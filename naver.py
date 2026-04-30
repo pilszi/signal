@@ -49,7 +49,7 @@ def get_detailed_news(url):
                 full_content = content.get_text(strip=True)
                 break
 
-        # 결측치 체크
+        # 결측치 체크 하는 부분
         if not main_image or not press_name or not full_content:
             return None
 
