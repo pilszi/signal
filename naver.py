@@ -172,3 +172,5 @@ if __name__ == '__main__':
         if scheduler.running:
             scheduler.shutdown()
             print("\n👋 [시스템] 스케줄러를 정지하고 서버를 안전하게 종료합니다.")
+
+print(e)
