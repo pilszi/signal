@@ -6,6 +6,7 @@
     <title>맞춤형 뉴스</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 </head>
 <body class="bg-gray-50">
         <!-- Navbar -->
@@ -29,12 +30,17 @@
                     </div>
 
                     <div class="flex items-center gap-3">
+                        <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
+                        <span id="user-greeting" class="hidden text-sm text-gray-600">
+                            <span id="user_name"></span>님 반갑습니다
+                        </span>
                         <button class="p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
                             <i data-lucide="user" class="w-5 h-5"></i>
                         </a>
-                        <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">login</a>
-                        <!-- <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors uppercase">Logout</button> -->
+                        <div id="authContainer">
+                            
+                        </div>
                     </div>
                 </div>
             </div>
@@ -76,6 +82,51 @@
         ];
 
         let selectedKeyword = null;
+
+        window.onload = function(){
+            axios.get("/log_time");
+            updateNavbar();
+        };
+
+        // Navbar 상태 업데이트
+        function updateNavbar() {
+            const authContainer = document.getElementById('authContainer');
+            // 태그가 없을 시 함수 종료(에러방지)
+            console.log(authContainer);
+            if (!authContainer){return};
+            const userNameSpan = document.getElementById('user_name');
+            const loggedInId = sessionStorage.getItem('savedUserId');
+            const userGreeting = document.getElementById('user-greeting');
+            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
+
+            if (loggedInId && loggedInId !== 'guest' && loggedInId !== 'null') {
+                // 1. 인사말 영역 처리
+                if (userGreeting && userNameSpan) {
+                    userNameSpan.textContent = loggedInId; // 아이디 텍스트 삽입
+                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
+                }
+
+                // 2. 로그아웃 버튼 표시
+                authContainer.innerHTML = `
+                    <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG OUT
+                    </button>
+                `;
+            } else {
+                // 로그아웃 상태일 때
+                if (userGreeting) {
+                    userGreeting.classList.add('hidden'); // 인사말 숨김
+                }
+
+                authContainer.innerHTML = `
+                    <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG IN
+                    </a>
+                `;
+            }
+            
+            if (window.lucide) lucide.createIcons();
+        }
 
         // 2. 키워드 추출 (중복 제거)
         const keywords = Array.from(new Set(mockCustomNews.map(n => n.customKeyword)));

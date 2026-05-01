@@ -136,27 +136,6 @@
                 rememberCheck.checked = true;
             }
 
-            // Navbar 상태 업데이트
-            function updateNavbar() {
-                const loggedInId = localStorage.getItem('savedUserId');
-                if (loggedInId && loggedInId !== 'guest') {
-                    authContainer.innerHTML = `
-                        <button onclick="handleLogout()" class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 rounded-lg transition-colors">
-                            <span class="text-sm font-medium">LOG OUT</span>
-                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                        </button>
-                    `;
-                } else {
-                    authContainer.innerHTML = `
-                        <a href="/login.html" class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 rounded-lg transition-colors">
-                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                            <span class="text-sm font-medium">LOG IN</span>
-                        </a>
-                    `;
-                }
-                lucide.createIcons();
-            }
-
             async function login(id, pw){
                 let param = {
                     "id" : id,
@@ -167,7 +146,8 @@
                 console.log(data.msg);
                 if (data.msg == 1) {
                     // 아이디 저장 로직
-                    localStorage.setItem('savedUserId', id);
+                    sessionStorage.setItem('savedUserId', id);
+                    // console.log(savedId);
                     window.location.href = "main.html";
                 } else {
                     showModal("아이디 또는 비밀번호가 일치하지 않습니다.");
@@ -184,7 +164,6 @@
                 login(uid, pw);
             });
 
-            updateNavbar();
         });
 
         // 모달 제어 함수
@@ -196,11 +175,5 @@
         function closeModal() {
             document.getElementById('alert-modal').classList.add('hidden');
         }
-
-        // 로그아웃 함수
-        window.handleLogout = () => {
-            localStorage.removeItem('savedUserId');
-            window.location.reload();
-        };
     </script>
 </html>

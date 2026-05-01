@@ -12,7 +12,7 @@ from db import get_db
 
 app = FastAPI()
 app.mount("/view", StaticFiles(directory="view"))
-app.add_middleware(SessionMiddleware, secret_key="secret", max_age=60)
+app.add_middleware(SessionMiddleware, secret_key="secret", max_age=600)
 
 def chk_session(req:Request):
     return req.session.get('login_id', '')
@@ -79,9 +79,9 @@ def login(info:Dict[str, str], req:Request):
                 # print(f'현재 저장된 세션 = {req.session}')
         except Exception as e:
             print(e)
-    return {"msg": success, "time": 60}
+    return {"msg": success, "login_id": req.session["login_id"]}
 
-# 로그인 후 일정 시간이 지난 사용자 member_login_log 테이블 업데이트 - logout_time, status
+# session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
 @app.get('/log_time')
 def log_time():
     count = 0
@@ -92,9 +92,15 @@ def log_time():
         # for log in log_res:
         #     print(f'로그인 한지 1분이 지난 계정 = {log}')
         logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                    WHERE login_time <= NOW() - INTERVAL 1 MINUTE""")
+                                    WHERE login_time <= NOW() - INTERVAL 60 MINUTE""")
         result = engine.execute(logout_sql)
         count = result.rowcount
 
     print(f'1분이 지나 로그아웃 된 계정 갯수 = {count}')
+    return {"msg": "session 만료 계정 로그아웃"}
+
+# 로그아웃 버튼으로 로그아웃 요청 - DB 로그아웃 시간, status 업데이트, session 삭제
+@app.get("/logout")
+def logout():
+    chk_session()
     return {}
