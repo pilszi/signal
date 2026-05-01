@@ -382,10 +382,17 @@
             document.getElementById('alert-modal').classList.add('hidden');
         }
 
-        function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")) {
-                location.href = "login.html";
-            }
+        async function handleLogout() {
+            if(confirm("로그아웃 하시겠습니까?")){
+                try {
+                    await axios.get("/logout");
+                    sessionStorage.removeItem('savedUserId');
+                    location.href = "login.html";
+                }catch (error) {
+                    console.error("로그아웃 중 오류 발생:", error);
+                    alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
+                }
+            } 
         }
     </script>
 </html>

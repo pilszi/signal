@@ -92,15 +92,23 @@ def log_time():
         # for log in log_res:
         #     print(f'로그인 한지 1분이 지난 계정 = {log}')
         logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                    WHERE login_time <= NOW() - INTERVAL 60 MINUTE""")
+                                    WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
         result = engine.execute(logout_sql)
         count = result.rowcount
 
-    print(f'1분이 지나 로그아웃 된 계정 갯수 = {count}')
+    print(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
     return {"msg": "session 만료 계정 로그아웃"}
 
 # 로그아웃 버튼으로 로그아웃 요청 - DB 로그아웃 시간, status 업데이트, session 삭제
 @app.get("/logout")
-def logout():
-    chk_session()
+def logout(req:Request):
+    log_no = req.session.get("current_log_no", "값이 없음")
+    print(f'log_no = {log_no}')
+    with get_db() as engine:
+        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0 
+                                WHERE log_no = :log_no""")
+        result = engine.execute(logout_sql, {"log_no": log_no})
+        success = result.rowcount
+        print(f'로그아웃 완료 계정 = {success}개')
+    req.session.clear()
     return {}
