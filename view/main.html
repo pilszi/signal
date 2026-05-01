@@ -34,18 +34,23 @@
                         
                         <div class="hidden md:flex gap-1">
                             <!-- 상대 경로 적용 -->
-                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">글로벌 현황</a>
-                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">맞춤형 뉴스</a>
-                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">시그널 로그</a>
+                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
+                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
+                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
                         </div>
                     </div>
 
                     <div class="flex items-center gap-3">
-                        <button class="p-2 rounded-lg hover:bg-gray-100 text-gray-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
-                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-gray-600">
+                        <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
+                        <span id="user-greeting" class="hidden text-sm text-gray-600">
+                            <span id="user-name">admin</span>님 반갑습니다
+                        </span>
+                        <button class="p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
+                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
                             <i data-lucide="user" class="w-5 h-5"></i>
                         </a>
-                        <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors uppercase">Logout</button>
+                        <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">login</a>
+                        <!-- <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors uppercase">Logout</button> -->
                     </div>
                 </div>
             </div>
@@ -197,6 +202,10 @@
             { currency: "JPY/KRW", rate: 8.92, change: -0.12 },
             { currency: "EUR/KRW", rate: 1482.10, change: 0.22 }
         ];
+
+        window.onload = function(){
+            axios.get("/log_time");
+        };
 
         // 초기화
         document.addEventListener('DOMContentLoaded', () => {
@@ -435,7 +444,9 @@
         });
 
         function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")) location.href = "login.html";
+            if(confirm("로그아웃 하시겠습니까?")){
+                location.href = "login.html";
+            } 
         }
 
         // 바깥 클릭 시 캘린더 닫기
