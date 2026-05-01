@@ -1,206 +1,122 @@
-import torch
-import numpy as np
-import pandas as pd
-import torch.nn.functional as F
-import re
 import json
+import logging
+
+import requests
+import numpy as np
+import yfinance as yf
+import pandas as pd
 import time
 from datetime import datetime
-from sqlalchemy import text
-from elasticsearch import Elasticsearch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
-# [내 모듈 임포트]
+from apscheduler.schedulers.background import BackgroundScheduler
 from config import Config
 from db import get_db
-import logging
+from sqlalchemy import text
+import random
+# 전역 변수 유지
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 logging.getLogger("elasticsearch").setLevel(logging.WARNING)  # ES 내부 로그 숨기기
 logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그 숨기기
 logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
-
-# ==========================================
-# 1. AI 모델 설정 (BERT & Gemini)
-# ==========================================
-MODEL_NAME = "klue/bert-base"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-bert_model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=3)
-bert_model.eval()
+cny_key_index = 0
 
 
-es_url = Config.ES_HOST
-if f":{Config.ES_PORT}" not in es_url:
-    es_url = f"{es_url}:{Config.ES_PORT}"
-# Elasticsearch 연결
-es = Elasticsearch(
-    es_url,
-    # basic_auth는 최신 elasticsearch 라이브러리 권장 방식입니다.
-    basic_auth=(Config.ES_USER, Config.ES_PWD) if Config.ES_USER else None
-)
-
-
-def get_bert_score(text_data):
-    """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출"""
-    try:
-        inputs = tokenizer(text_data, return_tensors="pt", truncation=True, padding=True, max_length=512)
-        with torch.no_grad():
-            outputs = bert_model(**inputs)
-        probs = F.softmax(outputs.logits, dim=-1)
-        neg, neu, pos = probs[0].tolist()
-        return (pos * 1.0) + (neg * -1.0)
-    except Exception as e:
-        logging.error(f"BERT 오류: {e}")
-        return 0.0
-
-
-def get_ai_prediction_report(risk_level, title, keywords, scores):
-    """Gemini AI 활용 리포트 생성"""
-    if risk_level != "심각":
-        main_kw = ", ".join(keywords[:2]) if keywords else "주요 경제 지표"
-        return {
-            "prediction": f"{main_kw} 관련 지표 안정화에 따른 시장 회복세 전망",
-            "reason": f"현재 {main_kw} 뉴스 심리 및 실시간 지표가 통계적 정상 범위 내에 머물고 있어 급격한 리스크 발생 가능성이 낮음"
-        }
-
-    prompt = f"""
-    [Role] 수석 전략 분석가
-    [Data] 제목: {title}, 키워드: {keywords}, 점수: {scores}
-    분석 미션:
-    1. 역사적 사건(오일쇼크, 금융위기 등)과 현재 상황의 유사성 분석
-    2. 데이터 기반 브리핑 및 미래 구조 변화 예측
-    출력 형식 (JSON):
-    {{
-      "prediction": "🚨 [요약]",
-      "reason": "1. [유사성]\\n2. [변화]\\n3. [제언]"
-    }}
-    """
-    for attempt in range(len(Config.GEMINI_API_KEYS)):
+def get_cny_rate_with_rotation():
+    """위안화 API 로테이션 수집 (금액 반환)"""
+    global cny_key_index
+    for _ in range(len(Config.CNY_API_KEYS)):
+        api_key = Config.CNY_API_KEYS[cny_key_index]
+        url = f"https://v6.exchangerate-api.com/v6/{api_key}/pair/CNY/KRW"
         try:
-            client = Config.get_next_client()
-            response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
-            res_text = response.text.strip()
-            json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
-            return json.loads(json_match.group()) if json_match else json.loads(res_text)
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            if data.get('result') == 'success':
+                rate = data['conversion_rate']
+                # logging.info(f"✅ [API #{cny_key_index + 1}] 위안화: {rate}")
+                return rate
+            elif data.get('result') == 'error':
+                cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
+                continue
         except Exception as e:
-            logging.info(f"Gemini 키 교체 시도... ({e})")
+            cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
             continue
-    return {"prediction": "분석 지연", "reason": "API 할당량 초과로 인한 지연"}
+    return None
 
 
-# ==========================================
-# 2. 통계 분석 로직 (Z-Score)
-# ==========================================
-def calculate_indicator_score(today_return, return_history_30d):
-    if not return_history_30d: return 1.0
-    mean_val, std_val = np.mean(return_history_30d), np.std(return_history_30d)
-    if std_val == 0: return 1.0
-    z_score = (today_return - mean_val) / std_val
-    # 지표가 급등하거나 급락하면(절대값 2이상) 위험(-1.0) 판정
-    return -1.0 if abs(z_score) >= 2.0 else 1.0
+def collect_market_data_job():
+    """60분 간격으로 실행될 수집 및 DB 저장 작업"""
+    logging.info(f"\n🚀 [수집 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    ticker_to_no = {
+        "USDKRW=X": 1, "EURKRW=X": 2, "JPYKRW=X": 3, "CNY=X": 4,
+        "GC=F": 5, "SI=F": 6, "HG=F": 7, "CL=F": 8, "BZ=F": 9, "NG=F": 10, "QM=F": 11
+    }
 
+    tickers = {
+        "환율": ["USDKRW=X", "EURKRW=X", "JPYKRW=X", "CNY=X"],
+        "원자재": ["GC=F", "SI=F", "HG=F", "CL=F", "BZ=F", "NG=F", "QM=F"]
+    }
 
-def aggregate_indicator(scores):
-    valid = [s for s in scores if s is not None]
-    if not valid: return 1.0
-    neg_count = sum(1 for s in valid if s == -1.0)
-    return -1.0 if neg_count >= len(valid) / 2 else 1.0
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-
-# ==========================================
-# 3. 메인 파이프라인
-# ==========================================
-def run_analysis():
-    logging.info(f"🚀 분석 시작: {datetime.now()}")
-
-    # [STEP 1] DB에서 최근 30일 지표 가져오기
+    # db.py의 get_db() 사용
     with get_db() as session:
-        query = text(
-            "SELECT indicator_no, price FROM indicator_data WHERE gathering_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
-        rows = session.execute(query).fetchall()
+        for cat, t_list in tickers.items():
+            for t in t_list:
+                try:
+                    price = None
+                    if t == "CNY=X":
+                        price = get_cny_rate_with_rotation()
+                        if price is None:
+                            data = yf.download("CNYKRW=X", period="1d", interval="1m", progress=False)
+                            if not data.empty: price = data['Close'].iloc[-1]
+                    else:
+                        data = yf.download(t, period="1d", interval="1m", progress=False)
+                        if not data.empty:
+                            last_val = data['Close'].iloc[-1]
+                            price = float(last_val) if not isinstance(last_val, (pd.Series, pd.DataFrame)) else float(
+                                last_val.iloc[0])
 
-    if not rows:
-        logging.info("❌ DB 데이터 부족")
-        return
+                    if price is not None:
+                        final_price = round(price, 4)
+                        i_no = ticker_to_no.get(t)
 
-    df = pd.DataFrame(rows, columns=['no', 'price'])
-    indicator_stats = {}
-    for i in range(1, 12):
-        prices = df[df['no'] == i]['price'].tolist()
-        if len(prices) > 1:
-            indicator_stats[i] = calculate_indicator_score(prices[-1], prices[:-1])
-        else:
-            indicator_stats[i] = 1.0
+                        # SQLAlchemy의 session.execute 사용 (SQL문 작성)
+                        # :variable 형식을 사용하여 SQL 인젝션 방지
+                        query = text("""
+                                INSERT INTO indicator_data (indicator_no, gathering_time, price)
+                                VALUES (:no, :time, :price)
+                            """)
+                        session.execute(query, {"no": i_no, "time": current_time, "price": final_price})
 
-    # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 50}
-    raw_news = es.search(index="news_origin_es2", body=search_query)
-    docs = raw_news['hits']['hits']
+                        logging.info(f"  ✅ [DB저장] {t:10} (No.{i_no}) | {final_price}")
+                    else:
+                        logging.info(f"  ⚠️ [데이터없음] {t}")
 
-    if not docs:
-        logging.info("✅ 처리할 새 뉴스 없음")
-        return
+                except Exception as e:
+                    logging.error(f"  ❌ [오류] {t}: {e}")
 
-    for doc in docs:
-        _id = doc['_id']
-        data = doc['_source']
+        # yield가 끝나면 get_db 내부에서 자동으로 commit()이 호출됩니다.
 
-        # [STEP 3] 점수 계산
-        sent_score = get_bert_score(data['title'])
-        ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
-        ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
+    logging.info(f"💤 수집 완료. 60분 대기...\n")
 
-        # 최종 가중치 합산
-        total = (sent_score * 0.4) + (ex_score * 0.3) + (ma_score * 0.3)
+# --- 스케줄러 설정 ---
 
-        if total <= -0.4:
-            risk_lv = "심각"
-        elif total <= 0.1:
-            risk_lv = "주의"
-        else:
-            risk_lv = "안정"
-
-        # [STEP 4] Gemini 리포트
-        ai_rep = get_ai_prediction_report(risk_lv, data['title'], data.get('keywords', []),
-                                          {"sent": sent_score, "ex": ex_score, "ma": ma_score})
-
-        # [STEP 5] 결과 데이터 구성 (요청하신 매핑 구조)
-        labelled_doc = {
-            "analyzed_at": datetime.utcnow().isoformat(),
-            "title": data['title'],
-            "keywords": data.get('keywords', []),
-            "url": data.get('url', ''),
-            "press_name": data.get('press_name', ''),
-            "main_image": data.get('main_image', ''),
-            "prediction": ai_rep['prediction'],
-            "prediction_reason": ai_rep['reason'],
-            "risk_level": risk_lv,
-            "final_total_score": {
-                "total": round(total, 4),
-                "sentiment_score": round(sent_score, 4),
-                "exchange_score": float(ex_score),
-                "raw_material_score": {
-                    "gold": float(indicator_stats.get(5, 1.0)),
-                    "silver": float(indicator_stats.get(6, 1.0)),
-                    "copper": float(indicator_stats.get(7, 1.0)),
-                    "wti_oil": float(indicator_stats.get(8, 1.0)),
-                    "bc_oil": float(indicator_stats.get(9, 1.0)),
-                    "dc_oil": float(indicator_stats.get(10, 1.0)),
-                    "ng": float(indicator_stats.get(11, 1.0))
-                }
-            },
-            "published_date": data.get('published_date'),
-            "country_name": data.get('country_name', 'Global')
-        }
-
-        # [STEP 6] ES 저장 및 상태 업데이트
-        es.index(index="news_labelling_es_3", body=labelled_doc)
-        # es.update(index="news_origin_es2", id=_id, body={"doc": {"is_processed": True}})
-        logging.info(f"📑 처리완료: {data['title'][:15]}... [{risk_lv}]")
-
+scheduler = BackgroundScheduler()
+# 60분(hours=1) 간격으로 실행
+random_second = random.randint(0, 59)
+scheduler.add_job(collect_market_data_job,"cron", minute="0", second=random_second, id='indicator_crawling')
 
 if __name__ == "__main__":
-    while True:
-        run_analysis()
-        logging.info("💤 10분 대기 후 다음 배치 시작...")
-        time.sleep(600)
+    # 실행 즉시 한 번 수집 시작
+    collect_market_data_job()
+
+    # 스케줄러 시작
+    scheduler.start()
+    logging.info("⏰ APScheduler 가동 중... (Ctrl+C로 종료)")
+
+    try:
+        while True:
+            time.sleep(1)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
+        logging.info("정지되었습니다.")
