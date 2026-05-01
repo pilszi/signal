@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signal - 회원가입</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+    <body class="bg-gray-50">
+
+        <!-- 1. Navbar -->
+        <nav class="border-b bg-white sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-20">
+                    <div class="flex items-center gap-8">
+                        <a href="main.html" class="flex items-center gap-2">
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
+                                Signal
+                            </span>
+                        </a>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button class="p-2 rounded-lg hover:bg-gray-100"><i data-lucide="bell" class="w-5 h-5 text-gray-600"></i></button>
+                        <a href="profile.html" class="p-2 rounded-lg hover:bg-gray-100"><i data-lucide="user" class="w-5 h-5 text-gray-600"></i></a>
+                        <div id="auth-button-container">
+                            <a href="login.html" class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 rounded-lg transition-colors">
+                                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                                <span class="text-sm font-medium">LOG IN</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 2. Signup Page UI -->
+        <div class="min-h-screen flex items-center justify-center px-4 py-12">
+            <div class="max-w-2xl w-full">
+                <div class="text-center mb-8">
+                    <a href="index.html" class="mb-4 inline-block">
+                        <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
+                            Signal
+                        </span>
+                    </a>
+                    <h1 class="text-2xl font-bold mb-2">회원가입</h1>
+                    <p class="text-gray-600">맞춤형 무역 리스크 알림을 받아보세요</p>
+                </div>
+
+                <div class="bg-white border rounded-xl p-8 shadow-sm">
+                    <form id="signup-form" class="space-y-5">
+                        <!-- 아이디 중복확인 -->
+                        <div>
+                            <label class="block text-sm mb-2 font-medium">아이디 <span class="text-red-500">*</span></label>
+                            <div class="flex gap-2">
+                                <input type="text" id="id" placeholder="사용자 아이디" class="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                                <button type="button" onclick="checkUsername()" class="px-4 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors whitespace-nowrap">중복확인</button>
+                            </div>
+                            <div id="id_msg" class="hidden items-center gap-2 mt-2 text-sm"></div>
+                        </div>
+
+                        <!-- 비밀번호 -->
+                        <div class="grid md:grid-cols-2 gap-5">
+                            <div>
+                                <label class="block text-sm mb-2 font-medium">비밀번호 <span class="text-red-500">*</span></label>
+                                <input type="password" id="password" placeholder="••••••••" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm mb-2 font-medium">비밀번호 확인 <span class="text-red-500">*</span></label>
+                                <input type="password" id="confirmPassword" placeholder="••••••••" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            </div>
+                            <p id="password-message" class="text-xs mt-1 hidden"></p>
+                        </div>
+
+                        <!-- 이름 / 연락처 -->
+                        <div>
+                            <label class="block text-sm mb-2 font-medium">이름 <span class="text-red-500">*</span></label>
+                            <input type="text" id="name" placeholder="홍길동" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-2 font-medium">연락처 <span class="text-red-500">*</span></label>
+                            <input type="tel" id="phone" placeholder="숫자만 입력" maxlength="13" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            <p class="text-xs text-gray-500 mt-1">하이픈 없이 숫자만 입력해주세요.</p>
+                        </div>
+
+                        <!-- 이메일 인증 -->
+                        <div>
+                            <label class="block text-sm mb-2 font-medium">이메일 <span class="text-red-500">*</span></label>
+                            <div class="flex gap-2 mb-2">
+                                <input type="email" id="email" placeholder="example@email.com" class="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                                <button type="button" id="send-code-btn" onclick="sendVerificationCode()" class="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2">
+                                    <i data-lucide="mail" class="w-4 h-4"></i> 인증코드
+                                </button>
+                            </div>
+                            <div id="verification-area" class="hidden flex gap-2">
+                                <input type="text" id="verificationCode" placeholder="6자리 인증코드 입력" maxlength="6" class="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="verifyCode()" class="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors">인증확인</button>
+                            </div>
+                            <div id="email-msg" class="hidden items-center gap-2 mt-2 text-sm text-green-600">
+                                <i data-lucide="check-circle" class="w-4 h-4"></i> <span>이메일 인증이 완료되었습니다.</span>
+                            </div>
+                        </div>
+
+                        <!-- 관심 키워드 (동적 추가/삭제) -->
+                        <div class="space-y-3">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">
+                                관심 키워드 <span class="text-red-500">*</span>
+                            </label>
+                            
+                            <!-- 키워드들이 나열될 컨테이너 -->
+                            <div id="keyword-container" class="flex flex-wrap gap-2">
+                                <!-- JS에서 초기 3개를 생성하거나, 아래처럼 직접 3개를 배치할 수 있습니다. -->
+                                <div class="flex gap-1 items-center">
+                                    <input type="text" name="keywords[]" 
+                                        class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        placeholder="관심 키워드">
+                                </div>
+                                <div class="flex gap-1 items-center">
+                                    <input type="text" name="keywords[]" 
+                                        class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        placeholder="관심 키워드">
+                                </div>
+                                <div class="flex gap-1 items-center">
+                                    <input type="text" name="keywords[]" 
+                                        class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        placeholder="관심 키워드">
+                                </div>
+
+                                <!-- 추가 버튼 -->
+                                <button type="button" onclick="addKeywordInput()" 
+                                    class="p-2 border border-blue-500 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-center">
+                                    <i data-lucide="plus" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            
+                            <p class="text-xs text-blue-600 leading-relaxed">
+                                * 단어 위주(예: 반도체, 금리)로 입력해 주세요. <br>
+                                * 거시 경제, 에너지, 원자재, 전략 산업 입력을 추천드립니다.
+                            </p>
+                        </div>
+
+                        <div class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-1" required>
+                            <label class="text-sm text-gray-600">개인정보 수집 및 이용에 동의합니다. (필수)</label>
+                        </div>
+
+                        <div class="flex gap-3 pt-4">
+                            <button type="button" onclick="location.href='login.html'" class="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors">취소</button>
+                            <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg transition-colors font-medium">가입하기</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 공통 모달 -->
+        <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
+            <div class="absolute inset-0 bg-black/50"></div>
+            <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative z-10 shadow-xl">
+                <p id="modal-message" class="text-center mb-4"></p>
+                <button onclick="closeModal()" class="w-full py-2 bg-blue-600 text-white rounded-md">확인</button>
+            </div>
+        </div>
+    </body>
+    <script>
+        const existingUsernames = ["admin", "user1", "test123"];
+        let isUsernameChecked = false;
+        let isUsernameTaken = null;
+        let generatedCode = "";
+        let emailVerified = false;
+
+        // 아이디 중복 확인
+        function checkUsername() {
+            const id = document.getElementById('id').value.trim().toLowerCase();
+            const msgDiv = document.getElementById('id_msg');
+            
+            if (!id) {
+                showModal("아이디를 입력해주세요.");
+                return;
+            }
+
+            isUsernameTaken = existingUsernames.includes(id);
+            isUsernameChecked = true;
+            
+            msgDiv.classList.remove('hidden', 'text-red-600', 'text-green-600');
+            msgDiv.classList.add('flex', isUsernameTaken ? 'text-red-600' : 'text-green-600');
+            
+            msgDiv.innerHTML = isUsernameTaken 
+                ? `<i data-lucide="x-circle" class="w-4 h-4"></i> <span>중복된 아이디입니다.</span>`
+                : `<i data-lucide="check-circle" class="w-4 h-4"></i> <span>사용가능한 아이디입니다.</span>`;
+            lucide.createIcons();
+        };
+
+        // 이메일 인증코드 발송
+        function sendVerificationCode() {
+            const email = document.getElementById('email').value.trim();
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+            if (!emailRegex.test(email)) {
+                showModal("올바른 이메일 형식을 입력해주세요.");
+                return;
+            }
+
+            generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+            document.getElementById('verification-area').classList.remove('hidden');
+            showModal(`인증 코드가 발송되었습니다. (데모: ${generatedCode})`);
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+
+            // 비밀번호 확인
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('confirmPassword');
+            const messageTag = document.getElementById('password-message');
+
+            function checkPasswordMatch() {
+                const pswd = passwordInput.value;
+                const confirmPswd = confirmInput.value;
+
+                // 하나라도 비어있으면 메시지 숨김
+                if (pswd === "" || confirmPswd === "") {
+                    messageTag.classList.add('hidden');
+                    return;
+                };
+
+                messageTag.classList.remove('hidden');
+
+                if (pswd === confirmPswd) {
+                    // 일치할 때
+                    messageTag.textContent = "비밀번호가 일치합니다.";
+                    messageTag.className = "text-xs mt-1 text-green-600"; // 초록색 멘트
+                    confirmInput.classList.remove('border-red-500');
+                    confirmInput.classList.add('border-green-500');
+                } else {
+                    // 불일치할 때
+                    messageTag.textContent = "비밀번호가 일치하지 않습니다.";
+                    messageTag.className = "text-xs mt-1 text-red-600"; // 빨간색 멘트
+                    confirmInput.classList.remove('border-green-500');
+                    confirmInput.classList.add('border-red-500');
+                }
+            };
+            passwordInput.addEventListener('input', checkPasswordMatch);
+            confirmInput.addEventListener('input', checkPasswordMatch);
+            
+            // 연락처 자동 하이픈 및 숫자 제한
+            const phoneInput = document.getElementById('phone');
+            if (phoneInput) {
+                phoneInput.addEventListener('input', function(e) {
+                    // 1. 숫자만 남기기
+                    let value = this.value.replace(/[^0-9]/g, "");
+                    
+                    // 2. 길이에 따라 하이픈 추가
+                    let result = "";
+                    if (value.length < 4) {
+                        result = value;
+                    } else if (value.length < 7) {
+                        result = value.substr(0, 3) + "-" + value.substr(3);
+                    } else if (value.length < 11) {
+                        result = value.substr(0, 3) + "-" + value.substr(3, 3) + "-" + value.substr(6);
+                    } else {
+                        // 11자리 이상 (010-1234-5678)
+                        result = value.substr(0, 3) + "-" + value.substr(3, 4) + "-" + value.substr(7, 4);
+                    }
+                    
+                    // 3. 최종 값 적용 (최대 13자: 숫자 11자 + 하이픈 2자)
+                    this.value = result.substring(0, 13);
+                });
+            }
+        });
+
+        // 이메일 코드 확인
+        function verifyCode() {
+            const inputCode = document.getElementById('verificationCode').value;
+            if (inputCode === generatedCode) {
+                emailVerified = true;
+                document.getElementById('verification-area').classList.add('hidden');
+                document.getElementById('send-code-btn').classList.add('hidden');
+                document.getElementById('email').disabled = true;
+                document.getElementById('email-msg').classList.remove('hidden');
+                document.getElementById('email-msg').classList.add('flex');
+                showModal("이메일 인증이 완료되었습니다.");
+            } else {
+                showModal("인증 코드가 일치하지 않습니다.");
+            }
+        };
+
+        // 키워드 입력창 동적 추가 함수
+        function addKeywordInput() {
+            const container = document.getElementById('keyword-container');
+            const addButton = event.currentTarget; // 클릭된 버튼
+
+            // 새로운 입력창 요소 생성
+            const newDiv = document.createElement('div');
+            newDiv.className = 'flex gap-1 items-center transition-all duration-200 opacity-0';
+            newDiv.style.transform = 'translateY(5px)';
+
+            newDiv.innerHTML = `
+                <input type="text" name="keywords[]" 
+                    class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="키워드 입력">
+                <button type="button" onclick="removeKeywordInput(this)" class="p-1 text-gray-400 hover:text-red-500 transition-colors">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            `;
+
+            // 버튼 바로 앞에 삽입
+            container.insertBefore(newDiv, addButton);
+
+            // 아이콘 생성 및 애니메이션 효과
+            if (window.lucide) lucide.createIcons();
+            setTimeout(() => {
+                newDiv.classList.remove('opacity-0', 'translateY(5px)');
+            }, 10);
+        };
+
+        // 키워드 입력창 삭제 함수
+        function removeKeywordInput(btn) {
+            const target = btn.parentElement;
+            target.classList.add('opacity-0');
+            setTimeout(() => target.remove(), 200);
+        };
+
+        // 폼 최종 제출
+        let formdata = {}
+        document.getElementById('signup-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            const keywords = Array.from(document.querySelectorAll('.keyword-input')).map(input => input.value.trim());
+            // 연락처에서 - 제외한 숫자만 value 저장
+            const phoneInput = document.getElementById('phone');
+            const cleanNumber = phoneInput.value.replace(/-/g, "");
+            phoneInput.value = cleanNumber;
+
+            if (!isUsernameChecked || isUsernameTaken) {
+                showModal("아이디 중복확인을 완료해주세요.");
+                return;
+            }
+            if (password !== confirmPassword) {
+                showModal("비밀번호가 일치하지 않습니다.");
+                return;
+            }
+            if (!emailVerified) {
+                showModal("이메일 인증을 완료해주세요.");
+                return;
+            }
+            if (!keywords.some(k => k)) {
+                showModal("최소 하나 이상의 키워드를 입력해주세요.");
+                return;
+            }
+            
+            showModal("가입에 성공하였습니다!");
+            setTimeout(() => location.href = "login.html", 1500);
+        });
+
+        // 모달 제어
+        function showModal(msg) {
+            document.getElementById('modal-message').innerText = msg;
+            document.getElementById('alert-modal').classList.remove('hidden');
+        }
+        function closeModal() {
+            document.getElementById('alert-modal').classList.add('hidden');
+        }
+    </script>
+</html>

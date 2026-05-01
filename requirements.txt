@@ -1,0 +1,21 @@
+fastapi
+uvicorn
+selenium
+google-genai
+sqlalchemy
+pymysql
+numpy
+undetected-chromedriver
+newspaper3k
+deep-translator
+elasticsearch
+apscheduler
+cloudscraper
+
+yfinance
+transformers
+torch
+
+lxml_html_clean
+webdriver-manager
+# pip install -r requirements.txt
