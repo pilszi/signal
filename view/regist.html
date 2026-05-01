@@ -6,6 +6,7 @@
     <title>Signal - 회원가입</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 </head>
     <body class="bg-gray-50">
 
@@ -203,7 +204,8 @@
 
             generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
             document.getElementById('verification-area').classList.remove('hidden');
-            showModal(`인증 코드가 발송되었습니다. (데모: ${generatedCode})`);
+            // showModal(`인증 코드가 발송되었습니다. (데모: ${generatedCode})`);
+            showModal('인증 코드가 발송되었습니다. (데모: 1111)')
         };
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -272,7 +274,8 @@
         // 이메일 코드 확인
         function verifyCode() {
             const inputCode = document.getElementById('verificationCode').value;
-            if (inputCode === generatedCode) {
+            if (inputCode === '1111') {
+            // if (inputCode === generatedCode) {
                 emailVerified = true;
                 document.getElementById('verification-area').classList.add('hidden');
                 document.getElementById('send-code-btn').classList.add('hidden');
@@ -292,7 +295,7 @@
 
             // 새로운 입력창 요소 생성
             const newDiv = document.createElement('div');
-            newDiv.className = 'flex gap-1 items-center transition-all duration-200 opacity-0';
+            newDiv.className = 'flex gap-1 items-center transition-all duration-300 opacity-0';
             newDiv.style.transform = 'translateY(5px)';
 
             newDiv.innerHTML = `
@@ -308,10 +311,13 @@
             container.insertBefore(newDiv, addButton);
 
             // 아이콘 생성 및 애니메이션 효과
-            if (window.lucide) lucide.createIcons();
-            setTimeout(() => {
-                newDiv.classList.remove('opacity-0', 'translateY(5px)');
-            }, 10);
+            requestAnimationFrame(() => {
+                newDiv.classList.remove('opacity-0');
+                newDiv.style.transform = 'translateY(0)'; // 다시 원래 높이로 복구!
+            });
+            if (window.lucide) {
+                lucide.createIcons();
+            }
         };
 
         // 키워드 입력창 삭제 함수
@@ -322,13 +328,16 @@
         };
 
         // 폼 최종 제출
-        let formdata = {}
         document.getElementById('signup-form').addEventListener('submit', (e) => {
             e.preventDefault();
-            
+            let param = {}
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
             const keywords = Array.from(document.querySelectorAll('.keyword-input')).map(input => input.value.trim());
+            // 빈문자열 제외
+            // const keywords = Array.from(document.querySelectorAll('.keyword-input'))
+            //               .map(input => input.value.trim())
+            //               .filter(k => k !== "");
             // 연락처에서 - 제외한 숫자만 value 저장
             const phoneInput = document.getElementById('phone');
             const cleanNumber = phoneInput.value.replace(/-/g, "");
@@ -351,9 +360,22 @@
                 return;
             }
             
-            showModal("가입에 성공하였습니다!");
-            setTimeout(() => location.href = "login.html", 1500);
+            param.id = document.getElementById('id').value;
+            param.pw = password;
+            param.email = document.getElementById('email').value;
+            param.phone_number = phoneInput.value;
+            param.keyword = keywords;
+            param.user_name = document.getElementById('name').value;
+            save(param);
         });
+
+        async function save(param){
+            let {data} = await axios.post('/regist', param);
+            console.log(data);
+            showModal("가입에 성공하였습니다!");
+
+            setTimeout(() => location.href = "login.html", 1500);
+        }
 
         // 모달 제어
         function showModal(msg) {

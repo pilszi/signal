@@ -109,10 +109,17 @@
                                 </div>
 
                                 <!-- 수정 모드 키워드 (기본 숨김) -->
-                                <div id="keyword-edit-area" class="hidden space-y-2">
-                                    <div id="keyword-inputs-container" class="space-y-2">
-                                        <!-- JS에서 input들이 추가됨 -->
+                                <div id="keyword-edit-area" class="hidden space-y-3">
+                                    <div id="keyword-container" class="flex flex-wrap gap-2">
+                                        <!-- 초기 인풋 박스들 (JS에서 생성하거나 직접 배치) -->
                                     </div>
+
+                                    <!-- 추가 버튼 -->
+                                    <button type="button" onclick="addKeywordInput()" 
+                                        id="add-keyword-btn"
+                                        class="p-2 border border-blue-500 text-blue-500 hover:bg-blue-50 rounded-lg flex items-center justify-center">
+                                        <i data-lucide="plus" class="w-4 h-4"></i>
+                                    </button>
                                     <p class="text-xs text-blue-600 mt-2">
                                         거시 경제, 에너지, 원자재, 전략 산업, 지정학적 리스크를 추천드립니다.
                                     </p>
@@ -195,8 +202,10 @@
                 pwArea.classList.remove('hidden');
                 kwView.classList.add('hidden');
                 kwEdit.classList.remove('hidden');
+                // 입력 필드 활성화
                 inputs.forEach(input => input.disabled = false);
                 
+                // [핵심] 키워드 입력창 초기화 및 기존값 채우기
                 initKeywordInputs();
             } else {
                 // 취소
@@ -208,6 +217,7 @@
                 pwArea.classList.add('hidden');
                 kwView.classList.remove('hidden');
                 kwEdit.classList.add('hidden');
+                // 입력 필드 비활성화
                 inputs.forEach(input => input.disabled = true);
                 
                 // 취소 시 데이터 복구
@@ -215,30 +225,48 @@
                 document.getElementById('form-phone').value = userData.phone;
                 renderKeywords();
             }
-            lucide.createIcons();
+            if (window.lucide){
+                lucide.createIcons();
+            }
         }
 
         // 키워드 입력 필드 초기화 (수정 모드용)
         function initKeywordInputs() {
-            const container = document.getElementById('keyword-inputs-container');
+            const container = document.getElementById('keyword-container');
+            // [핵심] 기존에 화면에 떠있던 인풋 '태그'들만 삭제 (데이터는 userData에 안전함)
             container.innerHTML = '';
-            userData.keywords.forEach((kw, idx) => addKeywordField(kw, idx));
+
+            // 기존 데이터(value)를 가지고 인풋 필드들을 생성
+            if (userData.keywords && userData.keywords.length > 0) {
+                userData.keywords.forEach((kw) => addKeywordInput(kw));
+            } else {
+                addKeywordInput(""); // 데이터가 없으면 빈 칸 하나 노출
+            }
         }
 
-        function addKeywordField(value = "", index = null) {
-            const container = document.getElementById('keyword-inputs-container');
+        // 개별 키워드 필드 생성 
+        function addKeywordInput(value = "", index = null) {
+            const container = document.getElementById('keyword-container');
             const div = document.createElement('div');
-            div.className = "flex gap-2 keyword-row";
-            div.innerHTML = `
-                <input type="text" value="${value}" placeholder="키워드 입력" required class="keyword-input flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <button type="button" onclick="removeKeywordField(this)" class="p-3 border border-red-500 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><i data-lucide="minus" class="w-5 h-5"></i></button>
-                <button type="button" onclick="addKeywordField('', null)" class="p-3 border border-blue-500 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><i data-lucide="plus" class="w-5 h-5"></i></button>
-            `;
-            container.appendChild(div);
-            lucide.createIcons();
             
-            // 플러스 버튼은 마지막 요소에만 유지
-            updateButtons();
+            // 콤팩트한 사이즈와 디자인 적용
+            div.className = "flex gap-1 items-center keyword-group"; 
+            div.innerHTML = `
+                <input type="text" name="keywords[]" value="${value}" 
+                    class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="관심 키워드">
+                <button type="button" onclick="this.parentElement.remove()" 
+                    class="text-gray-400 hover:text-red-500 transition-colors">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            `;
+            
+            // 추가 버튼(있다면) 바로 앞에 삽입하거나, 순서대로 추가
+            container.appendChild(div);
+            
+            if (window.lucide) {
+                lucide.createIcons();
+            }
         }
 
         function removeKeywordField(btn) {
