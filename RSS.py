@@ -227,6 +227,7 @@ def crawl_job():
 
     logging.info(
         f"📊 수집 리포트 | 신규: {stats['SUCCESS']} | 중복: {stats['EXIST']} | 실패: {stats['FAILED']} | 에러: {stats['ERROR']}")
+    return stats
 
 
 if __name__ == "__main__":

@@ -144,7 +144,7 @@ def bulk_search_naver_news():
             newly_saved = results.count(True)
 
     logging.info(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
-    return {"status": "success", "newly_saved": newly_saved}
+    return {"newly_saved": newly_saved, "already_exists": already_exists}
 
 
 # --- 이후 스케줄러 설정 및 시스템 가동 코드는 이전과 동일하게 유지 ---

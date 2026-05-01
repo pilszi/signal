@@ -164,18 +164,24 @@ def article_save(news_list):
 
 def article_process(keywords, total_pages):
     logging.info("----- 연합뉴스 수집 시작 -----")
+    final_stats = {"success": 0, "failed": 0, "skipped": 0}
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     try:
         for key in keywords:
             for p in range(1, total_pages + 1):
                 articles = article_crawling(driver, p, key)
                 if articles:
-                    article_save(articles)
+                    # article_save가 리턴하는 {success, failed, skipped}를 받음
+                    res = article_save(articles)
+
+                    final_stats["success"] += res.get("success", 0)
+                    final_stats["failed"] += res.get("failed", 0)
+                    final_stats["skipped"] += res.get("skipped", 0)
                 time.sleep(1)  # 키워드 간 짧은 휴식
     finally:
         driver.quit()
         logging.info("----- 연합뉴스 수집 종료 -----")
-
+    return final_stats
 
 def get_scheduler():
     # job_defaults 설정을 추가하여 인스턴스 제한을 풉니다.
