@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Signal - 내 프로필</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://unpkg.com/lucide@latest"></script>
+    </head>
+    <body class="bg-gray-50">
+
+        <!-- Navbar -->
+        <nav class="border-b bg-white sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-20">
+                    <div class="flex items-center gap-8">
+                        <!-- href에서 / 제거 -->
+                        <a href="main.html" class="flex items-center gap-2">
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
+                                Signal
+                            </span>
+                        </a>
+                        
+                        <div class="hidden md:flex gap-1">
+                            <!-- 상대 경로 적용 -->
+                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">글로벌 현황</a>
+                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">맞춤형 뉴스</a>
+                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">시그널 로그</a>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <button class="p-2 rounded-lg hover:bg-gray-100 text-gray-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
+                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-gray-600">
+                            <i data-lucide="user" class="w-5 h-5"></i>
+                        </a>
+                        <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors uppercase">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 2. Profile Page Content -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <h1 class="text-2xl font-bold mb-8">개인정보</h1>
+
+            <div class="grid md:grid-cols-3 gap-6">
+                <!-- 좌측 카드: 요약 정보 -->
+                <div class="md:col-span-1">
+                    <div class="bg-white border rounded-xl p-6 shadow-sm">
+                        <div class="flex flex-col items-center">
+                            <div class="w-24 h-24 bg-gradient-to-br from-blue-600 to-blue-800 rounded-full flex items-center justify-center mb-4">
+                                <i data-lucide="user" class="w-12 h-12 text-white"></i>
+                            </div>
+                            <h3 id="display-name" class="text-lg font-bold mb-1">홍길동</h3>
+                            <p id="display-email" class="text-sm text-gray-500 mb-4">hong@example.com</p>
+
+                            <div class="w-full space-y-2">
+                                <button id="edit-toggle-btn" onclick="toggleEdit()" class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium">
+                                    프로필 수정
+                                </button>
+                                <button onclick="location.href='delete-account.html'" class="block w-full px-4 py-2 bg-white border border-red-200 text-red-500 hover:bg-red-50 rounded-lg transition-colors text-center text-sm">
+                                    회원탈퇴
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 우측 카드: 상세 정보 폼 -->
+                <div class="md:col-span-2">
+                    <div class="bg-white border rounded-xl p-6 shadow-sm">
+                        <h2 class="text-xl font-bold mb-6">회원 정보</h2>
+
+                        <form id="profile-form" onsubmit="handleSubmit(event)" class="space-y-6">
+                            <!-- 이름 (읽기 전용) -->
+                            <div>
+                                <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
+                                    <i data-lucide="user" class="w-4 h-4 text-gray-400"></i> 이름
+                                </label>
+                                <input type="text" id="form-name" value="홍길동" disabled class="w-full px-4 py-3 border rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed">
+                            </div>
+
+                            <!-- 이메일 -->
+                            <div>
+                                <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
+                                    <i data-lucide="mail" class="w-4 h-4 text-gray-400"></i> 이메일
+                                </label>
+                                <input type="email" id="form-email" name="email" value="hong@example.com" required disabled class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
+                            </div>
+
+                            <!-- 연락처 -->
+                            <div>
+                                <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
+                                    <i data-lucide="phone" class="w-4 h-4 text-gray-400"></i> 연락처
+                                </label>
+                                <input type="tel" id="form-phone" name="phone" value="010-1234-5678" required disabled class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
+                            </div>
+
+                            <!-- 관심 키워드 섹션 -->
+                            <div>
+                                <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
+                                    <i data-lucide="tag" class="w-4 h-4 text-gray-400"></i> 관심 키워드
+                                </label>
+                                
+                                <!-- 조회 모드 키워드 -->
+                                <div id="keyword-view" class="flex flex-wrap gap-2">
+                                    <!-- JS에서 동적 생성됨 -->
+                                </div>
+
+                                <!-- 수정 모드 키워드 (기본 숨김) -->
+                                <div id="keyword-edit-area" class="hidden space-y-2">
+                                    <div id="keyword-inputs-container" class="space-y-2">
+                                        <!-- JS에서 input들이 추가됨 -->
+                                    </div>
+                                    <p class="text-xs text-blue-600 mt-2">
+                                        거시 경제, 에너지, 원자재, 전략 산업, 지정학적 리스크를 추천드립니다.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- 비밀번호 변경 (수정 모드 시 노출) -->
+                            <div id="password-change-area" class="hidden pt-4 border-t">
+                                <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
+                                    <i data-lucide="key" class="w-4 h-4 text-gray-400"></i> 비밀번호 변경 (선택사항)
+                                </label>
+                                <input type="password" placeholder="새 비밀번호 입력" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
+                                <input type="password" placeholder="새 비밀번호 확인" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+
+                            <!-- 저장 버튼 (수정 모드 시 노출) -->
+                            <button type="submit" id="save-btn" class="hidden w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg transition-colors font-bold shadow-md">
+                                변경사항 저장
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 공통 알림 모달 -->
+        <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
+            <div class="absolute inset-0 bg-black/50"></div>
+            <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 relative z-10 shadow-2xl border">
+                <div id="modal-icon" class="flex justify-center mb-4"></div>
+                <p id="modal-message" class="text-center font-medium text-gray-800 mb-6"></p>
+                <button onclick="closeModal()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-bold">확인</button>
+            </div>
+        </div>
+
+    </body>
+    <script>
+        // 초기 데이터 및 상태
+        let isEditing = false;
+        let userData = {
+            name: "홍길동",
+            email: "hong@example.com",
+            phone: "010-1234-5678",
+            keywords: ["석유", "반도체", "자동차", "금리"]
+        };
+        let originalData = { ...userData };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderKeywords();
+            lucide.createIcons();
+        });
+
+        // 키워드 렌더링 (조회 모드)
+        function renderKeywords() {
+            const container = document.getElementById('keyword-view');
+            container.innerHTML = userData.keywords.map(k => `
+                <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm border border-blue-200 font-medium">
+                    ${k}
+                </span>
+            `).join('');
+        }
+
+        // 수정 모드 전환
+        function toggleEdit() {
+            isEditing = !isEditing;
+            const btn = document.getElementById('edit-toggle-btn');
+            const saveBtn = document.getElementById('save-btn');
+            const pwArea = document.getElementById('password-change-area');
+            const kwView = document.getElementById('keyword-view');
+            const kwEdit = document.getElementById('keyword-edit-area');
+            const inputs = [document.getElementById('form-email'), document.getElementById('form-phone')];
+
+            if (isEditing) {
+                // 수정 모드 진입
+                originalData = { ...userData, keywords: [...userData.keywords] };
+                btn.innerText = "취소";
+                btn.classList.replace('bg-blue-600', 'bg-gray-100');
+                btn.classList.replace('text-white', 'text-gray-700');
+                saveBtn.classList.remove('hidden');
+                pwArea.classList.remove('hidden');
+                kwView.classList.add('hidden');
+                kwEdit.classList.remove('hidden');
+                inputs.forEach(input => input.disabled = false);
+                
+                initKeywordInputs();
+            } else {
+                // 취소
+                userData = { ...originalData };
+                btn.innerText = "프로필 수정";
+                btn.classList.replace('bg-gray-100', 'bg-blue-600');
+                btn.classList.replace('text-gray-700', 'text-white');
+                saveBtn.classList.add('hidden');
+                pwArea.classList.add('hidden');
+                kwView.classList.remove('hidden');
+                kwEdit.classList.add('hidden');
+                inputs.forEach(input => input.disabled = true);
+                
+                // 취소 시 데이터 복구
+                document.getElementById('form-email').value = userData.email;
+                document.getElementById('form-phone').value = userData.phone;
+                renderKeywords();
+            }
+            lucide.createIcons();
+        }
+
+        // 키워드 입력 필드 초기화 (수정 모드용)
+        function initKeywordInputs() {
+            const container = document.getElementById('keyword-inputs-container');
+            container.innerHTML = '';
+            userData.keywords.forEach((kw, idx) => addKeywordField(kw, idx));
+        }
+
+        function addKeywordField(value = "", index = null) {
+            const container = document.getElementById('keyword-inputs-container');
+            const div = document.createElement('div');
+            div.className = "flex gap-2 keyword-row";
+            div.innerHTML = `
+                <input type="text" value="${value}" placeholder="키워드 입력" required class="keyword-input flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button type="button" onclick="removeKeywordField(this)" class="p-3 border border-red-500 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><i data-lucide="minus" class="w-5 h-5"></i></button>
+                <button type="button" onclick="addKeywordField('', null)" class="p-3 border border-blue-500 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><i data-lucide="plus" class="w-5 h-5"></i></button>
+            `;
+            container.appendChild(div);
+            lucide.createIcons();
+            
+            // 플러스 버튼은 마지막 요소에만 유지
+            updateButtons();
+        }
+
+        function removeKeywordField(btn) {
+            const rows = document.querySelectorAll('.keyword-row');
+            if (rows.length > 1) {
+                btn.parentElement.remove();
+                updateButtons();
+            }
+        }
+
+        function updateButtons() {
+            const rows = document.querySelectorAll('.keyword-row');
+            rows.forEach((row, idx) => {
+                const plusBtn = row.querySelector('button[onclick*="addKeywordField"]');
+                plusBtn.style.display = (idx === rows.length - 1) ? 'block' : 'none';
+            });
+        }
+
+        // 폼 제출
+        function handleSubmit(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('form-email').value;
+            const phone = document.getElementById('form-phone').value;
+            const keywordInputs = document.querySelectorAll('.keyword-input');
+            const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
+
+            if (keywords.length === 0) {
+                showModal("최소 하나 이상의 키워드를 입력해주세요.", "error");
+                return;
+            }
+
+            // 데이터 업데이트
+            userData.email = email;
+            userData.phone = phone;
+            userData.keywords = keywords;
+
+            // UI 업데이트
+            document.getElementById('display-email').innerText = email;
+            renderKeywords();
+            toggleEdit(); // 수정 모드 종료
+            
+            showModal("개인정보가 성공적으로 수정되었습니다.", "success");
+        }
+
+        // 모달 제어
+        function showModal(msg, type) {
+            const modal = document.getElementById('alert-modal');
+            const iconDiv = document.getElementById('modal-icon');
+            document.getElementById('modal-message').innerText = msg;
+            
+            if(type === 'success') {
+                iconDiv.innerHTML = '<i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>';
+            } else {
+                iconDiv.innerHTML = '<i data-lucide="alert-circle" class="w-12 h-12 text-blue-500"></i>';
+            }
+            
+            modal.classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            document.getElementById('alert-modal').classList.add('hidden');
+        }
+
+        function handleLogout() {
+            if(confirm("로그아웃 하시겠습니까?")) {
+                location.href = "login.html";
+            }
+        }
+    </script>
+</html>

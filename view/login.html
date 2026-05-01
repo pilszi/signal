@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Signal - 로그인</title>
+        <!-- Tailwind CSS CDN -->
+        <script src="https://cdn.tailwindcss.com"></script>
+        <!-- Lucide Icons (React 버전 대체용) -->
+        <script src="https://unpkg.com/lucide@latest"></script>
+    </head>
+    <body class="bg-gray-50">
+        <!-- Navbar -->
+        <nav class="border-b bg-white sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-20">
+                    <div class="flex items-center gap-8">
+                        <!-- href에서 / 제거 -->
+                        <a href="main.html" class="flex items-center gap-2">
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
+                                Signal
+                            </span>
+                        </a>
+                        
+                        <div class="hidden md:flex gap-1">
+                            <!-- 상대 경로 적용 -->
+                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">글로벌 현황</a>
+                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">맞춤형 뉴스</a>
+                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">시그널 로그</a>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <button class="p-2 rounded-lg hover:bg-gray-100 text-gray-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
+                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-gray-600">
+                            <i data-lucide="user" class="w-5 h-5"></i>
+                        </a>
+                        <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors uppercase">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 2. Login Page UI -->
+        <div class="min-h-[calc(100vh-80px)] flex items-center justify-center px-4">
+            <div class="max-w-md w-full">
+                <div class="text-center mb-8">
+                    <a href="main.html" class="mb-4 inline-block">
+                        <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
+                            Signal
+                        </span>
+                    </a>
+                    <h1 class="text-2xl font-bold mb-2">로그인</h1>
+                    <p class="text-gray-600">무역 리스크 감지 플랫폼에 오신 것을 환영합니다</p>
+                </div>
+
+                <div class="bg-white border rounded-xl p-8 shadow-sm">
+                    <form id="login-form" class="space-y-5">
+                        <div>
+                            <label class="block text-sm mb-2 font-medium">아이디</label>
+                            <input
+                                type="text"
+                                id="userId"
+                                placeholder="아이디를 입력하세요"
+                                class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                required
+                            />
+                        </div>
+
+                        <div>
+                            <label class="block text-sm mb-2 font-medium">비밀번호</label>
+                            <input
+                                type="password"
+                                id="password"
+                                placeholder="••••••••"
+                                class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                required
+                            />
+                        </div>
+
+                        <div class="flex items-center justify-between text-sm">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="rememberUserId" class="rounded text-blue-600">
+                                <span class="text-gray-600">아이디 저장</span>
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <a href="find-id.html" class="text-blue-600 hover:text-blue-700">아이디 찾기</a>
+                                <span class="text-gray-300">|</span>
+                                <a href="find-pw.html" class="text-blue-600 hover:text-blue-700">비밀번호 찾기</a>
+                            </div>
+                        </div>
+
+                        <button
+                            type="submit"
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg transition-colors font-medium"
+                        >
+                            로그인
+                        </button>
+                    </form>
+
+                    <div class="mt-6 text-center text-sm">
+                        <span class="text-gray-600">계정이 없으신가요? </span>
+                        <a href="regist.html" class="text-blue-600 hover:text-blue-700 font-medium">회원가입</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 커스텀 모달 (AlertModal 대체) -->
+        <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
+            <div class="absolute inset-0 bg-black/50"></div>
+            <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative z-10 shadow-xl">
+                <p id="modal-message" class="text-center mb-4"></p>
+                <button onclick="closeModal()" class="w-full py-2 bg-blue-600 text-white rounded-md">확인</button>
+            </div>
+        </div>
+
+    </body>
+    <script>
+        // 로직 실행
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            
+            const loginForm = document.getElementById('login-form');
+            const userIdInput = document.getElementById('userId');
+            const passwordInput = document.getElementById('password');
+            const rememberCheck = document.getElementById('rememberUserId');
+            const authContainer = document.getElementById('auth-button-container');
+
+            // [useEffect 역할] 저장된 아이디 불러오기
+            const savedId = localStorage.getItem('savedUserId');
+            if (savedId && savedId !== 'guest') {
+                userIdInput.value = savedId;
+                rememberCheck.checked = true;
+            }
+
+            // Navbar 상태 업데이트
+            function updateNavbar() {
+                const loggedInId = localStorage.getItem('savedUserId');
+                if (loggedInId && loggedInId !== 'guest') {
+                    authContainer.innerHTML = `
+                        <button onclick="handleLogout()" class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 rounded-lg transition-colors">
+                            <span class="text-sm font-medium">LOG OUT</span>
+                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                        </button>
+                    `;
+                } else {
+                    authContainer.innerHTML = `
+                        <a href="/login.html" class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 rounded-lg transition-colors">
+                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                            <span class="text-sm font-medium">LOG IN</span>
+                        </a>
+                    `;
+                }
+                lucide.createIcons();
+            }
+
+            // [handleSubmit 역할] 로그인 처리
+            loginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const uid = userIdInput.value;
+                const pw = passwordInput.value;
+
+                if (uid === "admin" && pw === "admin123") {
+                    // 아이디 저장 로직
+                    localStorage.setItem('savedUserId', uid);
+                    window.location.href = "/map.html"; // navigate("/map")
+                } else {
+                    showModal("아이디 또는 비밀번호가 일치하지 않습니다.");
+                }
+            });
+
+            updateNavbar();
+        });
+
+        // 모달 제어 함수
+        function showModal(msg) {
+            document.getElementById('modal-message').innerText = msg;
+            document.getElementById('alert-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('alert-modal').classList.add('hidden');
+        }
+
+        // 로그아웃 함수
+        window.handleLogout = () => {
+            localStorage.removeItem('savedUserId');
+            window.location.reload();
+        };
+    </script>
+</html>
