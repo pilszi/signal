@@ -128,7 +128,7 @@ def run_analysis():
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
     search_query = {"query": {"term": {"is_processed": False}}, "size": 50}
-    raw_news = es.search(index="news_origin_es2", body=search_query)
+    raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
 
     if not docs:
@@ -188,8 +188,8 @@ def run_analysis():
         }
 
         # [STEP 6] ES 저장 및 상태 업데이트
-        es.index(index="news_labelling_es_3", body=labelled_doc)
-        # es.update(index="news_origin_es2", id=_id, body={"doc": {"is_processed": True}})
+        es.index(index="news_labelling", body=labelled_doc)
+        # es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
         print(f"📑 처리완료: {data['title'][:15]}... [{risk_lv}]")
 
 

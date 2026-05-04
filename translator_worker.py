@@ -18,7 +18,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로
 
 okt = Okt()
 es = Elasticsearch(["http://localhost:9200"])
-TARGET_INDICES = ["news_en_es1"]
+TARGET_INDICES = ["news_en"]
 
 
 def translate_chunk(chunk):
@@ -54,7 +54,7 @@ def translate_full_text_fast(text, limit=1500):
 
 def start_worker():
     logging.info(f"[{time.strftime('%H:%M:%S')}] 다중 인덱스 번역 및 분석 워커 가동 시작...")
-    logging.info(f"대상 인덱스: {TARGET_INDICES} -> 목적지: news_origin_es2")
+    logging.info(f"대상 인덱스: {TARGET_INDICES} -> 목적지: news_origin")
 
     while True:
         found_any_job = False
@@ -110,7 +110,7 @@ def start_worker():
                     "country_name": target_country
                 }
 
-                es.index(index="news_origin_es2", id=doc_id, document=analysis_doc)
+                es.index(index="news_origin", id=doc_id, document=analysis_doc)
                 logging.info(f"✅ ES2 저장 완료 및 상태 업데이트 성공")
 
             except Exception as e:
