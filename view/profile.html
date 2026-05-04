@@ -23,6 +23,139 @@
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="https://unpkg.com/lucide@latest"></script>
         <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+        
+        <style>
+            .notif-container {
+                    position: relative;
+                    display: inline-block;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                }
+            .notif-trigger {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 8px;           /* 적절한 클릭 영역 */
+                    transition: all 0.2s;   /* 부드러운 hover 효과 */
+                    position: relative;
+                    border: none;           /* 기본 보더 제거 */
+                    background: none;       /* 기본 배경 제거 */
+                    cursor: pointer;
+                }
+
+                .notif-badge {
+                    position: absolute;
+                    top: 2px;
+                    right: 2px;
+                    background-color: #ef4444; /* red-500 */
+                    color: white;
+                    font-size: 10px;
+                    font-weight: bold;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 9999px;
+                    align-items: center;
+                    justify-content: center;
+                    border: 2px solid white; /* 버튼 배경과 구분되도록 흰색 테두리 추가 */
+                }
+
+                /* 드롭다운 본체 */
+                .notif-dropdown {
+                    position: absolute;
+                    right: 0;
+                    top: calc(100% + 8px);
+                    width: 350px;
+                    background-color: white;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 0.75rem; /* rounded-xl */
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+                    z-index: 9999 !important;
+                }
+
+                .hidden { display: none; }
+
+                /* 헤더 */
+                .notif-header {
+                    padding: 16px;
+                    border-bottom: 1px solid #f3f4f6;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+
+                .header-title { font-size: 16px; font-weight: bold; color: #111827; }
+                .header-count { font-size: 13px; color: #6b7280; }
+
+                /* 알림 목록 */
+                .notif-body {
+                    max-height: 400px;
+                    overflow-y: auto;
+                }
+
+                .notif-item {
+                    padding: 16px;
+                    display: flex;
+                    gap: 12px;
+                    border-bottom: 1px solid #f3f4f6;
+                    cursor: pointer;
+                    transition: background-color 0.2s;
+                    position: relative;
+                }
+
+                .notif-item:hover { background-color: #f9fafb; }
+                .notif-item.unread { background-color: #eff6ff; }
+
+                /* 아이콘 박스 */
+                .icon-wrapper {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    flex-shrink: 0;
+                }
+
+                .type-signal { background-color: #fee2e2; color: #dc2626; }
+                .type-keyword { background-color: #dbeafe; color: #2563eb; }
+                .type-profile { background-color: #f3f4f6; color: #4b5563; }
+
+                .content-wrapper { flex: 1; }
+                .item-title { font-size: 14px; font-weight: 600; color: #1f2937; margin-bottom: 2px; }
+                .item-msg { font-size: 13px; color: #4b5563; line-height: 1.4; }
+                .item-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+                .item-time { font-size: 12px; color: #9ca3af; }
+                .unread-dot { width: 6px; height: 6px; background-color: #3b82f6; border-radius: 50%; }
+
+                /* 삭제 버튼 */
+                .delete-btn {
+                    background: none;
+                    border: none;
+                    color: #d1d5db;
+                    padding: 4px;
+                    cursor: pointer;
+                    height: fit-content;
+                }
+
+                .delete-btn:hover { color: #9ca3af; }
+
+                /* 푸터 */
+                .notif-footer {
+                    padding: 12px;
+                    text-align: center;
+                    background-color: #f9fafb;
+                }
+
+                .all-read-btn {
+                    background: none;
+                    border: none;
+                    color: #2563eb;
+                    font-size: 13px;
+                    font-weight: 500;
+                    cursor: pointer;
+                }
+
+                .all-read-btn:hover { text-decoration: underline; }
+        </style>
     </head>
     <body class="bg-gray-50">
 
@@ -51,7 +184,24 @@
                         <span id="user-greeting" class="hidden text-sm text-gray-600">
                             <span id="user_name"></span>님 반갑습니다
                         </span>
-                        <button class="p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
+                        <!-- 알림 컴포넌트 -->
+                        <div class="notif-container" id="notifContainer">
+                            <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
+                            <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
+                                <i data-lucide="bell" class="w-5 h-5"></i>
+                                <!-- 알림 숫자 배지 -->
+                                 <!-- 초기 상태는 숨김 처리 -->
+                                <span class="notif-badge" id="notifBadge" style="display: none;"></span>
+                            </button>
+
+                            <!-- 드롭다운 메뉴 (기본 숨김) -->
+                            <div class="notif-dropdown hidden" id="notifDropdown">
+                                <div class="notif-header">
+                                    <span class="header-count" id="notifCountText">3개의 새 알림</span>                                  
+                                </div>
+                                 <div id="notifList"></div>
+                            </div>
+                        </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
                             <i data-lucide="user" class="w-5 h-5"></i>
                         </a>
@@ -101,7 +251,7 @@
                                 <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
                                     <i data-lucide="user" class="w-4 h-4 text-gray-400"></i> 이름
                                 </label>
-                                <input type="text" id="form-name" value="홍길동" disabled class="w-full px-4 py-3 border rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed">
+                                <input type="text" id="form-name" disabled class="w-full px-4 py-3 border rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed">
                             </div>
 
                             <!-- 이메일 -->
@@ -109,7 +259,7 @@
                                 <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
                                     <i data-lucide="mail" class="w-4 h-4 text-gray-400"></i> 이메일
                                 </label>
-                                <input type="email" id="form-email" name="email" value="hong@example.com" required disabled class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
+                                <input type="email" id="form-email" name="email" required disabled class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
                             </div>
 
                             <!-- 연락처 -->
@@ -117,7 +267,7 @@
                                 <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
                                     <i data-lucide="phone" class="w-4 h-4 text-gray-400"></i> 연락처
                                 </label>
-                                <input type="tel" id="form-phone" name="phone" value="010-1234-5678" required disabled class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
+                                <input type="tel" id="form-phone" name="phone" required disabled class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
                             </div>
 
                             <!-- 관심 키워드 섹션 -->
@@ -154,7 +304,7 @@
                                 <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
                                     <i data-lucide="key" class="w-4 h-4 text-gray-400"></i> 비밀번호 변경 (선택사항)
                                 </label>
-                                <input type="password" placeholder="새 비밀번호 입력" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
+                                <input type="password" id="password" placeholder="새 비밀번호 입력" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
                                 <input type="password" placeholder="새 비밀번호 확인" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
 
@@ -177,14 +327,6 @@
                     <button onclick="closeModal()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-bold">확인</button>
                 </div>
             </div>
-                <!-- 회원정보 수정 페이지 하단에 배치 -->
-        <div class="mt-12 pt-6 border-t border-gray-200">
-            <h3 class="text-lg font-medium text-gray-900">계정 관리</h3>
-            <p class="text-sm text-gray-500 mb-4">계정을 삭제하면 모든 데이터가 영구적으로 제거됩니다.</p>
-            <button onclick="openDeleteModal()" class="text-red-600 hover:text-red-700 font-medium text-sm underline">
-                회원 탈퇴하기
-            </button>
-        </div>
 
         <!-- 회원 탈퇴 확인 모달 (초기엔 hidden) -->
         <div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4">
@@ -234,27 +376,15 @@
     <script>
         // 초기 데이터 및 상태
         let isEditing = false;
-        let userData = {
-            name: "홍길동",
-            email: "hong@example.com",
-            phone: "010-1234-5678",
-            keywords: ["석유", "반도체", "자동차", "금리"]
-        };
-        let originalData = { ...userData };
-
-        document.addEventListener('DOMContentLoaded', () => {
-            axios.get("/log_time");
-            updateNavbar();
-
-            renderKeywords();
-            lucide.createIcons();
-        });
+        let userData = {};
+        let originalData = {};
+        let savedUserId = sessionStorage.getItem("savedUserId");
 
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
             // 태그가 없을 시 함수 종료(에러방지)
-            console.log(authContainer);
+            // console.log(authContainer);
             if (!authContainer){return};
             const userNameSpan = document.getElementById('user_name');
             const loggedInId = sessionStorage.getItem('savedUserId');
@@ -289,11 +419,164 @@
             
             if (window.lucide) lucide.createIcons();
         }
+        // 알림 데이터 (로그인 여부에 따라 세팅 가능)
+        let myNotifs = [
+            { id: 1, type: "signal", title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
+            { id: 2, type: "keyword", title: "키워드 알림: 반도체", message: "중국 반도체 관련 새로운 뉴스가 등록되었습니다", time: "1시간 전", isRead: false },
+            { id: 3, type: "signal", title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "2시간 전", isRead: false },
+            { id: 4, type: "profile", title: "개인정보 수정 완료", message: "프로필 정보가 성공적으로 업데이트되었습니다", time: "3시간 전", isRead: true }
+        ];
 
-        // 키워드 렌더링 (조회 모드)
-        function renderKeywords() {
-            const container = document.getElementById('keyword-view');
-            container.innerHTML = userData.keywords.map(k => `
+        const trigger = document.getElementById('notifTrigger');
+        const dropdown = document.getElementById('notifDropdown');
+        const list = document.getElementById('notifList');
+
+        // 토글 이벤트
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('hidden');
+        });
+
+        // 외부 클릭 시 닫기
+        document.addEventListener('click', (e) => {
+            if (!document.getElementById('notifContainer').contains(e.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // 알림 렌더링 함수
+        function updateNotifUI() {
+            const badge = document.getElementById('notifBadge');
+            const list = document.getElementById('notifList');
+            const countText = document.getElementById('notifCountText');
+            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
+            
+            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
+            if (!savedUserId || savedUserId === "guest") {
+                badge.style.display = 'none'; // 배지 숨김
+                countText.innerText = '0개의 새 알림';
+                list.innerHTML = `
+                    <div style="padding: 40px; text-align: center;">
+                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
+                    </div>`;
+                return;
+            }
+            
+            const unreads = myNotifs.filter(n => !n.isRead);
+            
+            // 새 알림이 있을 때만 배지 표시
+            if (unreads.length > 0) {
+                badge.innerText = unreads.length;
+                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시
+            } else {
+                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김
+            }
+
+            // 드롭다운 내부 문구 업데이트
+            countText.innerText = `${unreads.length}개의 새 알림`;
+
+            // 알림 리스트 렌더링 로직 (기존과 동일)
+            renderList(list);
+        }
+
+        function renderList(container) {
+            if (myNotifs.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
+                return;
+            }
+            
+            container.innerHTML = myNotifs.map(n => {
+                // 1. 아이콘을 담을 변수 선언
+                let iconTag = '';
+
+                // 2. type에 따른 조건문 처리
+                if (n.type === 'signal') {
+                    iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                } else if (n.type === 'keyword') {
+                    iconTag = '<i data-lucide="tag" style="color: #3b82f6;"></i>';
+                } else {
+                    iconTag = '<i data-lucide="user" style="color: #6b7280;"></i>';
+                }
+
+                // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
+                return `
+                    <div class="notif-item ${n.isRead ? '' : 'unread'}" 
+                        onclick="readItem(${n.id}, '${n.type}')" 
+                        style="cursor: pointer;">
+                        <div class="notif-icon">
+                            ${iconTag}
+                        </div>
+                        <div class="notif-content">
+                            <div class="notif-title">${n.title}</div>
+                            <div class="notif-message">${n.message}</div>
+                            <div class="notif-time">${n.time} ${n.isRead ? '' : '<span class="unread-dot"></span>'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            lucide.createIcons();
+        }       
+
+        // 아이콘 매칭 함수
+        function getIcon(type) {
+            if (type === 'signal') return 'alert-triangle';
+            if (type === 'keyword') return 'tag';
+            return 'user';
+        }
+
+        // 아이템 클릭 (읽음 처리 및 이동)
+        function readItem(id, type) {
+            myNotifs = myNotifs.map(n => n.id === id ? {...n, isRead: true} : n);
+            updateNotifUI();
+            if (type === 'signal') {
+                location.href = 'signal_log.html';
+            } else if (type === 'keyword') {
+                location.href = 'custom_news.html';
+            } else {
+                location.href = 'profile.html';
+            }
+        }
+
+        // 아이템 삭제
+        function deleteItem(e, id) {
+            e.stopPropagation();
+            myNotifs = myNotifs.filter(n => n.id !== id);
+            updateNotifUI();
+        }
+
+        // 모두 읽음
+        function allRead() {
+            myNotifs = myNotifs.map(n => ({...n, isRead: true}));
+            updateNotifUI();
+        }
+
+        function formatPhoneNumber(phoneNumber) {
+            return phoneNumber
+                .replace(/[^0-9]/g, '') // 숫자가 아닌 문자 제거 (안전장치)
+                .replace(/^(\d{2,3})(\d{3,4})(\d{4})$/, `$1-$2-$3`);
+        }
+
+        // profile 렌더링 (조회 모드)
+        async function renderProfile() {
+            const name = document.getElementById('form-name');
+            const email = document.getElementById('form-email');
+            const phone = document.getElementById('form-phone');
+            const keyword = document.getElementById('keyword-view');
+
+            let {data} = await axios.get('/profile?id='+savedUserId);
+            console.log(data);
+            userData = {
+                "name" : data.user_name,
+                "email" : data.email,
+                "phone" : data.phone_number,
+                "keywords" : data.keyword
+            };
+            originalData = { ...userData };
+
+            name.value = userData.name;
+            email.value = userData.email;
+            phone.value = formatPhoneNumber(userData.phone);
+            keyword.innerHTML = userData.keywords.map(k => `
                 <span class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm border border-blue-200 font-medium">
                     ${k}
                 </span>
@@ -309,7 +592,7 @@
             const kwView = document.getElementById('keyword-view');
             const kwEdit = document.getElementById('keyword-edit-area');
             const inputs = [document.getElementById('form-email'), document.getElementById('form-phone')];
-
+            let savedPW = '';
             if (isEditing) {
                 // 수정 모드 진입
                 originalData = { ...userData, keywords: [...userData.keywords] };
@@ -320,6 +603,30 @@
                 pwArea.classList.remove('hidden');
                 kwView.classList.add('hidden');
                 kwEdit.classList.remove('hidden');
+                if(inputs[1]){
+                    inputs[1].addEventListener('input', function(e) {
+                    // 1. 숫자만 남기기
+                    let value = this.value.replace(/[^0-9]/g, "");
+
+                    // 2. 길이에 따라 하이픈 추가 (기존에 작성하신 로직 활용)
+                    let result = "";
+                    if (value.length < 4) {
+                        result = value;
+                    } else if (value.length < 7) {
+                        result = value.substr(0, 3) + "-" + value.substr(3);
+                    } else if (value.length < 11) {
+                        result = value.substr(0, 3) + "-" + value.substr(3, 3) + "-" + value.substr(6);
+                    } else {
+                        result = value.substr(0, 3) + "-" + value.substr(3, 4) + "-" + value.substr(7);
+                    }
+
+                    // 3. 최종 값 적용 (최대 13자)
+                    this.value = result.substring(0, 13);
+                    
+                    // 중요: 수정 중인 데이터(userData)에도 하이픈이 포함된 값을 동기화
+                    userData.phone = this.value;
+                });
+                }
                 // 입력 필드 활성화
                 inputs.forEach(input => input.disabled = false);
                 
@@ -341,7 +648,7 @@
                 // 취소 시 데이터 복구
                 document.getElementById('form-email').value = userData.email;
                 document.getElementById('form-phone').value = userData.phone;
-                renderKeywords();
+                renderProfile();
             }
             if (window.lucide){
                 lucide.createIcons();
@@ -403,12 +710,14 @@
             });
         }
 
+        let = param = {};
         // 폼 제출
-        function handleSubmit(e) {
+        async function handleSubmit(e) {
             e.preventDefault();
             
             const email = document.getElementById('form-email').value;
-            const phone = document.getElementById('form-phone').value;
+            const phone = document.getElementById('form-phone').value.replaceAll('-', '');;
+            const pw = document.getElementById('password').vlaue;
             const keywordInputs = document.querySelectorAll('.keyword-input');
             const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
 
@@ -422,9 +731,20 @@
             userData.phone = phone;
             userData.keywords = keywords;
 
+            param = {
+                "id": savedUserId,
+                "email": email,
+                "phone_number": phone,
+                "keyword": keywords,
+            };
+            if(pw != ''){
+                param.pw = pw;
+            }
+            let = {data} = await axios.post("/update_profile", param);
+            console.log(data);
             // UI 업데이트
             document.getElementById('display-email').innerText = email;
-            renderKeywords();
+            renderProfile();
             toggleEdit(); // 수정 모드 종료
             
             showModal("개인정보가 성공적으로 수정되었습니다.", "success");
@@ -463,7 +783,7 @@
             } 
         }
                 // 모달 열기
-        function openDeleteModal() {
+        async function openDeleteModal() {
             document.getElementById('deleteModal').classList.remove('hidden');
             document.body.style.overflow = 'hidden'; // 배경 스크롤 방지
         }
@@ -476,14 +796,13 @@
             document.getElementById('modalPassword').value = "";
             document.getElementById('modalConfirm').checked = false;
         }
-
+        
         // 탈퇴 폼 제출 처리
         document.getElementById('modalDeleteForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const password = document.getElementById('modalPassword').value;
             const isConfirmed = document.getElementById('modalConfirm').checked;
-            const savedUserId = sessionStorage.getItem("savedUserId")
             
             if (!isConfirmed) {
                 alert("탈퇴 동의 체크박스에 체크해주세요.");
@@ -495,26 +814,38 @@
                 return;
             }
 
-            // 서버로 탈퇴 요청
-            axios.get("/delete_member?id="+savedUserId).then(({data}) => {
-                console.log(data);
-            });
             // 서버 연동 전 테스트 로직 (리액트 코드 기준)
-            if (password === "admin123") {
-                if(confirm("최종 확인: 정말로 계정을 삭제하시겠습니까?")) {
-
-                    // 2. 세션 삭제
-                    sessionStorage.removeItem("savedUserId");
-                    localStorage.removeItem("loginAttempts");
-                    localStorage.removeItem("loginBlockEndTime");
-                    
-                    alert("회원 탈퇴가 완료되었습니다. 메인 페이지로 이동합니다.");
-                    location.href = "main.html"; // 메인으로 리다이렉트
+            if (confirm("정말로 계정을 삭제하시겠습니까?")) {
+                try {
+                    // 이제 서버에서 비번을 가져오지 않고, 입력한 비번을 서버로 던집니다.
+                    // 보안을 위해 POST 방식을 권장하지만, 현재 구조에 맞춰 GET/Query로 예시를 듭니다.
+                    let {data} = await axios.post("/delete_member", {
+                        id: savedUserId,
+                        input_pw: password  // 서버가 이 비번을 받아서 DB의 암호화된 값과 비교합니다.
+                    });
+                    console.log(data.msg);
+                    if (data.msg) {
+                        sessionStorage.removeItem("savedUserId");
+                        alert("회원 탈퇴가 완료되었습니다.");
+                        location.href = "main.html";
+                    } else {
+                        alert("비밀번호가 일치하지 않습니다.");
+                    }
+                } catch (error) {
+                    // 서버에서 401(인증실패) 등을 보냈을 때 처리
+                    alert("비밀번호가 틀렸거나 탈퇴 처리 중 오류가 발생했습니다.");
                 }
-            } else {
-                alert("비밀번호가 일치하지 않습니다.");
-                document.getElementById('modalPassword').value = "";
             }
+        });
+
+        // 페이지 오픈시 실행
+        document.addEventListener('DOMContentLoaded', () => {
+            axios.get("/session_out");
+            updateNavbar();
+
+            renderProfile();
+            lucide.createIcons();
+            updateNotifUI();
         });
     </script>
 </html>

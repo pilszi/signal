@@ -139,12 +139,12 @@
             async function login(id, pw){
                 let param = {
                     "id" : id,
-                    "pw" : pw
+                    "input_pw" : pw
                 }
                 // console.log(param);
                 let {data} = await axios.post('/login', param);
                 console.log(data.msg);
-                if (data.msg == 1) {
+                if (data.msg) {
                     // 아이디 저장 로직
                     sessionStorage.setItem('savedUserId', id);
                     // console.log(savedId);

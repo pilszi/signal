@@ -15,12 +15,6 @@ import random
 from utils import generate_article_id
 from dateutil import parser as date_parser
 from concurrent.futures import ThreadPoolExecutor  # 멀티스레딩용
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-logging.getLogger("elasticsearch").setLevel(logging.WARNING)  # ES 내부 로그 숨기기
-logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그 숨기기
-logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
 
 es = Elasticsearch(["http://localhost:9200"])
 INDEX_NAME = "news_origin_es2"
@@ -55,7 +49,7 @@ def get_detailed_news(url):
                 full_content = content.get_text(strip=True)
                 break
 
-        # 결측치 체크
+        # 결측치 체크 하는 부분
         if not main_image or not press_name or not full_content:
             return None
 
@@ -134,7 +128,7 @@ def bulk_search_naver_news():
 
                 time.sleep(0.1)
             except Exception as e:
-                logging.error(f"⚠️ [{kw}] API 호출 오류: {e}")
+                print(f"⚠️ [{kw}] API 호출 오류: {e}")
 
     # [최적화 2] 멀티스레딩(ThreadPoolExecutor) 적용
     # 동시에 10개의 상세 페이지를 긁어옵니다.
@@ -143,7 +137,7 @@ def bulk_search_naver_news():
             results = list(executor.map(process_single_article, tasks))
             newly_saved = results.count(True)
 
-    logging.info(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
+    print(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
     return {"status": "success", "newly_saved": newly_saved}
 
 
@@ -154,22 +148,22 @@ random_second = random.randint(0, 59)
 
 @scheduler.scheduled_job("cron", minute="0,15,30,45", second=random_second, id='collect_and_update_task')
 def auto_collect_and_market_update():
-    logging.info(f"\n🚀 [통합 정기 사이클 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\n🚀 [통합 정기 사이클 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     try:
         collect_result = bulk_search_naver_news()
-        logging.info(f"✅ 수집 완료: 새 뉴스 {collect_result.get('newly_saved', 0)}건 확보")
+        print(f"✅ 수집 완료: 새 뉴스 {collect_result.get('newly_saved', 0)}건 확보")
     except Exception as e:
-        logging.error(f"❌ 수집 단계 오류 발생: {e}")
-    logging.info(f"🏁 [사이클 종료] {datetime.now()}")
+        print(f"❌ 수집 단계 오류 발생: {e}")
+    print(f"🏁 [사이클 종료] {datetime.now()}")
 
 
 if __name__ == '__main__':
     try:
         if not scheduler.running:
             scheduler.start()
-            logging.info("⏰ [시스템] 백그라운드 스케줄러 가동 시작 (15분 주기)")
+            print("⏰ [시스템] 백그라운드 스케줄러 가동 시작 (15분 주기)")
 
-        logging.info("🚀 [시스템] 초기 데이터 확보를 위해 첫 번째 분석을 즉시 실행합니다...")
+        print("🚀 [시스템] 초기 데이터 확보를 위해 첫 번째 분석을 즉시 실행합니다...")
         auto_collect_and_market_update()
 
         while True:
@@ -177,4 +171,4 @@ if __name__ == '__main__':
     except (KeyboardInterrupt, SystemExit):
         if scheduler.running:
             scheduler.shutdown()
-            logging.info("\n👋 [시스템] 스케줄러를 정지하고 서버를 안전하게 종료합니다.")
+            print("\n👋 [시스템] 스케줄러를 정지하고 서버를 안전하게 종료합니다.")

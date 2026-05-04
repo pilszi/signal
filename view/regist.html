@@ -164,14 +164,13 @@
         </div>
     </body>
     <script>
-        const existingUsernames = ["admin", "user1", "test123"];
         let isUsernameChecked = false;
         let isUsernameTaken = null;
         let generatedCode = "";
         let emailVerified = false;
 
         // 아이디 중복 확인
-        function checkUsername() {
+        async function checkUsername() {
             const id = document.getElementById('id').value.trim().toLowerCase();
             const msgDiv = document.getElementById('id_msg');
             
@@ -180,15 +179,27 @@
                 return;
             }
 
-            isUsernameTaken = existingUsernames.includes(id);
+            let {data} = await axios.get('/overlay?id='+id);
+            // console.log(data);
+            // 1. 중복 여부 확인
+            isUsernameTaken = data.msg;
             isUsernameChecked = true;
-            
+
+            // 2. 스타일 초기화
             msgDiv.classList.remove('hidden', 'text-red-600', 'text-green-600');
-            msgDiv.classList.add('flex', isUsernameTaken ? 'text-red-600' : 'text-green-600');
-            
-            msgDiv.innerHTML = isUsernameTaken 
-                ? `<i data-lucide="x-circle" class="w-4 h-4"></i> <span>중복된 아이디입니다.</span>`
-                : `<i data-lucide="check-circle" class="w-4 h-4"></i> <span>사용가능한 아이디입니다.</span>`;
+            msgDiv.classList.add('flex');
+
+            // 3. 조건문에 따른 스타일 및 메시지 처리
+            if (isUsernameTaken) {
+                // 중복된 아이디일 경우
+                msgDiv.classList.add('text-red-600');
+                msgDiv.innerHTML = `<i data-lucide="x-circle" class="w-4 h-4"></i> <span>중복된 아이디입니다.</span>`;
+            } else {
+                // 사용 가능한 아이디일 경우
+                msgDiv.classList.add('text-green-600');
+                msgDiv.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4"></i> <span>사용가능한 아이디입니다.</span>`;
+            }
+
             lucide.createIcons();
         };
 
