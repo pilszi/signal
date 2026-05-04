@@ -42,7 +42,7 @@ es = Elasticsearch(
     ["http://localhost:9200"],
     request_timeout=30
 )
-INDEX_NAME = "news_en_es1"
+INDEX_NAME = "news_en1"
 scraper = cloudscraper.create_scraper()
 
 RSS_FEEDS = [
@@ -102,6 +102,51 @@ def get_source_name(url):
     return "Global News"
 
 
+def extract_exact_date(html, article_obj):
+    """
+    [방법 B 강화] 주요 외신별 맞춤형 시간 파싱 로직
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # 1. CNBC 전용: 'last_updated_datetime' 또는 'published_datetime' 메타 데이터
+    cnbc_meta = soup.find('meta', attrs={'name': 'last-modified'}) or \
+                soup.find('meta', attrs={'property': 'article:published_time'})
+    if cnbc_meta and cnbc_meta.get('content'):
+        try:
+            return date_parser.parse(cnbc_meta['content'])
+        except:
+            pass
+
+    # 2. Al Jazeera 전 "@type": "NewsArticle" 내의 datePublished 검색
+    import json
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            data = json.loads(script.string)
+            if isinstance(data, dict) and data.get('@type') == 'NewsArticle':
+                return date_parser.parse(data.get('datePublished'))
+            elif isinstance(data, list):  # 가끔 리스트 형태로 들어있음
+                for item in data:
+                    if item.get('@type') == 'NewsArticle':
+                        return date_parser.parse(item.get('datePublished'))
+        except:
+            pass
+
+    # 3. The Guardian 전용: 'article:published_time' 메타 태그
+    guardian_meta = soup.find('meta', attrs={'property': 'article:published_time'})
+    if guardian_meta and guardian_meta.get('content'):
+        try:
+            return date_parser.parse(guardian_meta['content'])
+        except:
+            pass
+
+    # 4. 공통: newspaper3k 결과가 있다면 활용
+    if article_obj.publish_date:
+        return article_obj.publish_date
+
+    return None
+
+
 def fallback_extract(html):
     soup = BeautifulSoup(html, 'html.parser')
     meta_desc = soup.find('meta', attrs={'name': 'description'}) or \
@@ -130,11 +175,9 @@ def fetch_and_save(data):
     doc_id = hashlib.sha256(clean_url.encode('utf-8')).hexdigest()
 
     try:
-        # [최적화 1] 네트워크 요청 전 ES 중복 체크로 불필요한 트래픽 차단
         if es.exists(index=INDEX_NAME, id=doc_id):
             return "EXIST"
 
-        # 병렬 처리 시 서버 차단 방지를 위한 미세 대기
         time.sleep(random.uniform(0.1, 0.5))
 
         response = scraper.get(clean_url, timeout=20)
@@ -153,7 +196,6 @@ def fetch_and_save(data):
         if len(content) < 300 or is_bad_content:
             content = fallback_extract(html)
 
-        # [결측치 체크 강화]
         press_name = get_source_name(clean_url)
         main_image = article.top_image
 
@@ -164,7 +206,10 @@ def fetch_and_save(data):
         if not main_image or len(main_image.strip()) < 5:
             return "FAILED"
 
-        raw_date = article.publish_date or rss_pub_date
+        # [방법 B 적용] 상세 페이지에서 다시 한번 정교하게 날짜 추출
+        exact_date = extract_exact_date(html, article)
+        raw_date = exact_date or rss_pub_date
+
         if not raw_date:
             return "FAILED"
 
@@ -211,6 +256,7 @@ def crawl_job():
                     norm_url = raw_url.split('?')[0].split('#')[0].strip().rstrip('/')
 
                     if norm_url not in link_data:
+                        # RSS 데이터에 상세 시간이 있으면 최대한 보존
                         link_data[norm_url] = entry.get('published') or entry.get('updated')
         except Exception as e:
             logging.error(f"Feed error ({feed_url}): {e}")
@@ -218,7 +264,6 @@ def crawl_job():
     tasks = list(link_data.items())
     stats = {"SUCCESS": 0, "EXIST": 0, "FAILED": 0, "ERROR": 0}
 
-    # [최적화 2] 해외 사이트 지연을 고려하여 max_workers를 10으로 확장
     if tasks:
         with ThreadPoolExecutor(max_workers=10) as executor:
             results = list(executor.map(fetch_and_save, tasks))

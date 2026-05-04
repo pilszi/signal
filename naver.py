@@ -17,7 +17,7 @@ from dateutil import parser as date_parser
 from concurrent.futures import ThreadPoolExecutor  # 멀티스레딩용
 
 es = Elasticsearch(["http://localhost:9200"])
-INDEX_NAME = "news_origin_es2"
+INDEX_NAME = "news_origin"
 
 
 def get_detailed_news(url):

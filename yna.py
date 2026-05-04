@@ -76,7 +76,7 @@ def article_crawling(driver, p: int, keyword):
                 doc_id = generate_article_id(link)
 
                 # [최적화] 이미 있는 기사는 본문 페이지에 들어가지도 않음
-                if es.exists(index="news_origin_es2", id=doc_id):
+                if es.exists(index="news_origin", id=doc_id):
                     continue
 
                 # 2. 이미지 체크
@@ -141,7 +141,7 @@ def article_save(news_list):
             actions = [
                 {
                     "_op_type": "create",
-                    "_index": "news_origin_es2",
+                    "_index": "news_origin",
                     "_id": generate_article_id(row["url"]),
                     "_source": {
                         "title": row["title"], "content": row["content"],
