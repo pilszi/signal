@@ -10,6 +10,7 @@ from starlette.staticfiles import StaticFiles
 from dataReqType.regist import RegistModel
 from db import get_db
 from hash import hash_password, verify_password
+from elasticsearch import Elasticsearch
 
 app = FastAPI()
 app.mount("/view", StaticFiles(directory="view"))
@@ -17,6 +18,11 @@ app.add_middleware(SessionMiddleware, secret_key="secret", max_age=600)
 
 def chk_session(req:Request):
     return req.session.get('login_id', '')
+
+es = Elasticsearch(
+    ["http://localhost:9200"],
+    request_timeout=30
+)
 
 @app.get('/')
 def main():
@@ -193,4 +199,62 @@ def update_profile(info:Dict[str, Any]):
             insert_res = engine.execute(insert_sql, {"member_no": id_result["member_no"], "keyword": key})
             key_insert += insert_res.rowcount
         print(f'키워드 수정 = {key_insert}')
+    return {"msg": "ok"}
+
+
+# main 페이지 오늘의 뉴스 조회
+@app.get("/public_signals")
+def public_signals():
+    # print('뉴스 요청')
+    body = {
+        "query": {
+            "bool": {
+                "filter": [
+                    {
+                        "range": {
+                            "published_date": {
+                                "gte": "now-12h", # 현재 시각 기준 12시간 전부터
+                                "lte": "now",      # 현재 시각까지
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        "sort": [
+            { "published_date": { "order": "desc" } } # 최신 기사가 먼저 나오도록 정렬
+        ]
+    }
+    res = es.search(index= "news_origin_es2", body= body)
+    print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
+    # print(res['hits']['hits'])
+    public_news = []
+    for news in res['hits']['hits']:
+        # print(news["_source"])
+        _news = {
+            'title' : news["_source"]["title"],
+            'url' : news["_source"]["url"],
+            'main_image' : news["_source"]["main_image"],
+            'published_date' : news["_source"]["published_date"],
+            'press_name' : news["_source"]["press_name"]
+        }
+        public_news.append(_news)
+    # print(public_news)
+    return {"msg": public_news}
+
+
+# 기사 열람 기록 저장
+@app.post("/news_view")
+def news_view(info:Dict[str, str]):
+    print(f'{info["id"]} 가 열람한 기사 url = {info["url"]}')
+    with get_db() as engine:
+        sql = sqlalchemy.text("""SELECT member_no FROM member_info WHERE id = :id""")
+        res = engine.execute(sql, {"id": info["id"]}).mappings().fetchone()
+        print(f'member_no = {res}')
+        sql = sqlalchemy.text("""SELECT count(news_url) as cnt FROM news_view WHERE member_no = :member_no AND news_url = :news_url""")
+        view_res = engine.execute(sql, {"member_no": res["member_no"], "news_url": info["url"]}).mappings().fetchone()
+        if view_res["cnt"] == 0:
+            sql = sqlalchemy.text("""INSERT INTO news_view (member_no, news_url)VALUES(:member_no, :news_url)""")
+            res = engine.execute(sql, {"member_no": res["member_no"], "news_url": info["url"]})
+            print(f'기사열람 DB 삽입 성공 {res.rowcount}개')
     return {"msg": "ok"}
