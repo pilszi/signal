@@ -710,14 +710,14 @@
             });
         }
 
-        let = param = {};
+        let param = {};
         // 폼 제출
         async function handleSubmit(e) {
             e.preventDefault();
             
             const email = document.getElementById('form-email').value;
             const phone = document.getElementById('form-phone').value.replaceAll('-', '');;
-            const pw = document.getElementById('password').vlaue;
+            const pw = document.getElementById('password').value;
             const keywordInputs = document.querySelectorAll('.keyword-input');
             const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
 
@@ -740,13 +740,15 @@
             if(pw != ''){
                 param.pw = pw;
             }
-            let = {data} = await axios.post("/update_profile", param);
+            let {data} = await axios.post("/update_profile", param);
             console.log(data);
             // UI 업데이트
-            document.getElementById('display-email').innerText = email;
+            // 왼쪽 카드와 상단바의 이름도 즉시 업데이트
+            document.getElementById('display-name').innerText = userData.name;
+            updateNavbar(); // 상단바 다시 그리기
+
             renderProfile();
             toggleEdit(); // 수정 모드 종료
-            
             showModal("개인정보가 성공적으로 수정되었습니다.", "success");
         }
 
@@ -842,10 +844,25 @@
         document.addEventListener('DOMContentLoaded', () => {
             axios.get("/session_out");
             updateNavbar();
-
             renderProfile();
             lucide.createIcons();
             updateNotifUI();
+
+            // 전화번호 하이픈 로직을 여기로 옮겨서 중복 등록을 방지합니다.
+            const phoneInput = document.getElementById('form-phone');
+            if (phoneInput) {
+                phoneInput.addEventListener('input', function(e) {
+                    let value = this.value.replace(/[^0-9]/g, "");
+                    let result = "";
+                    if (value.length < 4) result = value;
+                    else if (value.length < 7) result = value.substr(0, 3) + "-" + value.substr(3);
+                    else if (value.length < 11) result = value.substr(0, 3) + "-" + value.substr(3, 3) + "-" + value.substr(6);
+                    else result = value.substr(0, 3) + "-" + value.substr(3, 4) + "-" + value.substr(7);
+
+                    this.value = result.substring(0, 13);
+                    userData.phone = this.value; // 실시간 데이터 동기화
+                });
+            }
         });
     </script>
 </html>

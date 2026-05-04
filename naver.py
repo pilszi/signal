@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from config import Config
 import urllib.request
 import json
-import hashlib
+import logging
 import html
 from utils import find_target_country
 from utils import extract_keywords
@@ -49,7 +49,7 @@ def get_detailed_news(url):
                 full_content = content.get_text(strip=True)
                 break
 
-        # 결측치 체크 하는 부분
+        # 결측치 체크
         if not main_image or not press_name or not full_content:
             return None
 
@@ -137,7 +137,7 @@ def bulk_search_naver_news():
             results = list(executor.map(process_single_article, tasks))
             newly_saved = results.count(True)
 
-    print(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
+    logging.info(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
     return {"status": "success", "newly_saved": newly_saved}
 
 
@@ -148,22 +148,28 @@ random_second = random.randint(0, 59)
 
 @scheduler.scheduled_job("cron", minute="0,15,30,45", second=random_second, id='collect_and_update_task')
 def auto_collect_and_market_update():
-    print(f"\n🚀 [통합 정기 사이클 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logging.info(f"\n🚀 [통합 정기 사이클 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     try:
         collect_result = bulk_search_naver_news()
-        print(f"✅ 수집 완료: 새 뉴스 {collect_result.get('newly_saved', 0)}건 확보")
+        logging.info(f"✅ 수집 완료: 새 뉴스 {collect_result.get('newly_saved', 0)}건 확보")
     except Exception as e:
-        print(f"❌ 수집 단계 오류 발생: {e}")
-    print(f"🏁 [사이클 종료] {datetime.now()}")
+        logging.error(f"❌ 수집 단계 오류 발생: {e}")
+    logging.info(f"🏁 [사이클 종료] {datetime.now()}")
+
+def run_naver_collect():
+    """main.py의 스케줄러와 연결되는 네이버 뉴스 수집 메인 함수"""
+    print(f"📡 [네이버 뉴스 수집 시작] {datetime.now().strftime('%H:%M:%S')}")
+    # 실제 수집 로직인 bulk_search_naver_news를 호출합니다.
+    return bulk_search_naver_news()
 
 
 if __name__ == '__main__':
     try:
         if not scheduler.running:
             scheduler.start()
-            print("⏰ [시스템] 백그라운드 스케줄러 가동 시작 (15분 주기)")
+            logging.info("⏰ [시스템] 백그라운드 스케줄러 가동 시작 (15분 주기)")
 
-        print("🚀 [시스템] 초기 데이터 확보를 위해 첫 번째 분석을 즉시 실행합니다...")
+        logging.info("🚀 [시스템] 초기 데이터 확보를 위해 첫 번째 분석을 즉시 실행합니다...")
         auto_collect_and_market_update()
 
         while True:
@@ -171,4 +177,4 @@ if __name__ == '__main__':
     except (KeyboardInterrupt, SystemExit):
         if scheduler.running:
             scheduler.shutdown()
-            print("\n👋 [시스템] 스케줄러를 정지하고 서버를 안전하게 종료합니다.")
+            logging.info("\n👋 [시스템] 스케줄러를 정지하고 서버를 안전하게 종료합니다.")

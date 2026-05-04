@@ -3,24 +3,18 @@ import html
 from config import Config  # 클래스를 통째로 가져옵니다.
 from collections import Counter
 import hashlib
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-logging.getLogger("elasticsearch").setLevel(logging.WARNING)  # ES 내부 로그 숨기기
-logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그 숨기기
-logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
 
 def generate_article_id(url):
     return hashlib.sha256(url.strip().encode('utf-8')).hexdigest()
 
+# 기사를 수집한 후 먼저 normalize, clean_html을 거침
 # 1. 텍스트 정규화 (가장 많이 쓰임)
 def normalize(text):
     if not text: return ""
     # 소문자 변환 및 모든 공백 제거
     return text.lower().replace(" ", "")
 
-
-# 2. 뉴스 제목/본문 정제 도구
+# 2. 태그 제거
 def clean_html(text):
     if not text: return ""
     # <b> 태그 등 제거 및 HTML 엔티티 복원
@@ -69,16 +63,16 @@ def extract_noun_number_pairs(text):
     return results
 
 
-# 키워드 추출 함수
+# 키워드 추출 함수 - 위에 normalize와 clean_html을 거치면 본문에서 중요한 키워드만 추출
 def extract_keywords(title, content):
     """
-    기사 제목과 본문에서 정제된 핵심 키워드 최대 10개 추출 (최종 개선 버전)
+    기사 제목과 본문에서 정제된 핵심 키워드 최대 10개 추출
     """
     try:
         from config import Config
         filters = Config.TOTAL_FILTERS
 
-        # --- [Step 1] 개체명 추출 ---
+        # [Step 1] 개체명 추출
         target_entities = [
             "미국","중국","일본","베트남","이란","러시아","우크라이나","EU","중동",
             "트럼프","바이든","푸틴","시진핑","파월",
@@ -91,36 +85,37 @@ def extract_keywords(title, content):
 
         entities = [ent for ent in target_entities if ent in title or ent in content[:500]]
 
-        # --- [Step 2] 수치 데이터 ---
+        # [Step 2] 수치 데이터
         value_pattern = r'[\$|₩]?\d+[\d,.]*\s?[%|배|조|억|만|포인트|p|달러|원|불]+'
         found_values = re.findall(value_pattern, title + " " + content[:500])
 
-        # --- [Step 3] 텍스트 정제 ---
+        # [Step 3] 텍스트 정제
         particles = re.compile(r'(으로|보다|에서|에대한|한다|했다|하며|하여|까지|부터|조차|이나|은|는|이|가|을|를|의|에|도)$')
 
         def clean_word(word):
             w = re.sub(r'[^가-힣a-zA-Z0-9%]', '', word)
             return particles.sub('', w)
 
-        # --- [Step 4] 명사 빈도 기반 ---
+        # [Step 4] 명사 빈도 기반
         clean_text = re.sub(r'[^가-힣a-zA-Z0-9\s]', ' ', title + " " + content[:1000])
         raw_words = clean_text.split()
 
         processed_words = []
         for w in raw_words:
             cleaned = clean_word(w)
+            # filter_keywords 함수의 if 조건
             if len(cleaned) > 1 and cleaned not in filters and not cleaned.isdigit():
                 processed_words.append(cleaned)
 
         top_nouns = [k for k, v in Counter(processed_words).most_common(15)]
 
-        # 🔥 --- [Step 5] 핵심 추가: 명사 + 수치 강제 추출 ---
+        # [Step 5] 위에 있는 extract_noun_number_pairs 함수 -> 명사 + 수치 강제 추출
         pair_keywords = extract_noun_number_pairs(title + " " + content[:500])
 
-        # 🔥 --- [Step 6] 최종 병합 ---
+        # [Step 6] 최종 병합
         all_candidates = (
             entities +
-            pair_keywords +     # 🔥 핵심 추가
+            pair_keywords +
             found_values +
             top_nouns
         )
@@ -138,13 +133,14 @@ def extract_keywords(title, content):
             if len(final_keywords) >= 10:
                 break
 
-        # --- [Step 7] fallback ---
+        # [Step 7] fallback
         if not final_keywords:
             title_words = [clean_word(w) for w in title.split() if len(clean_word(w)) > 1]
+            # 앞선 단계에서 키워드 안 뽑혔을 때도 filter_keywords 함수의 if 조건 활용
             final_keywords = [w for w in title_words if w not in filters][:5]
 
         return final_keywords
 
     except Exception as e:
-        logging.error(f"⚠️ 키워드 추출 오류: {e}")
+        print(f"⚠️ 키워드 추출 오류: {e}")
         return []

@@ -1,196 +1,280 @@
+import sys
+import os
+import subprocess
+import asyncio
 from typing import Dict, Any
-
+import traceback
 import sqlalchemy
-from fastapi import FastAPI
+from fastapi import FastAPI, Body, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.requests import Request
-from starlette.responses import RedirectResponse
-from starlette.staticfiles import StaticFiles
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from contextlib import asynccontextmanager
+from sse_starlette.sse import EventSourceResponse
 
+# --- 이 코드를 반드시 추가하세요 ---
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+# -------------------------------
+
+# [내부 모듈 임포트]
+from logger import get_logger
 from dataReqType.regist import RegistModel
-from db import get_db
+from db import get_db, engine
 from hash import hash_password, verify_password
 
-app = FastAPI()
-app.mount("/view", StaticFiles(directory="view"))
-app.add_middleware(SessionMiddleware, secret_key="secret", max_age=600)
+# 파일 연동 (수집 및 분석 모듈)
+import naver
+import yna
+import RSS
+import indicator
+import translator_worker
+import ml
 
-def chk_session(req:Request):
-    return req.session.get('login_id', '')
+# 로거 및 학습 완료 증명서 설정
+logger = get_logger(__name__)
+TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아닌지를 확인하는 체크포인트
 
+# 전역 스케줄러 객체 (함수 외부에서 접근 가능하도록 설정)
+global_scheduler = AsyncIOScheduler()
+
+# ==========================================
+# 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
+# ==========================================
+async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
+    """
+    BERT 모델 학습 여부를 체크하고, 완료되었다면 ml.run_analysis를 주기적으로 실행함
+    """
+    if not os.path.exists(TRAIN_LOCK_FILE):
+        logger.info("📡 [Pipeline] 첫 실행: 기존 CSV 데이터를 이용한 모델 학습을 시작합니다.")
+        try:
+            logger.info("🧠 [Pipeline] BERT 모델 파인튜닝 가동 (subprocess)...")
+            # 가상환경 파이썬으로 train_model.py 실행
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                os.path.join(os.getcwd(), "train_model.py"),  # 절대 경로로 변경
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                logger.info("🎊 [Pipeline] 모델 학습 완료! 분석 모드로 전환합니다.")
+                with open(TRAIN_LOCK_FILE, "w") as f:
+                    f.write(f"Finished at {os.path.getmtime('train_model.py')}")
+
+                # BERT 분석 작업 등록 (10분)
+                if not scheduler.get_job('ml_analysis'):
+                    scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
+            else:
+                logger.error(f"❌ [Pipeline] 학습 도중 에러 발생: {stderr.decode()}")
+        except Exception as e:
+            logger.error(f"❌ [Pipeline] 파이프라인 실행 중 예외 발생: {str(e)}")
+            logger.error(traceback.format_exc())
+    else:
+        # 이미 학습이 완료된 경우 바로 분석 작업 등록
+        if not scheduler.get_job('ml_analysis'):
+            logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
+            scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
+
+
+# ==========================================
+# 1. 서버 생애주기(Lifespan) 설정
+# ==========================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
+    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=10, id='nc')
+    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=10, id='yc')
+    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=10, id='rc')
+    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=2, id='tw')
+    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=5, id='ic')
+    # 학습/분석 파이프라인 관리 (5분마다 체크)
+    global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=5, args=[global_scheduler], id='ml_pipeline')
+
+    # 서버 시작과 동시에 즉시 실행 (백그라운드 태스크)
+    asyncio.create_task(manage_ml_pipeline(global_scheduler))
+
+    global_scheduler.start()
+    logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
+    yield
+    global_scheduler.shutdown()
+
+
+# FastAPI 앱 초기화
+app = FastAPI(lifespan=lifespan)
+# 세션 유지 시간 30분으로 연장
+app.add_middleware(SessionMiddleware, secret_key="secret", max_age=1800)
+app.mount("/view", StaticFiles(directory="view"), name="view")
+
+
+# ==========================================
+# 2. API 엔드포인트
+# ==========================================
 @app.get('/')
 def main():
     return RedirectResponse("/view/main.html")
 
 
-# 회원가입 요청 -> db member_info 와 member_keyword 에 저장
+@app.get('/overlay')
+def overlay(id: str):
+    """아이디 중복 체크"""
+    sql = sqlalchemy.text("SELECT EXISTS (SELECT 1 FROM member_info WHERE id = :id) as is_taken")
+    with get_db() as db:
+        result = db.execute(sql, {"id": id}).mappings().fetchone()
+        return {"msg": bool(result["is_taken"])}
+
+
 @app.post("/regist")
 def regist(info: RegistModel):
-    # print(f'info = {info}')
+    """회원가입 및 키워드 저장"""
     pw = hash_password(info.pw)
-    with get_db() as engine:
-        parent_sql = sqlalchemy.text("""INSERT INTO member_info (id, pw, user_name, phone_number, email)
-                            VALUES (:id, :pw, :user_name, :phone_number, :email)""")
-        parent_res = engine.execute(parent_sql, {
-            "id": info.id,
-            "pw": pw,
-            "user_name": info.user_name,
-            "phone_number": info.phone_number,
-            "email": info.email
-        })
-        parent_suc = parent_res.rowcount
-        member_no = parent_res.lastrowid
+    with get_db() as db:
+        sql = sqlalchemy.text("""INSERT INTO member_info (id, pw, user_name, phone_number, email)
+                                 VALUES (:id, :pw, :user_name, :phone_number, :email)""")
+        res = db.execute(sql, {"id": info.id, "pw": pw, "user_name": info.user_name, "phone_number": info.phone_number,
+                               "email": info.email})
+        member_no = res.lastrowid
 
-        child_sql = sqlalchemy.text("""INSERT INTO member_keyword (member_no, keyword)
-                                    VALUES (:member_no, :keyword)""")
-        child_suc = 0
+        child_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES (:member_no, :keyword)")
         for key in info.keyword:
-            child_res = engine.execute(child_sql, {
-                "member_no": member_no,
-                "keyword": key
-            })
-            child_suc += child_res.rowcount
-        print(f'회원 정보 저장 완료 member_info : {parent_suc} / member_keyword : {child_suc}')
+            db.execute(child_sql, {"member_no": member_no, "keyword": key})
     return {"msg": "regist OK!"}
 
-# id 중복체크 요청
-@app.get('/overlay')
-def overlay(id:str):
-    # print(f'중복체크 요청 id = {id}')
-    success = False
-    sql = sqlalchemy.text("""SELECT EXISTS (SELECT 1 FROM member_info WHERE id = :id) as is_taken""")
-    with get_db() as engine:
-        result = engine.execute(sql, {"id": id}).mappings().fetchone()
-        # print(f'중복된 id 조회 결과 = {result["is_taken"]}')
-        if result["is_taken"] == 1:
-            success = True
-    return {"msg": success}
 
-
-# 로그인 요청
 @app.post('/login')
-def login(info:Dict[str, str], req:Request):
-    success = False
-    # print(f'info = {info}')
-    sql = sqlalchemy.text("""SELECT member_no ,pw FROM member_info WHERE id = :id""")
-    with get_db() as engine:
-        result = engine.execute(sql,{"id":info["id"]}).mappings().fetchone()
-        # print(f'result = {result}')
-        success = verify_password(info["input_pw"], result.pw)
-        # print(f'로그인 결과 = {success}')
-        # 로그인 성공시 id, ip, log_no 세션에 저장
-        try:
-            if success:
-                client_ip = req.client.host
-                # print(f'접속한 ip = {client_ip}')
-                login_sql = sqlalchemy.text("""INSERT INTO member_login_log (member_no, login_ip, status)
-                                        VALUES(:member_no, :login_ip, 1)""")
-                res = engine.execute(login_sql, {"member_no": result.member_no, "login_ip": client_ip})
-                suc = res.rowcount
-                # print(f' 로그인 로그 db 저장 완료 갯수 = {suc}')
-                log_no = res.lastrowid
-                req.session['login_id'] = info["id"]
-                req.session["current_log_no"] = log_no
-                # print(f'현재 저장된 세션 = {req.session}')
-        except Exception as e:
-            print(e)
-    return {"msg": success}
+def login(info: Dict[str, str], req: Request):
+    """로그인 처리 및 로그 기록"""
+    sql = sqlalchemy.text("SELECT member_no, pw, user_name FROM member_info WHERE id = :id")
+    with get_db() as db:
+        result = db.execute(sql, {"id": info["id"]}).mappings().fetchone()
+        if result and verify_password(info["input_pw"], result.pw):
+            client_ip = req.client.host
+            log_sql = sqlalchemy.text(
+                "INSERT INTO member_login_log (member_no, login_ip, status) VALUES(:member_no, :login_ip, 1)")
+            res = db.execute(log_sql, {"member_no": result.member_no, "login_ip": client_ip})
 
-# session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
-@app.get('/session_out')
-def session_out():
-    count = 0
-    with get_db() as engine:
-        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                    WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
-        result = engine.execute(logout_sql)
-        count = result.rowcount
+            # 세션에 중요 정보 기록
+            req.session['login_id'] = info["id"]
+            req.session['user_name'] = result.user_name
+            req.session["current_log_no"] = res.lastrowid
+            return {"msg": True}
+    return {"msg": False}
 
-    print(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
-    return {"msg": "session 만료 계정 로그아웃"}
 
-# 로그아웃 버튼으로 로그아웃 요청 - DB 로그아웃 시간, status 업데이트, session 삭제
 @app.get("/logout")
-def logout(req:Request):
-    log_no = req.session.get("current_log_no", "값이 없음")
-    print(f'log_no = {log_no}')
-    with get_db() as engine:
-        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0 
-                                WHERE log_no = :log_no""")
-        result = engine.execute(logout_sql, {"log_no": log_no})
-        success = result.rowcount
-        print(f'로그아웃 완료 계정 = {success}개')
+def logout(req: Request):
+    """로그아웃 및 로그 엔드타임 갱신"""
+    log_no = req.session.get("current_log_no")
+    if log_no:
+        with get_db() as db:
+            db.execute(
+                sqlalchemy.text("UPDATE member_login_log SET logout_time = NOW(), status = 0 WHERE log_no = :log_no"),
+                {"log_no": log_no})
     req.session.clear()
     return {"msg": "logout OK!"}
 
 
-# 회원 탈퇴 요청
-@app.post("/delete_member")
-def delete_member(info:Dict[str, str]):
-    # print(f'탈퇴 요청 정보 = {info}')
-    success = False
-    delete_cnt = 0
-    # 계정 id로 DB에서 조회한 비밀번호와 사이트에서 입력한 비밀번호 확인 값 비교하여 같으면 계정 삭제
-    sql = sqlalchemy.text("""SELECT pw FROM member_info WHERE id = :id""")
-    with get_db() as engine:
-        result = engine.execute(sql, {"id": info["id"]}).mappings().fetchone()
-        success = verify_password(info["input_pw"], result.pw)
-        if success:
-            sql = sqlalchemy.text("""DELETE FROM member_info WHERE id = :id""")
-            result = engine.execute(sql, {"id": info["id"]})
-            delete_cnt = result.rowcount
-    print(f'삭제 처리 된 계정 갯수 = {delete_cnt}')
+@app.get("/profile")
+def get_profile(id: str):
+    """사용자의 프로필 정보와 관심 키워드를 가져옴"""
+    with get_db() as db:
+        # 1. 기본 정보 조회
+        user_sql = sqlalchemy.text("SELECT user_name, email, phone_number, member_no FROM member_info WHERE id = :id")
+        user = db.execute(user_sql, {"id": id}).mappings().fetchone()
+        if not user:
+            return {"msg": "User not found"}
 
-    return {"msg": success}
+        # 2. 키워드 조회
+        kw_sql = sqlalchemy.text("SELECT keyword FROM member_keyword WHERE member_no = :member_no")
+        keywords = db.execute(kw_sql, {"member_no": user["member_no"]}).scalars().all()
 
-# 개인 profile 페이지 요청
-@app.get('/profile')
-def profile(id:str):
-    # print(f'프로필 페이지 요청 id = {id}')
-    with get_db() as engine:
-        # 1. profile 요청 id 로 member_no, user_name, email, phone_number 조회
-        sql = sqlalchemy.text("""SELECT member_no, user_name, email, phone_number FROM member_info WHERE id = :id""")
-        id_result = engine.execute(sql, {"id": id}).mappings().fetchone()
-        # print(f'member_no = {result}')
-
-        # 2. member_no 로 관심키워드 조회
-        sql = sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no""")
-        no_result = engine.execute(sql, {"member_no": id_result["member_no"]}).mappings().fetchall()
-        # print(f'member_no 에 해당하는 keyword = {no_result}')
-        kewords = []
-        for key in no_result:
-            # print(key)
-            kewords.append(key["keyword"])
-        # print(f'keyword = {kewords}')
-    return {"user_name": id_result.user_name, "email": id_result.email, "phone_number": id_result.phone_number, "keyword": kewords}
+        return {
+            "user_name": user["user_name"],
+            "email": user["email"],
+            "phone_number": user["phone_number"],
+            "keyword": list(keywords)
+        }
 
 
-# 개인정보 수정 요청
 @app.post("/update_profile")
-def update_profile(info:Dict[str, Any]):
-    print(f'수정 요청 = {info}')
-    with get_db() as engine:
-        sql = sqlalchemy.text("""SELECT member_no FROM member_info WHERE id = :id""")
-        id_result = engine.execute(sql, {"id": info["id"]}).mappings().fetchone()
-        print(id_result)
-        # 패스워드 수정 여부에 따른 조건문
-        if "pw" in info and info["pw"]:
-            pw = hash_password(info["pw"])
-            sql = sqlalchemy.text("""UPDATE member_info SET 
-                            email = :email, phone_number = :phone_number, pw = :pw WHERE id = :id""")
-            update_res = engine.execute(sql, {"id": info["id"],"email": info["email"], "phone_number": info["phone_number"], "pw": pw})
-        else:
-            sql = sqlalchemy.text("""UPDATE member_info SET email = :email, phone_number = :phone_number WHERE id = :id""")
-            update_res = engine.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
+def update_profile(info: Dict[str, Any]):
+    """회원 정보 수정 (키워드 포함)"""
+    with get_db() as db:
+        # 1. 회원 번호 확인
+        id_sql = sqlalchemy.text("SELECT member_no FROM member_info WHERE id = :id")
+        member_no = db.execute(id_sql, {"id": info["id"]}).mappings().fetchone()["member_no"]
 
-        # 키워드 수정
-        del_sql = sqlalchemy.text("""DELETE FROM member_keyword WHERE member_no = :member_no""")
-        del_res = engine.execute(del_sql, {"member_no": id_result.member_no})
-        print({f"키워드 삭제 = {del_res.rowcount}"})
+        # 2. 기본 정보 및 비밀번호 수정
+        if info.get("pw"):
+            new_pw = hash_password(info["pw"])
+            sql = sqlalchemy.text(
+                "UPDATE member_info SET email=:email, phone_number=:phone_number, pw=:pw WHERE id=:id")
+            db.execute(sql,
+                       {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"], "pw": new_pw})
+        else:
+            sql = sqlalchemy.text("UPDATE member_info SET email=:email, phone_number=:phone_number WHERE id=:id")
+            db.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
+
+        # 키워드 갱신
+        db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": member_no})
         key_insert = 0
-        for key in info["keyword"]:
-            insert_sql = sqlalchemy.text("""INSERT INTO member_keyword (member_no, keyword) VALUES(:member_no, :keyword)""")
-            insert_res = engine.execute(insert_sql, {"member_no": id_result["member_no"], "keyword": key})
-            key_insert += insert_res.rowcount
-        print(f'키워드 수정 = {key_insert}')
-    return {"msg": "ok"}
+        for key in info.get("keyword", []):
+            ins_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES(:member_no, :keyword)")
+            res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
+            key_insert += res.rowcount
+
+    return {"msg": "ok", "updated_keywords": key_insert}
+
+
+@app.post("/delete_member")
+def delete_member(info: Dict[str, str]):
+    """비밀번호 확인 후 회원 탈퇴 처리 (관련 데이터 삭제)"""
+    user_id = info.get("id")
+    input_pw = info.get("input_pw")
+
+    with get_db() as db:
+        # 1. 사용자 비밀번호 확인
+        sql = sqlalchemy.text("SELECT member_no, pw FROM member_info WHERE id = :id")
+        result = db.execute(sql, {"id": user_id}).mappings().fetchone()
+
+        if result and verify_password(input_pw, result.pw):
+            m_no = result.member_no
+            # 2. 연관 데이터 삭제 (외래키 제약조건 고려 순서)
+            db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :m_no"), {"m_no": m_no})
+            db.execute(sqlalchemy.text("DELETE FROM member_login_log WHERE member_no = :m_no"), {"m_no": m_no})
+            db.execute(sqlalchemy.text("DELETE FROM member_info WHERE member_no = :m_no"), {"m_no": m_no})
+            return {"msg": True}
+    return {"msg": False}
+
+# ==========================================
+# 3. 실시간 알림 API (ml.py 활용)
+# ==========================================
+@app.get("/api/risk-signals")
+async def get_risk_signals():
+    """Elasticsearch 기반 최신 리스크 뉴스 데이터 제공"""
+    try:
+        # ml.py에 만든 get_latest_signals 함수를 호출
+        results = ml.get_latest_signals(size=10)
+        return {"status": "success", "data": results or []}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# 시그널 로그를 브라우저 알림에 뜨게 해주는 함수
+@app.get("/api/stream-risk")
+async def stream_risk():
+    """브라우저에 알림을 쏴주는 SSE 통로"""
+    async def event_generator():
+        while True:
+            # 1분마다 시스템이 살아있음을 알림 (실제 알림 로직은 고도화 가능)
+            yield {"data": "🔔 실시간 분석 엔진 가동 중"}
+            await asyncio.sleep(60)
+
+    return EventSourceResponse(event_generator())
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # reload=True는 개발 중에만 사용하기
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

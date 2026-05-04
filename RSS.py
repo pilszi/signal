@@ -42,7 +42,7 @@ es = Elasticsearch(
     ["http://localhost:9200"],
     request_timeout=30
 )
-INDEX_NAME = "news_en1"
+INDEX_NAME = "news_en"
 scraper = cloudscraper.create_scraper()
 
 RSS_FEEDS = [
@@ -175,9 +175,11 @@ def fetch_and_save(data):
     doc_id = hashlib.sha256(clean_url.encode('utf-8')).hexdigest()
 
     try:
+        # [최적화 1] 네트워크 요청 전 ES 중복 체크로 불필요한 트래픽 차단
         if es.exists(index=INDEX_NAME, id=doc_id):
             return "EXIST"
 
+        # 병렬 처리 시 서버 차단 방지를 위한 미세 대기
         time.sleep(random.uniform(0.1, 0.5))
 
         response = scraper.get(clean_url, timeout=20)
@@ -196,6 +198,7 @@ def fetch_and_save(data):
         if len(content) < 300 or is_bad_content:
             content = fallback_extract(html)
 
+        # [결측치 체크 강화]
         press_name = get_source_name(clean_url)
         main_image = article.top_image
 
@@ -264,6 +267,7 @@ def crawl_job():
     tasks = list(link_data.items())
     stats = {"SUCCESS": 0, "EXIST": 0, "FAILED": 0, "ERROR": 0}
 
+    # [최적화 2] 해외 사이트 지연을 고려하여 max_workers를 10으로 확장
     if tasks:
         with ThreadPoolExecutor(max_workers=10) as executor:
             results = list(executor.map(fetch_and_save, tasks))
@@ -272,6 +276,13 @@ def crawl_job():
 
     logging.info(
         f"📊 수집 리포트 | 신규: {stats['SUCCESS']} | 중복: {stats['EXIST']} | 실패: {stats['FAILED']} | 에러: {stats['ERROR']}")
+
+
+def run_reuters_collect():
+    """main.py의 스케줄러와 연결되는 글로벌 뉴스 수집 메인 함수"""
+    logging.info("📡 [글로벌 뉴스 수집 시작] RSS 피드 탐색 중...")
+
+    return crawl_job()
 
 
 if __name__ == "__main__":

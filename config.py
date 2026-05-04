@@ -3,8 +3,9 @@ from google import genai
 from dotenv import load_dotenv
 
 
-# .env 로드
-load_dotenv()
+# 원래는 load_dotenv() 였지만,
+# 파일 이름이 'env'라면 아래처럼 써야 함(확장자가 없어서)
+load_dotenv(dotenv_path="env")
 
 
 def get_env(key: str, default=None, required=True):
@@ -263,7 +264,7 @@ class Config:
         "체결": 0.6, "투자확대": 0.8, "상생": 0.5
     }
 
-    # 문장 내 기능적 불용어 (기사 문구 노이즈)
+    # 문장 내 기능적 불용어
     STOPWORDS = [
         "기자", "뉴스", "네이버", "이번", "지난", "통해", "대해", "관련", "위해", "코드",
         "사진", "출처", "제공", "속보", "단독", "현지", "종합", "사실", "가장", "매우",
