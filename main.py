@@ -23,6 +23,7 @@ es = Elasticsearch(
     ["http://localhost:9200"],
     request_timeout=30
 )
+es_index = "news_origin_es2"
 
 @app.get('/')
 def main():
@@ -223,9 +224,10 @@ def public_signals():
         },
         "sort": [
             { "published_date": { "order": "desc" } } # 최신 기사가 먼저 나오도록 정렬
-        ]
+        ],
+        "size": 100
     }
-    res = es.search(index= "news_origin_es2", body= body)
+    res = es.search(index= es_index, body= body)
     print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
     # print(res['hits']['hits'])
     public_news = []
@@ -258,3 +260,96 @@ def news_view(info:Dict[str, str]):
             res = engine.execute(sql, {"member_no": res["member_no"], "news_url": info["url"]})
             print(f'기사열람 DB 삽입 성공 {res.rowcount}개')
     return {"msg": "ok"}
+
+
+# 맞춤형뉴스 요청
+@app.get("/custom_news")
+def custom_news(id:str):
+    print(f'맞춤형 요청 id = {id}')
+    with get_db() as engine:
+        sql = sqlalchemy.text("""SELECT member_no FROM member_info WHERE id = :id""")
+        res = engine.execute(sql, {"id": id}).mappings().fetchone()
+        # print(res)
+
+        # 회원별 관심 키워드 조회
+        sql = sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no""")
+        keys_res = engine.execute(sql, {"member_no": res["member_no"]}).mappings().fetchall()
+        # print(keys_res)
+        keyword = []
+        for key in keys_res:
+            # print(keywords['keyword'])
+            keyword.append(key["keyword"])
+            # print(f'관심 키워드 = {key["keyword"]}')
+        print(f'관심 키워드 = {keyword}')
+        # 기존 열람 기사 url 조회
+        sql = sqlalchemy.text("""SELECT news_url FROM news_view WHERE member_no = :member_no""")
+        read_res = engine.execute(sql, {"member_no": res["member_no"]}).mappings().fetchall()
+        read_url = []
+        for url in read_res:
+            # print(url["news_url"])
+            read_url.append(url["news_url"])
+        # 키워드가 들어간 뉴스기사 조회
+        """ test 쿼리 """
+        body = {
+            "query": {
+                "terms": {
+                    "extracted_keyword": keyword    # 리스트 전달
+                }
+            },
+            "sort": [
+                {"published_date": "desc"} # 최신 기사가 먼저 나오도록 정렬
+            ],
+            "size": 100
+        }
+        """ 추후 es_3 에서 데이터 가져올 때 사용할 쿼리"""
+        # body = {
+        #     "query": {
+        #         "bool": {
+        #             "must": [
+        #                 {
+        #                     "terms": {
+        #                         "extracted_keyword": keyword  # 특정 키워드 조건
+        #                     }
+        #                 }
+        #             ],
+        #             "filter": [
+        #                 {
+        #                     "range": {
+        #                         "analyzed_at": {
+        #                             "gte": "now-24h",  # 현재(now) 기준 24시간 전(24h) 이상(gte)
+        #                             "lt": "now"  # 현재 미만(lt)
+        #                         }
+        #                     }
+        #                 }
+        #             ]
+        #         }
+        #     },
+        #     "sort": [
+        #         {"published_date": "desc"}
+        #     ],
+        #     "size": 100
+        # }
+        res = es.search(index= es_index, body= body)
+        print(f"검색 된 기사 갯수 = {res['hits']['total']['value']}")
+        custom_news = []
+        for news in res['hits']['hits']:
+            # print(news["_source"])
+            source_keywords = news["_source"].get("extracted_keyword", [])
+            matched_list = list(set(source_keywords) & set(keyword))
+            display_keyword = ''
+            if matched_list:
+                display_keyword = matched_list[0]
+            else:
+                display_keyword = '리스크'
+            _news = {
+                'title': news["_source"]["title"],
+                'url': news["_source"]["url"],
+                'main_image': news["_source"]["main_image"],
+                'published_date': news["_source"]["published_date"],
+                'press_name': news["_source"]["press_name"],
+                'keyword': display_keyword,
+                'is_read': news["_source"]["url"] in read_url
+            }
+            custom_news.append(_news)
+        print(f'custom_news 갯수 = {len(custom_news)}')
+    return {"keyword": keyword, "total_val": len(custom_news), "news": custom_news}
