@@ -195,7 +195,7 @@
                             <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
                                 <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>                                  
+                                    <span class="header-count" id="notifCountText">3개의 새 알림</span>                                  
                                 </div>
                                  <div id="notifList"></div>
                             </div>
@@ -233,27 +233,36 @@
         </div>
 
         <div id="news-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        </div>
+            </div>
     </div>
 
     <script>
-        let savedUserId = sessionStorage.getItem("savedUserId");
+        // 1. Mock Data (React의 mockCustomNews 대체)
+        const mockCustomNews = [
+            { id: 1, title: "삼성전자, 차세대 HBM 공급 확대", media: "경제일보", imageUrl: "https://picsum.photos/seed/1/400/250", analysisTime: "2026-04-28T14:30:00", url: "#", riskScore: 85, riskLevel: 3, customKeyword: "반도체", isRead: false },
+            { id: 2, title: "연준, 금리 동결 가능성 시사", media: "금융신문", imageUrl: "https://picsum.photos/seed/2/400/250", analysisTime: "2026-04-28T10:00:00", url: "#", riskScore: 45, riskLevel: 1, customKeyword: "금리", isRead: true },
+            { id: 3, title: "SK하이닉스 신규 공장 착공", media: "IT뉴스", imageUrl: "https://picsum.photos/seed/3/400/250", analysisTime: "2026-04-28T16:00:00", url: "#", riskScore: 92, riskLevel: 3, customKeyword: "반도체", isRead: false },
+            { id: 4, title: "환율 변동성 확대에 따른 대응책", media: "데일리경제", imageUrl: "https://picsum.photos/seed/4/400/250", analysisTime: "2026-04-27T18:00:00", url: "#", riskScore: 65, riskLevel: 2, customKeyword: "환율", isRead: false },
+            { id: 5, title: "반도체 수출 지표 역대 최고", media: "산업일보", imageUrl: "https://picsum.photos/seed/5/400/250", analysisTime: "2026-04-28T09:00:00", url: "#", riskScore: 70, riskLevel: 2, customKeyword: "반도체", isRead: true }
+        ];
+
         let selectedKeyword = null;
 
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
             // 태그가 없을 시 함수 종료(에러방지)
-            // console.log(authContainer);
+            console.log(authContainer);
             if (!authContainer){return};
             const userNameSpan = document.getElementById('user_name');
+            const loggedInId = sessionStorage.getItem('savedUserId');
             const userGreeting = document.getElementById('user-greeting');
             // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+            if (loggedInId && loggedInId !== 'guest' && loggedInId !== 'null') {
                 // 1. 인사말 영역 처리
                 if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
+                    userNameSpan.textContent = loggedInId; // 아이디 텍스트 삽입
                     userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
                 }
 
@@ -281,11 +290,10 @@
 
         // 알림 데이터 (로그인 여부에 따라 세팅 가능)
         let myNotifs = [
-            { id: 1, title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
-            { id: 2, title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "30분 전", isRead: false },
-            { id: 3, title: "3단계 위험 시그널", message: "글로벌 반도체 공급망 병목 현상 가속화", time: "1시간 전", isRead: false },
-            { id: 4, title: "2단계 경계 시그널", message: "원-달러 환율 급등에 따른 수출 채산성 악화 우려", time: "2시간 전", isRead: true },
-            { id: 5, title: "3단계 위험 시그널", message: "주요 자동차 부품 원자재(니켈) 가격 변동성 확대", time: "3시간 전", isRead: true }
+            { id: 1, type: "signal", title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
+            { id: 2, type: "keyword", title: "키워드 알림: 반도체", message: "중국 반도체 관련 새로운 뉴스가 등록되었습니다", time: "1시간 전", isRead: false },
+            { id: 3, type: "signal", title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "2시간 전", isRead: false },
+            { id: 4, type: "profile", title: "개인정보 수정 완료", message: "프로필 정보가 성공적으로 업데이트되었습니다", time: "3시간 전", isRead: true }
         ];
 
         const trigger = document.getElementById('notifTrigger');
@@ -311,6 +319,7 @@
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
             // 1. 로그인 여부 확인 (React 코드의 로직 반영)
+            const savedUserId = sessionStorage.getItem("savedUserId");
             
             // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
             if (!savedUserId || savedUserId === "guest") {
@@ -348,7 +357,16 @@
             
             container.innerHTML = myNotifs.map(n => {
                 // 1. 아이콘을 담을 변수 선언
-                let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                let iconTag = '';
+
+                // 2. type에 따른 조건문 처리
+                if (n.type === 'signal') {
+                    iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                } else if (n.type === 'keyword') {
+                    iconTag = '<i data-lucide="tag" style="color: #3b82f6;"></i>';
+                } else {
+                    iconTag = '<i data-lucide="user" style="color: #6b7280;"></i>';
+                }
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
@@ -371,22 +389,22 @@
 
         // 아이콘 매칭 함수
         function getIcon(type) {
+            if (type === 'signal') return 'alert-triangle';
+            if (type === 'keyword') return 'tag';
             return 'user';
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
         function readItem(id, type) {
-            myNotifs = myNotifs.map(n => {
-                if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, isRead: true };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
-                }
-            });
+            myNotifs = myNotifs.map(n => n.id === id ? {...n, isRead: true} : n);
             updateNotifUI();
-            location.href = 'signal_log.html';
+            if (type === 'signal') {
+                location.href = 'signal_log.html';
+            } else if (type === 'keyword') {
+                location.href = 'custom_news.html';
+            } else {
+                location.href = 'profile.html';
+            }
         }
 
         // 아이템 삭제
@@ -402,6 +420,10 @@
             updateNotifUI();
         }
 
+
+        // 2. 키워드 추출 (중복 제거)
+        const keywords = Array.from(new Set(mockCustomNews.map(n => n.customKeyword)));
+
         // 3. 뉴스 카드 컴포넌트 (Template Function)
         function createNewsCard(news) {
             const riskColors = {
@@ -409,138 +431,81 @@
                 2: "bg-yellow-100 text-yellow-700",
                 3: "bg-red-100 text-red-700"
             };
-            let newBadge = '';
-            if (!news.is_read) {
-                newBadge = '<div class="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>';
-            }
 
             return `
-                <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
-                    <a href=${news.url} target="_blank">
-                        <img src="${news.main_image}" alt="news" class="w-full h-48 object-cover">
-                    </a>
+                <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow relative ${news.isRead ? 'opacity-75' : ''}">
+                    <img src="${news.imageUrl}" alt="news" class="w-full h-48 object-cover">
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-2">
                             <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.riskLevel] || 'bg-gray-100'}">
                                 Signal ${news.riskScore}
                             </span>
-                            <span class="text-xs text-blue-600 font-medium">${news.keyword}</span>
+                            <span class="text-xs text-blue-600 font-medium">#${news.customKeyword}</span>
                         </div>
+                        <h3 class="font-bold text-lg mb-2 line-clamp-2">${news.title}</h3>
                         <div class="flex justify-between items-center mt-4">
-                            <span class="text-sm text-gray-500 h-8">${news.press_name}</span>
-                            <span class="text-xs text-gray-400 h-8">${news.published_date.split('T')[0]}</span>
-                            </div>
-                        <a href=${news.url} target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
+                            <span class="text-sm text-gray-500">${news.media}</span>
+                            <span class="text-xs text-gray-400">${news.analysisTime.split('T')[0]}</span>
+                        </div>
                     </div>
-                    ${newBadge}
+                    ${!news.isRead ? '<div class="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>' : ''}
+                    <a href="${news.url}" class="stretched-link" onclick="handleRead(${news.id})"></a>
                 </div>
             `;
         }
 
         // 4. 필터 및 정렬 렌더링 함수
-        async function render() {
+        function render() {
             const filterContainer = document.getElementById('keyword-filters');
             const newsGrid = document.getElementById('news-grid');
             const statsText = document.getElementById('stats-text');
 
-            let {data} = await axios.get("/custom_news?id="+savedUserId);
-            console.log(data);
             // 필터 버튼 생성
             filterContainer.innerHTML = '<i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>';
             
             // '전체' 버튼
             const allBtn = document.createElement('button');
             allBtn.innerText = '전체';
-            // 1. 기본 공통 스타일 설정
-            let classNames = "px-4 py-2 rounded-lg transition-colors";
-
-            // 2. 조건에 따른 스타일 분기 (if문)
-            if (selectedKeyword === null) {
-                // '전체'가 선택된 상태 (강조)
-                classNames += " bg-gray-900 text-white";
-            } else {
-                // 다른 키워드가 선택된 상태 (비활성화 느낌)
-                classNames += " bg-gray-100 text-gray-700 hover:bg-gray-200";
-            }
-
-            allBtn.className = classNames;
-            allBtn.onclick = () => { 
-                selectedKeyword = null; 
-                render(); 
-            };
+            allBtn.className = `px-4 py-2 rounded-lg transition-colors ${selectedKeyword === null ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`;
+            allBtn.onclick = () => { selectedKeyword = null; render(); };
             filterContainer.appendChild(allBtn);
 
             // 개별 키워드 버튼
-            data.keyword.forEach(kw => {
+            keywords.forEach(kw => {
                 const btn = document.createElement('button');
                 btn.innerText = kw;
-                let className = 'px-4 py-2 rounded-lg transition-colors';
-
-                if (selectedKeyword === kw){
-                    className += " bg-blue-500 text-white";
-                }else{
-                    className += " bg-blue-50 text-blue-600 hover:bg-blue-100"
-                }
-                btn.onclick = () => { 
-                    selectedKeyword = kw; 
-                    render(); 
-                };
-                btn.className = className;
+                btn.className = `px-4 py-2 rounded-lg transition-colors ${selectedKeyword === kw ? "bg-blue-500 text-white" : "bg-blue-50 text-blue-600 hover:bg-blue-100"}`;
+                btn.onclick = () => { selectedKeyword = kw; render(); };
                 filterContainer.appendChild(btn);
             });
 
-            
-
             // 필터링 및 정렬 로직
-            const filtered = data.news.filter(n => !selectedKeyword || n.keyword === selectedKeyword);
+            const filtered = mockCustomNews.filter(n => !selectedKeyword || n.customKeyword === selectedKeyword);
             const sorted = [...filtered].sort((a, b) => {
-                // 1. 읽음 상태 기준 정렬 (읽지 않은 기사 !is_read 가 위로 오도록)
-                const readA = !!a.is_read; 
-                const readB = !!b.is_read;
-                if (readA !== readB) {
-                    if (readA) {
-                        return 1;  // a가 읽은 상태면 뒤로 보냄
-                    } else {
-                        return -1; // a가 읽지 않은 상태면 앞으로 보냄
-                    }
-                }
-                // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
-                if (a.riskScore !== b.riskScore) {
-                    return b.riskScore - a.riskScore;
-                }
-                // 3. 날짜 기준 정렬 (최신순)
-                const dateA = new Date(a.published_date);
-                const dateB = new Date(b.published_date);
-                return dateB - dateA;
+                if (a.isRead !== b.isRead) return a.isRead ? 1 : -1;
+                if (a.riskScore !== b.riskScore) return b.riskScore - a.riskScore;
+                return new Date(b.analysisTime) - new Date(a.analysisTime);
             });
 
             // 뉴스 그리드 채우기
             newsGrid.innerHTML = sorted.map(news => createNewsCard(news)).join('');
             
             // 통계 갱신
-            const unreadCount = sorted.filter(n => !n.is_read).length;
+            const unreadCount = sorted.filter(n => !n.isRead).length;
             statsText.innerText = `${sorted.length}개의 뉴스 · 읽지 않은 뉴스 ${unreadCount}개`;
 
             lucide.createIcons();
         }
 
-        // 📡 기사 클릭 로그를 서버로 전송하는 함수
-        async function logNewsClick(articleUrl) {
-            
-            // 로그인하지 않은 비회원은 로그를 쌓지 않거나 예외 처리
-            if (savedUserId){
-                // 2. 서버로 POST 요청 전송
-                await axios.post("/news_view", {
-                    id: savedUserId,
-                    url: articleUrl
-                });
-                console.log("열람 로그 전송 완료");
-                window.open(articleUrl, '_blank');
-                setTimeout(() => {
-                    window.location.reload();
-                }, 100); // 0.1초 뒤 새로고침
-            }
-        }   
+        // 읽음 처리 핸들러 (데모용)
+        window.handleRead = (id) => {
+            const index = mockCustomNews.findIndex(n => n.id === id);
+            if (index !== -1) mockCustomNews[index].isRead = true;
+            render();
+        };
+
+        // 초기 렌더링
+        render();
 
         document.addEventListener('DOMContentLoaded', () => {
             // 현재 브라우저의 파일명만 추출
@@ -565,7 +530,7 @@
             axios.get("/session_out");
             updateNavbar();
             updateNotifUI();
-            render();
+
             if (window.lucide) lucide.createIcons();
         });
 
@@ -582,6 +547,10 @@
             } 
         }      
         
+
+        // window.onload = function(){
+            
+        // };
     </script>
 
     <style>

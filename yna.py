@@ -194,6 +194,17 @@ def get_scheduler():
     return sch
 
 
+def run_yna_collect():
+    """main.py의 스케줄러와 연결되는 연합뉴스 수집 메인 함수"""
+    logging.info("📡 [연합뉴스 통합 수집 시작]")
+
+    # 키워드와 페이지 수를 인자로 넘겨줘야 함
+    keywords = ["유가", "중국", "미국", "전쟁", "중동", "환율", "수입", "수출"]
+    total_pages = 1  # 테스트 시(1페이지), 운영 시(2페이지)
+
+    return article_process(keywords, total_pages)
+
+
 if __name__ == '__main__':
     sch = get_scheduler()
     try:

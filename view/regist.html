@@ -16,19 +16,19 @@
                 <div class="flex justify-between items-center h-20">
                     <div class="flex items-center gap-8">
                         <a href="main.html" class="flex items-center gap-2">
-                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
-                                Signal
-                            </span>
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">Signal</span>
                         </a>
+                        <div class="hidden md:flex gap-1">
+                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
+                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
+                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
+                        </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button class="p-2 rounded-lg hover:bg-gray-100"><i data-lucide="bell" class="w-5 h-5 text-gray-600"></i></button>
-                        <a href="profile.html" class="p-2 rounded-lg hover:bg-gray-100"><i data-lucide="user" class="w-5 h-5 text-gray-600"></i></a>
-                        <div id="auth-button-container">
-                            <a href="login.html" class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 rounded-lg transition-colors">
-                                <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                                <span class="text-sm font-medium">LOG IN</span>
-                            </a>
+                        <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
+                        <a href="profile.html" class="p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="user" class="w-5 h-5"></i></a>
+                        <div id="authContainer">
+                            <!-- 로그인 상태에 따라 버튼이 들어갈 자리 -->
                         </div>
                     </div>
                 </div>
@@ -128,7 +128,7 @@
                                 </div>
 
                                 <!-- 추가 버튼 -->
-                                <button type="button" onclick="addKeywordInput()" 
+                                <button type="button" onclick="addKeywordInput(event)"
                                     class="p-2 border border-blue-500 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors flex items-center justify-center">
                                     <i data-lucide="plus" class="w-4 h-4"></i>
                                 </button>
@@ -154,7 +154,7 @@
             </div>
         </div>
 
-        <!-- 공통 모달 -->
+        <!-- 공통 알림 모달 -->
         <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
             <div class="absolute inset-0 bg-black/50"></div>
             <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative z-10 shadow-xl">
@@ -164,129 +164,75 @@
         </div>
     </body>
     <script>
+        // --- 1. 전역 상태 변수 ---
         let isUsernameChecked = false;
         let isUsernameTaken = null;
-        let generatedCode = "";
         let emailVerified = false;
 
-        // 아이디 중복 확인
+        // --- 2. 기능 함수 정의 ---
+        function updateNavbar() {
+            const authContainer = document.getElementById('authContainer');
+            const userNameSpan = document.getElementById('user_name');
+            const userGreeting = document.getElementById('user-greeting');
+            const loggedInId = sessionStorage.getItem('savedUserId');
+
+            if (loggedInId && loggedInId !== 'guest' && loggedInId !== 'null') {
+                if (userNameSpan) userNameSpan.textContent = loggedInId;
+                if (userGreeting) userGreeting.classList.remove('hidden');
+                if (authContainer) {
+                    authContainer.innerHTML = `<button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">LOG OUT</button>`;
+                }
+            } else {
+                if (authContainer) {
+                    authContainer.innerHTML = `<a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">LOG IN</a>`;
+                }
+            }
+            if (window.lucide) lucide.createIcons();
+        }
+
+        async function handleLogout() {
+            if(confirm("로그아웃 하시겠습니까?")){
+                try {
+                    await axios.get("/logout");
+                    sessionStorage.removeItem('savedUserId');
+                    location.href = "login.html";
+                } catch (e) {
+                    console.error("로그아웃 실패:", e);
+                }
+            }
+        }
+
         async function checkUsername() {
             const id = document.getElementById('id').value.trim().toLowerCase();
             const msgDiv = document.getElementById('id_msg');
-            
-            if (!id) {
-                showModal("아이디를 입력해주세요.");
-                return;
-            }
+            if (!id) { showModal("아이디를 입력해주세요."); return; }
 
-            let {data} = await axios.get('/overlay?id='+id);
-            // console.log(data);
-            // 1. 중복 여부 확인
+            let {data} = await axios.get('/overlay?id=' + id);
             isUsernameTaken = data.msg;
             isUsernameChecked = true;
 
-            // 2. 스타일 초기화
             msgDiv.classList.remove('hidden', 'text-red-600', 'text-green-600');
             msgDiv.classList.add('flex');
-
-            // 3. 조건문에 따른 스타일 및 메시지 처리
             if (isUsernameTaken) {
-                // 중복된 아이디일 경우
                 msgDiv.classList.add('text-red-600');
                 msgDiv.innerHTML = `<i data-lucide="x-circle" class="w-4 h-4"></i> <span>중복된 아이디입니다.</span>`;
             } else {
-                // 사용 가능한 아이디일 경우
                 msgDiv.classList.add('text-green-600');
                 msgDiv.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4"></i> <span>사용가능한 아이디입니다.</span>`;
             }
-
             lucide.createIcons();
-        };
+        }
 
-        // 이메일 인증코드 발송
         function sendVerificationCode() {
             const email = document.getElementById('email').value.trim();
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-            if (!emailRegex.test(email)) {
-                showModal("올바른 이메일 형식을 입력해주세요.");
-                return;
-            }
-
-            generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showModal("올바른 이메일 형식을 입력해주세요."); return; }
             document.getElementById('verification-area').classList.remove('hidden');
-            // showModal(`인증 코드가 발송되었습니다. (데모: ${generatedCode})`);
-            showModal('인증 코드가 발송되었습니다. (데모: 1111)')
-        };
+            showModal('인증 코드가 발송되었습니다. (데모: 1111)');
+        }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            lucide.createIcons();
-
-            // 비밀번호 확인
-            const passwordInput = document.getElementById('password');
-            const confirmInput = document.getElementById('confirmPassword');
-            const messageTag = document.getElementById('password-message');
-
-            function checkPasswordMatch() {
-                const pswd = passwordInput.value;
-                const confirmPswd = confirmInput.value;
-
-                // 하나라도 비어있으면 메시지 숨김
-                if (pswd === "" || confirmPswd === "") {
-                    messageTag.classList.add('hidden');
-                    return;
-                };
-
-                messageTag.classList.remove('hidden');
-
-                if (pswd === confirmPswd) {
-                    // 일치할 때
-                    messageTag.textContent = "비밀번호가 일치합니다.";
-                    messageTag.className = "text-xs mt-1 text-green-600"; // 초록색 멘트
-                    confirmInput.classList.remove('border-red-500');
-                    confirmInput.classList.add('border-green-500');
-                } else {
-                    // 불일치할 때
-                    messageTag.textContent = "비밀번호가 일치하지 않습니다.";
-                    messageTag.className = "text-xs mt-1 text-red-600"; // 빨간색 멘트
-                    confirmInput.classList.remove('border-green-500');
-                    confirmInput.classList.add('border-red-500');
-                }
-            };
-            passwordInput.addEventListener('input', checkPasswordMatch);
-            confirmInput.addEventListener('input', checkPasswordMatch);
-            
-            // 연락처 자동 하이픈 및 숫자 제한
-            const phoneInput = document.getElementById('phone');
-            if (phoneInput) {
-                phoneInput.addEventListener('input', function(e) {
-                    // 1. 숫자만 남기기
-                    let value = this.value.replace(/[^0-9]/g, "");
-                    
-                    // 2. 길이에 따라 하이픈 추가
-                    let result = "";
-                    if (value.length < 4) {
-                        result = value;
-                    } else if (value.length < 7) {
-                        result = value.substr(0, 3) + "-" + value.substr(3);
-                    } else if (value.length < 11) {
-                        result = value.substr(0, 3) + "-" + value.substr(3, 3) + "-" + value.substr(6);
-                    } else {
-                        // 11자리 이상 (010-1234-5678)
-                        result = value.substr(0, 3) + "-" + value.substr(3, 4) + "-" + value.substr(7, 4);
-                    }
-                    
-                    // 3. 최종 값 적용 (최대 13자: 숫자 11자 + 하이픈 2자)
-                    this.value = result.substring(0, 13);
-                });
-            }
-        });
-
-        // 이메일 코드 확인
         function verifyCode() {
             const inputCode = document.getElementById('verificationCode').value;
             if (inputCode === '1111') {
-            // if (inputCode === generatedCode) {
                 emailVerified = true;
                 document.getElementById('verification-area').classList.add('hidden');
                 document.getElementById('send-code-btn').classList.add('hidden');
@@ -294,107 +240,106 @@
                 document.getElementById('email-msg').classList.remove('hidden');
                 document.getElementById('email-msg').classList.add('flex');
                 showModal("이메일 인증이 완료되었습니다.");
-            } else {
-                showModal("인증 코드가 일치하지 않습니다.");
-            }
-        };
+            } else { showModal("인증 코드가 일치하지 않습니다."); }
+        }
 
-        // 키워드 입력창 동적 추가 함수
-        function addKeywordInput() {
+        function addKeywordInput(event) {
             const container = document.getElementById('keyword-container');
-            const addButton = event.currentTarget; // 클릭된 버튼
-
-            // 새로운 입력창 요소 생성
+            const addButton = event.currentTarget;
             const newDiv = document.createElement('div');
             newDiv.className = 'flex gap-1 items-center transition-all duration-300 opacity-0';
             newDiv.style.transform = 'translateY(5px)';
-
             newDiv.innerHTML = `
-                <input type="text" name="keywords[]" 
-                    class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                    placeholder="키워드 입력">
+                <input type="text" name="keywords[]" class="keyword-input w-32 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="키워드 입력">
                 <button type="button" onclick="removeKeywordInput(this)" class="p-1 text-gray-400 hover:text-red-500 transition-colors">
                     <i data-lucide="x" class="w-4 h-4"></i>
-                </button>
-            `;
-
-            // 버튼 바로 앞에 삽입
+                </button>`;
             container.insertBefore(newDiv, addButton);
+            requestAnimationFrame(() => { newDiv.classList.remove('opacity-0'); newDiv.style.transform = 'translateY(0)'; });
+            if (window.lucide) lucide.createIcons(); // 아이콘 재생성
+        }
 
-            // 아이콘 생성 및 애니메이션 효과
-            requestAnimationFrame(() => {
-                newDiv.classList.remove('opacity-0');
-                newDiv.style.transform = 'translateY(0)'; // 다시 원래 높이로 복구!
-            });
-            if (window.lucide) {
-                lucide.createIcons();
-            }
-        };
-
-        // 키워드 입력창 삭제 함수
         function removeKeywordInput(btn) {
             const target = btn.parentElement;
             target.classList.add('opacity-0');
             setTimeout(() => target.remove(), 200);
-        };
-
-        // 폼 최종 제출
-        document.getElementById('signup-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            let param = {}
-            const password = document.getElementById('password').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            const keywords = Array.from(document.querySelectorAll('.keyword-input')).map(input => input.value.trim());
-            // 빈문자열 제외
-            // const keywords = Array.from(document.querySelectorAll('.keyword-input'))
-            //               .map(input => input.value.trim())
-            //               .filter(k => k !== "");
-            // 연락처에서 - 제외한 숫자만 value 저장
-            const phoneInput = document.getElementById('phone');
-            const cleanNumber = phoneInput.value.replace(/-/g, "");
-            phoneInput.value = cleanNumber;
-
-            if (!isUsernameChecked || isUsernameTaken) {
-                showModal("아이디 중복확인을 완료해주세요.");
-                return;
-            }
-            if (password !== confirmPassword) {
-                showModal("비밀번호가 일치하지 않습니다.");
-                return;
-            }
-            if (!emailVerified) {
-                showModal("이메일 인증을 완료해주세요.");
-                return;
-            }
-            if (!keywords.some(k => k)) {
-                showModal("최소 하나 이상의 키워드를 입력해주세요.");
-                return;
-            }
-            
-            param.id = document.getElementById('id').value;
-            param.pw = password;
-            param.email = document.getElementById('email').value;
-            param.phone_number = phoneInput.value;
-            param.keyword = keywords;
-            param.user_name = document.getElementById('name').value;
-            save(param);
-        });
-
-        async function save(param){
-            let {data} = await axios.post('/regist', param);
-            console.log(data);
-            showModal("가입에 성공하였습니다!");
-
-            setTimeout(() => location.href = "login.html", 1500);
         }
 
-        // 모달 제어
+        async function save(param) {
+            try {
+                let { data } = await axios.post('/regist', param);
+                showModal("가입에 성공하였습니다!");
+                setTimeout(() => { location.href = "login.html"; }, 1500);
+            } catch (error) {
+                showModal("회원가입 처리 중 오류가 발생했습니다.");
+            }
+        }
+
         function showModal(msg) {
             document.getElementById('modal-message').innerText = msg;
             document.getElementById('alert-modal').classList.remove('hidden');
         }
+
         function closeModal() {
             document.getElementById('alert-modal').classList.add('hidden');
         }
+
+        // --- 3. 초기화 및 리스너 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            updateNavbar();
+
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('confirmPassword');
+            const messageTag = document.getElementById('password-message');
+
+            function checkPasswordMatch() {
+                const pswd = passwordInput.value;
+                const confirmPswd = confirmInput.value;
+                if (!pswd || !confirmPswd) { messageTag.classList.add('hidden'); return; }
+                messageTag.classList.remove('hidden');
+                if (pswd === confirmPswd) {
+                    messageTag.textContent = "비밀번호가 일치합니다.";
+                    messageTag.className = "text-xs mt-1 text-green-600";
+                    confirmInput.classList.add('border-green-500'); confirmInput.classList.remove('border-red-500');
+                } else {
+                    messageTag.textContent = "비밀번호가 일치하지 않습니다.";
+                    messageTag.className = "text-xs mt-1 text-red-600";
+                    confirmInput.classList.add('border-red-500'); confirmInput.classList.remove('border-green-500');
+                }
+            }
+            passwordInput.addEventListener('input', checkPasswordMatch);
+            confirmInput.addEventListener('input', checkPasswordMatch);
+
+            const phoneInput = document.getElementById('phone');
+            phoneInput.addEventListener('input', function() {
+                let val = this.value.replace(/[^0-9]/g, "");
+                let res = "";
+                if (val.length < 4) res = val;
+                else if (val.length < 7) res = val.substr(0,3) + "-" + val.substr(3);
+                else if (val.length < 11) res = val.substr(0,3) + "-" + val.substr(3,3) + "-" + val.substr(6);
+                else res = val.substr(0,3) + "-" + val.substr(3,4) + "-" + val.substr(7,4);
+                this.value = res.substring(0,13);
+            });
+        });
+
+        document.getElementById('signup-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = document.getElementById('id').value;
+            const pw = document.getElementById('password').value;
+            const confirmPw = document.getElementById('confirmPassword').value;
+            const email = document.getElementById('email').value;
+            const name = document.getElementById('name').value;
+            const phoneInput = document.getElementById('phone');
+            const keywords = Array.from(document.querySelectorAll('.keyword-input')).map(i => i.value.trim()).filter(k => k);
+
+            if (!isUsernameChecked || isUsernameTaken) { showModal("아이디 중복확인을 완료해주세요."); return; }
+            if (pw !== confirmPw) { showModal("비밀번호가 일치하지 않습니다."); return; }
+            if (!emailVerified) { showModal("이메일 인증을 완료해주세요."); return; }
+            if (keywords.length === 0) { showModal("최소 하나 이상의 관심 키워드를 입력해주세요."); return; }
+
+            save({ id, pw, email, phone_number: phoneInput.value.replace(/-/g, ""), keyword: keywords, user_name: name });
+        });
     </script>
+</body>
 </html>

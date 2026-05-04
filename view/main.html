@@ -191,7 +191,7 @@
                             <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
                                 <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>                                  
+                                    <span class="header-count" id="notifCountText">3개의 새 알림</span>                                  
                                 </div>
                                  <div id="notifList"></div>
                             </div>
@@ -343,7 +343,6 @@
     </body>
     <script>
         // 초기 상태 데이터
-        let savedUserId = sessionStorage.getItem('savedUserId');
         let selectedCountry = null;
         let dateFilter = "";
         let calendarMonth = new Date(2026, 3); // 2026년 4월
@@ -362,13 +361,14 @@
             // console.log(authContainer);
             if (!authContainer){return};
             const userNameSpan = document.getElementById('user_name');
+            const loggedInId = sessionStorage.getItem('savedUserId');
             const userGreeting = document.getElementById('user-greeting');
             // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+            if (loggedInId && loggedInId !== 'guest' && loggedInId !== 'null') {
                 // 1. 인사말 영역 처리
                 if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
+                    userNameSpan.textContent = loggedInId; // 아이디 텍스트 삽입
                     userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
                 }
 
@@ -396,11 +396,10 @@
 
         // 알림 데이터 (로그인 여부에 따라 세팅 가능)
         let myNotifs = [
-            { id: 1, title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
-            { id: 2, title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "30분 전", isRead: false },
-            { id: 3, title: "3단계 위험 시그널", message: "글로벌 반도체 공급망 병목 현상 가속화", time: "1시간 전", isRead: false },
-            { id: 4, title: "2단계 경계 시그널", message: "원-달러 환율 급등에 따른 수출 채산성 악화 우려", time: "2시간 전", isRead: true },
-            { id: 5, title: "3단계 위험 시그널", message: "주요 자동차 부품 원자재(니켈) 가격 변동성 확대", time: "3시간 전", isRead: true }
+            { id: 1, type: "signal", title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
+            { id: 2, type: "keyword", title: "키워드 알림: 반도체", message: "중국 반도체 관련 새로운 뉴스가 등록되었습니다", time: "1시간 전", isRead: false },
+            { id: 3, type: "signal", title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "2시간 전", isRead: false },
+            { id: 4, type: "profile", title: "개인정보 수정 완료", message: "프로필 정보가 성공적으로 업데이트되었습니다", time: "3시간 전", isRead: true }
         ];
 
         const trigger = document.getElementById('notifTrigger');
@@ -426,6 +425,7 @@
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
             // 1. 로그인 여부 확인 (React 코드의 로직 반영)
+            const savedUserId = sessionStorage.getItem("savedUserId");
             
             // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
             if (!savedUserId || savedUserId === "guest") {
@@ -463,7 +463,16 @@
             
             container.innerHTML = myNotifs.map(n => {
                 // 1. 아이콘을 담을 변수 선언
-                let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                let iconTag = '';
+
+                // 2. type에 따른 조건문 처리
+                if (n.type === 'signal') {
+                    iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                } else if (n.type === 'keyword') {
+                    iconTag = '<i data-lucide="tag" style="color: #3b82f6;"></i>';
+                } else {
+                    iconTag = '<i data-lucide="user" style="color: #6b7280;"></i>';
+                }
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
@@ -486,22 +495,22 @@
 
         // 아이콘 매칭 함수
         function getIcon(type) {
+            if (type === 'signal') return 'alert-triangle';
+            if (type === 'keyword') return 'tag';
             return 'user';
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
         function readItem(id, type) {
-            myNotifs = myNotifs.map(n => {
-                if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, isRead: true };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
-                }
-            });
+            myNotifs = myNotifs.map(n => n.id === id ? {...n, isRead: true} : n);
             updateNotifUI();
-            location.href = 'signal_log.html';
+            if (type === 'signal') {
+                location.href = 'signal_log.html';
+            } else if (type === 'keyword') {
+                location.href = 'custom_news.html';
+            } else {
+                location.href = 'profile.html';
+            }
         }
 
         // 아이템 삭제
@@ -612,10 +621,11 @@
             lucide.createIcons();
         }
 
-        // 뉴스 렌더링
-        async function renderNews() {
+        // 뉴스 렌더링 (단순화된 예시 카드)
+        function renderNews() {
             const grid = document.getElementById('news-grid');
             const newsTitle = document.getElementById('news-title');
+            // newsTitle.innerText = selectedCountry ? `${countryNames[selectedCountry]} 관련 리스크 뉴스` : "오늘의 뉴스";
             
             if (selectedCountry) {
                 // 사용자가 지도에서 국가를 선택했을 때
@@ -626,44 +636,32 @@
                 newsTitle.innerText = "오늘의 뉴스";
             }           
 
-            let {data} = await axios.get("/public_signals");
-            console.log(data.msg);
+            // 가상의 데이터 4개 출력
+            const newsData = [
+                { title: "중동 지정학적 리스크 확산 우려", media: "글로벌경제", risk: 85, time: "2시간 전" },
+                { title: "미 국채 금리 변동성에 따른 시장 영향", media: "금융타임즈", risk: 42, time: "4시간 전" },
+                { title: "반도체 공급망 재편과 신규 규제", media: "산업뉴스", risk: 68, time: "5시간 전" },
+                { title: "환율 급등에 따른 수출 기업 비상", media: "경제매일", risk: 75, time: "7시간 전" }
+            ];
 
-            grid.innerHTML = data.msg.map(n => `
-                <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group cursor-pointer" onclick="logNewsClick('${n.url}')">
+            grid.innerHTML = newsData.map(n => `
+                <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group cursor-pointer">
                     <div class="h-40 bg-gray-200 relative overflow-hidden">
-                        <a href=${n.url} target="_blank">
-                            <img src="${n.main_image}" alt="news_image" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                        </a>
+                        <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                         <div class="absolute bottom-3 left-3 text-white">
                             <span class="text-xs font-medium px-2 py-1 bg-red-600 rounded mb-2 inline-block">RISK ${n.risk}</span>
                         </div>
                     </div>
                     <div class="p-4">
                         <div class="flex justify-between items-start mb-2">
-                            <span class="text-xs font-bold text-blue-600 uppercase">${n.press_name}</span>
-                            <span class="text-xs text-gray-400">${n.published_date.split('T')[0]}</span>
+                            <span class="text-xs font-bold text-blue-600 uppercase">${n.media}</span>
+                            <span class="text-xs text-gray-400">${n.time}</span>
                         </div>
-                        <a href=${n.url} target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${n.title}</a>
+                        <h4 class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${n.title}</h4>
                     </div>
                 </div>
             `).join('');
         }
-
-        // 📡 기사 클릭 로그를 서버로 전송하는 함수
-        async function logNewsClick(articleUrl) {
-            
-            // 로그인하지 않은 비회원은 로그를 쌓지 않거나 예외 처리
-            if (savedUserId){
-                // 2. 서버로 POST 요청 전송
-                await axios.post("/news_view", {
-                    id: savedUserId,
-                    url: articleUrl
-                });
-                console.log("열람 로그 전송 완료");
-            }
-        }   
 
         // 국가 선택 로직
         function selectCountry(code) {

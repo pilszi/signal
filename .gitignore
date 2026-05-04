@@ -1,0 +1,21 @@
+# 1. 보안 파일
+.env
+.env.local
+
+# 2. 파이참 설정 (팀원들과 공유 금지)
+.idea/
+*.iml
+
+# 3. 파이썬 잡동사니 (컴파일 파일)
+**/__pycache__/
+*.py[cod]
+
+# 4. 모델 학습 결과 및 데이터 (용량 과다 주범)
+results/
+results_2/
+finance_data.csv
+*.lock
+
+# 데이터 및 대용량 모델 폴더 제외
+data/
+fine_tuned_finance_model_2/
