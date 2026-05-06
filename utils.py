@@ -1,13 +1,13 @@
 import re
 import html
-from config import Config  # 클래스를 통째로 가져옵니다.
 from collections import Counter
 import hashlib
+from config import Config
 
 def generate_article_id(url):
     return hashlib.sha256(url.strip().encode('utf-8')).hexdigest()
 
-# 기사를 수집한 후 먼저 normalize, clean_html을 거침
+# 기사 라벨링 1 -[라벨링 전처리]: 기사를 수집한 후 먼저 normalize, clean_html을 거침
 # 1. 텍스트 정규화 (가장 많이 쓰임)
 def normalize(text):
     if not text: return ""
@@ -17,41 +17,59 @@ def normalize(text):
 # 2. 태그 제거
 def clean_html(text):
     if not text: return ""
-    # <b> 태그 등 제거 및 HTML 엔티티 복원
-    clean_text = text.replace('<b>', '').replace('</b>', '')
-    return html.unescape(clean_text)
+    # &quot; -> " 형태로 변환 후 태그 제거
+    decoded_text = html.unescape(text)
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', decoded_text).strip()
 
 
 # 3. 국가 매칭 보조 로직 (G20_COUNTRY_MAP 활용)
 def find_target_country(title, content):
-    # 1순위: 국가명 매칭
+    """
+    국가 추출 로직 (화이트리스트 + 도시 매칭)
+    '정부', '시장' 등 일반 명사 오인을 방지하고, 매핑되지 않으면 'Global'을 반환
+    """
+    # 분석할 전체 텍스트 (제목 + 본문)
+    combined_text = f"{title} {content}"
+
+    # 1순위: 국가명 매칭 (Config에 정의된 G20_COUNTRY_MAP 사용)
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-        if kr_name in title or kr_name in content:
+        if kr_name in combined_text:
             return en_name
 
-    # 2순위: 도시명 매칭
+    # 2순위: 도시명 매칭 (Config에 정의된 CITY_TO_COUNTRY_MAP 사용)
     for city_name, en_name in Config.CITY_TO_COUNTRY_MAP.items():
-        if city_name in title or city_name in content:
+        if city_name in combined_text:
             return en_name
 
-    return "Others"
+    # 3순위: 매핑되지 않은 경우 'Global'로 처리
+    return "Global"
 
 
 # 4. 키워드 필터링 도구 (STOPWORDS/NOISE_WORDS 활용)
+# 지저분한 단어들 제외하고 핵심 단어들만 뽑기
 def filter_keywords(keywords, filter_set):
-    return [
-        k for k in keywords
-        if k not in filter_set and not k.isdigit() and len(str(k)) > 1
+    """
+    불용어 제거 및 가독성 필터링
+    """
+    # 한글 외 영문(quot 등) 제거 및 불용어 제거, 2글자 이상만 허용
+    filtered = [
+        kw for kw in keywords
+        if kw not in Config.STOPWORDS and len(kw) > 1 and not re.match(r'^[a-zA-Z]+$', kw)
     ]
+    # 중복 제거 및 상위 10개 반환
+    return list(dict.fromkeys(filtered))[:10]
+
 
 # 5. 키워드 추출 함수
 # 키워드 명사랑 수치만 정확하게 추출하는 함수
 def extract_noun_number_pairs(text):
     """
-    '명사 + 숫자%' 형태를 강제로 추출
-    예: 수출 17.3%, 생산 10.5%
+    정규표현식 강화: [명사 + 숫자 + 단위] 추출
+    예: "인수 금액 3조", "공급 계약 20억"
     """
-    pattern = r'([가-힣A-Za-z]{2,10})[^0-9]{0,5}(\d+(?:\.\d+)?%)'
+    # 패턴 설명: (2글자 이상 명사) + (공백0개 이상) + (숫자) + (단위)
+    pattern = r'([가-힣]{2,})\s*([\d\.,]+)\s*(조|억|만|%|달러|원|포인트|bp)'
     matches = re.findall(pattern, text)
 
     results = []
@@ -60,9 +78,13 @@ def extract_noun_number_pairs(text):
         number = m[1]
         results.append(f"{noun} {number}")
 
-    return results
+    # "명사 숫자단위" 형태로 결합 (예: "인수 금액 3조")
+    return [f"{m[0]} {m[1]}{m[2]}" for m in matches]
 
 
+
+# 기사 라벨링 2 -[속성 라벨링]: utils.py / extract_noun_number_pairs, filter_keywords
+# 그 다음 ml.py로 넘어감
 # 키워드 추출 함수 - 위에 normalize와 clean_html을 거치면 본문에서 중요한 키워드만 추출
 def extract_keywords(title, content):
     """
@@ -71,6 +93,7 @@ def extract_keywords(title, content):
     try:
         from config import Config
         filters = Config.TOTAL_FILTERS
+        okt = Okt()
 
         # [Step 1] 개체명 추출
         target_entities = [
@@ -144,3 +167,10 @@ def extract_keywords(title, content):
     except Exception as e:
         print(f"⚠️ 키워드 추출 오류: {e}")
         return []
+
+
+# 네이버와 연합뉴스 중복 기사 제거
+def generate_article_id(title):
+    # 제목에서 공백과 특수문자를 제거해서 '순수 텍스트'만 추출
+    clean_title = re.sub(r'\s+', '', title)
+    return hashlib.sha256(clean_title.encode('utf-8')).hexdigest()

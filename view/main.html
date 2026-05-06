@@ -1,206 +1,55 @@
 <!DOCTYPE html>
 <html lang="ko">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Signal - 세계 리스크 히트맵</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://unpkg.com/lucide@latest"></script>
-        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-        <script src="https://unpkg.com/lucide@latest"></script>
-        <style>
-            /* 지도 내 국가 호버 효과 */
-            .country-path:hover {
-                opacity: 0.8;
-                cursor: pointer;
-            }
-            .selected-country {
-                stroke: #2563eb;
-                stroke-width: 2px;
-            }
-            .notif-container {
-                position: relative;
-                display: inline-block;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            }
-
-            .notif-trigger {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 8px;           /* 적절한 클릭 영역 */
-                transition: all 0.2s;   /* 부드러운 hover 효과 */
-                position: relative;
-                border: none;           /* 기본 보더 제거 */
-                background: none;       /* 기본 배경 제거 */
-                cursor: pointer;
-            }
-
-            .notif-badge {
-                position: absolute;
-                top: 2px;
-                right: 2px;
-                background-color: #ef4444; /* red-500 */
-                color: white;
-                font-size: 10px;
-                font-weight: bold;
-                width: 16px;
-                height: 16px;
-                border-radius: 9999px;
-                align-items: center;
-                justify-content: center;
-                border: 2px solid white; /* 버튼 배경과 구분되도록 흰색 테두리 추가 */
-            }
-
-            /* 드롭다운 본체 */
-            .notif-dropdown {
-                position: absolute;
-                right: 0;
-                top: calc(100% + 8px);
-                width: 350px;
-                background-color: white;
-                border: 1px solid #e5e7eb;
-                border-radius: 0.75rem; /* rounded-xl */
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-                z-index: 9999 !important;
-            }
-
-            .hidden { display: none; }
-
-            /* 헤더 */
-            .notif-header {
-                padding: 16px;
-                border-bottom: 1px solid #f3f4f6;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-
-            .header-title { font-size: 16px; font-weight: bold; color: #111827; }
-            .header-count { font-size: 13px; color: #6b7280; }
-
-            /* 알림 목록 */
-            .notif-body {
-                max-height: 400px;
-                overflow-y: auto;
-            }
-
-            .notif-item {
-                padding: 16px;
-                display: flex;
-                gap: 12px;
-                border-bottom: 1px solid #f3f4f6;
-                cursor: pointer;
-                transition: background-color 0.2s;
-                position: relative;
-            }
-
-            .notif-item:hover { background-color: #f9fafb; }
-            .notif-item.unread { background-color: #eff6ff; }
-
-            /* 아이콘 박스 */
-            .icon-wrapper {
-                width: 40px;
-                height: 40px;
-                border-radius: 8px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                flex-shrink: 0;
-            }
-
-            .type-signal { background-color: #fee2e2; color: #dc2626; }
-            .type-keyword { background-color: #dbeafe; color: #2563eb; }
-            .type-profile { background-color: #f3f4f6; color: #4b5563; }
-
-            .content-wrapper { flex: 1; }
-            .item-title { font-size: 14px; font-weight: 600; color: #1f2937; margin-bottom: 2px; }
-            .item-msg { font-size: 13px; color: #4b5563; line-height: 1.4; }
-            .item-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-            .item-time { font-size: 12px; color: #9ca3af; }
-            .unread-dot { width: 6px; height: 6px; background-color: #3b82f6; border-radius: 50%; }
-
-            /* 삭제 버튼 */
-            .delete-btn {
-                background: none;
-                border: none;
-                color: #d1d5db;
-                padding: 4px;
-                cursor: pointer;
-                height: fit-content;
-            }
-
-            .delete-btn:hover { color: #9ca3af; }
-
-            /* 푸터 */
-            .notif-footer {
-                padding: 12px;
-                text-align: center;
-                background-color: #f9fafb;
-            }
-
-            .all-read-btn {
-                background: none;
-                border: none;
-                color: #2563eb;
-                font-size: 13px;
-                font-weight: 500;
-                cursor: pointer;
-            }
-
-            .all-read-btn:hover { text-decoration: underline; }
-        </style>
-    </head>
-    <body class="bg-gray-50 text-gray-900">
-        <!-- Navbar -->
-        <nav class="border-b bg-white sticky top-0 z-50">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center h-20">
-                    <div class="flex items-center gap-8">
-                        <!-- href에서 / 제거 -->
-                        <a href="main.html" class="flex items-center gap-2">
-                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
-                                Signal
-                            </span>
-                        </a>
-                        
-                        <div class="hidden md:flex gap-1">
-                            <!-- 상대 경로 적용 -->
-                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
-                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
-                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
-                        </div>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signal - 세계 리스크 히트맵</title>
+    <!-- 외부 라이브러리 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        .country-path:hover { opacity: 0.8; cursor: pointer; }
+        .notif-container { position: relative; display: inline-block; }
+        .notif-dropdown { position: absolute; right: 0; top: calc(100% + 8px); width: 350px; background: white; border: 1px solid #e5e7eb; border-radius: 0.75rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); z-index: 9999 !important; }
+        .hidden { display: none; }
+        .notif-item { padding: 16px; display: flex; gap: 12px; border-bottom: 1px solid #f3f4f6; cursor: pointer; }
+        .unread-dot { width: 6px; height: 6px; background-color: #3b82f6; border-radius: 50%; }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <!-- 1. Navbar: 인증 및 메뉴 이동 -->
+    <nav class="border-b bg-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <div class="flex items-center gap-8">
+                    <a href="main.html" class="flex items-center gap-2">
+                        <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">Signal</span>
+                    </a>
+                    <div class="hidden md:flex gap-1">
+                        <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-blue-600 bg-blue-50 font-bold">글로벌 현황</a>
+                        <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
+                        <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
                     </div>
-
-                    <div class="flex items-center gap-3">
-                        <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <span id="user-greeting" class="hidden text-sm text-gray-600">
-                            <span id="user_name"></span>님 반갑습니다
-                        </span>
-                        <!-- 알림 컴포넌트 -->
-                        <div class="notif-container" id="notifContainer">
-                            <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
-                            <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
-                                <i data-lucide="bell" class="w-5 h-5"></i>
-                                <!-- 알림 숫자 배지 -->
-                                 <!-- 초기 상태는 숨김 처리 -->
-                                <span class="notif-badge" id="notifBadge" style="display: none;"></span>
-                            </button>
-
-                            <!-- 드롭다운 메뉴 (기본 숨김) -->
-                            <div class="notif-dropdown hidden" id="notifDropdown">
-                                <div class="notif-header">
-                                    <span class="header-count" id="notifCountText">3개의 새 알림</span>                                  
-                                </div>
-                                 <div id="notifList"></div>
-                            </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
+                    <div class="notif-container" id="notifContainer">
+                        <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                            <span class="notif-badge" id="notifBadge" style="display: none;"></span>
+                        </button>
+                        <div class="notif-dropdown hidden" id="notifDropdown">
+                            <div class="notif-header"><span class="header-count" id="notifCountText">0개의 새 알림</span></div>
+                            <div id="notifList" class="max-h-80 overflow-y-auto"></div>
                         </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
                             <i data-lucide="user" class="w-5 h-5"></i>
                         </a>
                         <div id="authContainer">
-                            
+
                         </div>
                     </div>
                 </div>
@@ -209,10 +58,10 @@
 
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div class="grid lg:grid-cols-3 gap-8 relative">
-                
+
                 <!-- 왼쪽/중앙 컬럼 (지도 & 뉴스) -->
                 <div class="lg:col-span-2">
-                    
+
                     <!-- 히트맵 카드 -->
                     <div class="bg-white border rounded-xl p-6 mb-8 shadow-sm">
                         <div class="flex items-center justify-between mb-4">
@@ -236,7 +85,7 @@
                                 <p>전세계 리스크 분포도 (SVG Map)</p>
                                 <p class="text-xs mt-1">지도의 국가를 클릭하여 필터링하세요.</p>
                             </div>
-                            
+
                             <!-- 예시 클릭 버튼 (동작 확인용) -->
                             <div class="absolute bottom-4 left-4 flex gap-2">
                                 <button onclick="selectCountry('USA')" class="px-3 py-1 bg-white border rounded shadow-sm text-xs hover:bg-gray-50">미국(USA) 선택</button>
@@ -253,10 +102,10 @@
                     <!-- 뉴스 검색 및 필터 -->
                     <div class="mb-6 space-y-3">
                         <h2 id="news-title" class="font-bold text-xl mb-4">오늘의 뉴스</h2>
-                        
+
                         <div class="relative">
                             <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"></i>
-                            <input type="text" id="search-input" placeholder="키워드 또는 헤드라인 검색..." 
+                            <input type="text" id="search-input" placeholder="키워드 또는 헤드라인 검색..."
                                 class="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
 
@@ -301,7 +150,7 @@
                 <!-- 오른쪽 사이드바 (고정) -->
                 <div class="lg:col-span-1">
                     <div class="lg:sticky lg:top-24 space-y-6">
-                        
+
                         <!-- 환율 카드 -->
                         <div class="bg-white border rounded-xl p-6 shadow-sm">
                             <h3 class="mb-6 font-bold text-gray-800 flex items-center gap-2">
@@ -348,6 +197,14 @@
         let calendarMonth = new Date(2026, 3); // 2026년 4월
         const countryNames = { "United States": "미국", "India": "인도", "Korea": "대한민국", "China": "중국", "Japan": "일본" };
 
+        const myChart = echarts.init(document.getElementById('map'));
+         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
+        // 1. 데이터 로드: ml.py가 서버(main.py)에 받은 뉴스 데이터와 환율/원자재 데이터
+        async function fetchMainData() {
+            try {
+                // 뉴스 데이터 가져오기
+                const res = await axios.get('/api/risk-signals');
+                allSignals = res.data.data;
         const mockRates = [
             { currency: "USD/KRW", rate: 1384.50, change: 0.45 },
             { currency: "JPY/KRW", rate: 8.92, change: -0.12 },
@@ -365,6 +222,15 @@
             const userGreeting = document.getElementById('user-greeting');
             // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
+                // 2. 시장 지표 데이터 가져오기
+                const indicatorRes = await axios.get('/api/market-indicators');
+                if (indicatorRes.data.status === "success") {
+                    renderExchangeRates(indicatorRes.data.data);
+                }
+
+                if (allSignals && allSignals.length > 0) {
+                    document.getElementById('update-time').innerText = `${new Date(allSignals[0].analyzed_at).toLocaleString()} 갱신`;
+                    renderExchangeRates(allSignals[0].final_total_score.exchange_details);
             if (loggedInId && loggedInId !== 'guest' && loggedInId !== 'null') {
                 // 1. 인사말 영역 처리
                 if (userGreeting && userNameSpan) {
@@ -390,7 +256,7 @@
                     </a>
                 `;
             }
-            
+
             if (window.lucide) lucide.createIcons();
         }
 
@@ -426,7 +292,7 @@
             const countText = document.getElementById('notifCountText');
             // 1. 로그인 여부 확인 (React 코드의 로직 반영)
             const savedUserId = sessionStorage.getItem("savedUserId");
-            
+
             // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
             if (!savedUserId || savedUserId === "guest") {
                 badge.style.display = 'none'; // 배지 숨김
@@ -437,9 +303,9 @@
                     </div>`;
                 return;
             }
-            
+
             const unreads = myNotifs.filter(n => !n.isRead);
-            
+
             // 새 알림이 있을 때만 배지 표시
             if (unreads.length > 0) {
                 badge.innerText = unreads.length;
@@ -460,7 +326,7 @@
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
                 return;
             }
-            
+
             container.innerHTML = myNotifs.map(n => {
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '';
@@ -476,8 +342,8 @@
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
-                    <div class="notif-item ${n.isRead ? '' : 'unread'}" 
-                        onclick="readItem(${n.id}, '${n.type}')" 
+                    <div class="notif-item ${n.isRead ? '' : 'unread'}"
+                        onclick="readItem(${n.id}, '${n.type}')"
                         style="cursor: pointer;">
                         <div class="notif-icon">
                             ${iconTag}
@@ -525,7 +391,7 @@
             myNotifs = myNotifs.map(n => ({...n, isRead: true}));
             updateNotifUI();
         }
-        
+
         var chartDom = document.getElementById('map');
         var myChart = echarts.init(chartDom);
 
@@ -534,7 +400,7 @@
             .then(response => response.json())
             .then(worldJson => {
                 echarts.registerMap('world', worldJson);
-                
+
                 // ES_3에서 가져올 데이터 예시 (국가 이름은 world.json 기준)
                 var data = [
                     {name: 'Korea', value: 1}, // 1단계: 초록
@@ -566,15 +432,39 @@
                         layoutSize: '120%',
                         data: data, // ES_3에서 가져온 1~3단계 데이터
                         roam: true,
-                        
+
                         // [추가] 마우스 오버(Hover) 시 스타일
-                        emphasis: { 
+                        emphasis: {
                             label: { show: true },
-                            itemStyle: { 
+                            itemStyle: {
                                 areaColor: '#eee' // 마우스 올렸을 때는 연한 회색
                             }
                         },
 
+        // 4. 필터 핸들러
+        function selectCountry(name, score) {
+            selectedCountry = name;
+            const infoBox = document.getElementById('selected-country-info');
+            document.getElementById('country-name').innerText = countryNamesKOR[name] || name;
+            document.getElementById('country-score').innerText = `${score}점`;
+            infoBox.classList.remove('hidden');
+            applyFilters();
+        }
+
+        function resetCountryFilter() {
+            selectedCountry = null;
+            document.getElementById('selected-country-info').classList.add('hidden');
+            myChart.dispatchAction({ type: 'unSelect', seriesIndex: 0 });
+            applyFilters();
+        }
+
+        function handleSearch() {
+            searchQuery = document.getElementById('search-input').value;
+            applyFilters();
+        }
+        // 환율/원자재 라벨링 4[위에 함수에서 데이터 가져와서 환율 가격 보여줌]
+        // 5. 환율 및 뉴스 렌더링
+        function renderExchangeRates(rates) {
                         // [핵심 추가] 클릭해서 '선택(Select)'되었을 때 스타일
                         selectedMode: 'single', // 한 번에 하나의 국가만 선택 가능
                         select: {
@@ -600,12 +490,37 @@
         console.log(params.name + "의 뉴스를 불러옵니다.");
         selectCountry(params.name);
         // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
-        
+
         });
 
         // 환율 렌더링
         function renderExchangeRates() {
             const container = document.getElementById('exchange-rates');
+            if (!rates) {
+                container.innerHTML = '<p class="text-xs text-gray-400">데이터를 불러올 수 없습니다.</p>';
+                return;
+            }
+
+            // 1. 환율 데이터 구성 (위안화 추가)
+            const currencies = [
+                { label: '달러/KRW', val: rates.usd, key: 'USD' },
+                { label: '유로/KRW', val: rates.eur, key: 'EUR' },
+                { label: '엔화/KRW', val: rates.jpy, key: 'JPY' },
+                { label: '위안화/KRW', val: rates.cny, key: 'CNY' } // 드디어 추가!
+            ];
+
+            // 2. 원자재 데이터 구성 (main.py에서 보낸 raw_material_score 참고)
+            // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
+
+            container.innerHTML = currencies.map(c => `
+                <div class="flex items-center justify-between border-b border-gray-50 pb-2">
+                    <div>
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">${c.label}</p>
+                        <p class="text-lg font-bold">${c.val ? c.val.toLocaleString() : '---'}원</p>
+                    </div>
+                    <div class="${c.val > 1000 ? 'text-red-500' : 'text-blue-500'}">
+                        <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    </div>
             container.innerHTML = mockRates.map(rate => `
                 <div class="flex items-center justify-between">
                     <div>
@@ -618,15 +533,17 @@
                     </div>
                 </div>
             `).join('');
-            lucide.createIcons();
-        }
 
         // 뉴스 렌더링 (단순화된 예시 카드)
         function renderNews() {
+            lucide.createIcons(); // 아이콘 재생성
+}
+        // 뉴스 그리드 설정
+        function renderNewsGrid() {
             const grid = document.getElementById('news-grid');
             const newsTitle = document.getElementById('news-title');
             // newsTitle.innerText = selectedCountry ? `${countryNames[selectedCountry]} 관련 리스크 뉴스` : "오늘의 뉴스";
-            
+
             if (selectedCountry) {
                 // 사용자가 지도에서 국가를 선택했을 때
                 const countryName = countryNames[selectedCountry];
@@ -634,7 +551,7 @@
             } else {
                 // 페이지 접속시 초기 상태
                 newsTitle.innerText = "오늘의 뉴스";
-            }           
+            }
 
             // 가상의 데이터 4개 출력
             const newsData = [
@@ -653,6 +570,13 @@
                         </div>
                     </div>
                     <div class="p-4">
+                        <div class="flex justify-between items-start mb-3">
+                            <!-- 숫자 대신 서버에서 보낸 risk_status(안정/주의/위기)와 risk_color를 사용합니다 -->
+                            <span class="text-[10px] font-bold px-2 py-1 rounded"
+                                  style="background-color: ${n.risk_color}20; color: ${n.risk_color};">
+                                ${n.risk_status} (RISK ${Math.round((n.final_total_score.total + 1) * 50)})
+                            </span>
+                            <span class="text-[10px] text-gray-400">${n.analyzed_at.split('T')[0]}</span>
                         <div class="flex justify-between items-start mb-2">
                             <span class="text-xs font-bold text-blue-600 uppercase">${n.media}</span>
                             <span class="text-xs text-gray-400">${n.time}</span>
@@ -672,8 +596,8 @@
             const scoreEl = document.getElementById('country-score');
 
             nameEl.innerText = countryNames[code];
-            
-            // test 
+
+            // test
             if(code === 'India'){
                 scoreEl.innerText = '92점 (심각)';
                 scoreEl.className = 'font-bold text-red-600';
@@ -681,7 +605,7 @@
                 scoreEl.innerText = '65점 (주의)';
                 scoreEl.className = 'font-bold text-yellow-600';
             };
-            
+
             infoBox.classList.remove('hidden');
             renderNews();
         }
@@ -696,7 +620,7 @@
             const container = document.getElementById('calendar-days');
             const header = document.getElementById('calendar-header');
             container.innerHTML = '';
-            
+
             const year = calendarMonth.getFullYear();
             const month = calendarMonth.getMonth();
             header.innerText = `${year}년 ${month + 1}월`;
@@ -739,7 +663,7 @@
             navItems.forEach(item => {
                 // href 속성값에서 파일명만 가져와서 비교
                 const itemHref = item.getAttribute('href').split("/").pop();
-                
+
                 if (currentPath === itemHref) {
                     if (item.querySelector('i')) {
                         item.classList.replace('text-gray-600', 'text-blue-600');
@@ -764,7 +688,7 @@
                     console.error("로그아웃 중 오류 발생:", error);
                     alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
                 }
-            } 
+            }
         }
 
         // 바깥 클릭 시 캘린더 닫기

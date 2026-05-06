@@ -1,11 +1,23 @@
 import os
 from google import genai
+from pathlib import Path
 from dotenv import load_dotenv
 
 
-# 원래는 load_dotenv() 였지만,
-# 파일 이름이 'env'라면 아래처럼 써야 함(확장자가 없어서)
-load_dotenv(dotenv_path="env")
+# 현재 config.py 파일의 위치를 기준으로 프로젝트 루트 폴더를 찾기
+base_dir = Path(__file__).resolve().parent
+# 그 폴더 안에 있는 .env 파일을 가리킴
+env_path = base_dir / '.env'
+# [확인용 출력] 터미널에서 이 경로가 맞는지 눈으로 꼭 확인!
+print(f"🔍 .env 경로 확인: {env_path}")
+
+# 파일을 로드
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+    print("✅ .env 파일 로드 성공!")
+else:
+    print("❌ .env 파일을 찾을 수 없습니다. 경로를 다시 확인해주세요.")
+
 
 
 def get_env(key: str, default=None, required=True):
@@ -14,8 +26,6 @@ def get_env(key: str, default=None, required=True):
     if required and value is None:
         raise ValueError(f"❌ 환경변수 누락: {key}")
     return value
-
-
 
 
 
@@ -218,27 +228,54 @@ class Config:
         "시드니": "Australia", "캔버라": "Australia",
         "서울": "Korea"
     }
-    # 수집할 데이터 검색어
+    # 수집할 데이터 검색어(네이버/연합뉴스 용)
     STRATEGIC_KEYWORDS = {
         "에너지/원자재": [
             "국제유가 급등 비상", "천연가스 공급 중단 리스크", "희토류 수출 통제 규제",
-            "핵심광물 공급망 위기", "WTI 브렌트유 리스크"
+            "핵심광물 공급망 위기", "WTI 브렌트유 리스크", "중동 호르무즈 해협 봉쇄",  # 추가
+            "러시아 가스관 가동 중단"  # 추가
         ],
         "핵심산업": [
             "반도체 수출 규제 제재", "이차전지 IRA 보조금 리스크", "자동차 관세 보복 조치",
-            "HBM 반도체 수급 위기", "공급망 내재화 리스크"
+            "HBM 반도체 수급 위기", "공급망 내재화 리스크", "대만 TSMC 가동 중단 위기",  # 추가
+            "AI 반도체 독점 규제"  # 추가
         ],
         "금융/지표": [
             "원달러 환율 폭등 위기", "미국 연준 금리 인상 쇼크", "한국 무역수지 적자 원인",
-            "스태그플레이션 경제 위기", "국가 신용등급 강등 리스크"
+            "스태그플레이션 경제 위기", "국가 신용등급 강등 리스크", "일본 엔저 경제 충격",  # 추가
+            "미국 국채 금리 급등"  # 추가
         ],
         "지정학리스크": [
             "중동 분쟁 확산 경제", "미중 무역 전쟁 보복", "호르무즈 해협 마비",
-            "러시아 우크라이나 전쟁 리스크", "대만 해협 지정학적 위기"
+            "러시아 우크라이나 전쟁 리스크", "대만 해협 지정학적 위기", "남중국해 영유권 분쟁",  # 추가
+            "이스라엘 이란 보복 공습"  # 추가
         ],
         "글로벌정책": [
             "트럼프 보편적 관세 정책", "대중국 반도체 장비 수출제한", "미국 대선 경제 불확실성",
-            "EU 탄소국경조정제도 규제", "보호무역주의 통상 리스크"
+            "EU 탄소국경조정제도 규제", "보호무역주의 통상 리스크", "빅테크 반독점 규제 강화"  # 추가
+        ]
+    }
+    # 수집할 데이터 검색어(RSS 용)
+    STRATEGIC_KEYWORDS_EN = {
+        "Energy": [
+            "Oil price spike", "Natural gas supply disruption", "Rare earth export control",
+            "Critical mineral supply chain", "WTI Brent risk", "Strait of Hormuz blockade"
+        ],
+        "Industry": [
+            "Semiconductor export restriction", "IRA subsidy risk", "Automotive tariff retaliation",
+            "HBM supply shortage", "TSMC production halt", "AI chip monopoly regulation"
+        ],
+        "Finance": [
+            "USD exchange rate surge", "Fed rate hike shock", "Trade deficit",
+            "Stagflation fear", "Credit rating downgrade", "Yen depreciation impact"
+        ],
+        "Geopolitics": [
+            "Middle East conflict escalation", "US-China trade war", "Russia-Ukraine war risk",
+            "Taiwan Strait tension", "South China Sea dispute", "Israel-Iran retaliation"
+        ],
+        "Policy": [
+            "Trump tariff policy", "China chip equipment ban", "US election uncertainty",
+            "EU CBAM regulation", "Protectionism trade risk", "Big Tech antitrust"
         ]
     }
 
@@ -269,6 +306,9 @@ class Config:
         "기자", "뉴스", "네이버", "이번", "지난", "통해", "대해", "관련", "위해", "코드",
         "사진", "출처", "제공", "속보", "단독", "현지", "종합", "사실", "가장", "매우",
         "이후", "현재", "모두", "다시", "결국", "일부", "진행", "확인", "발표", "예정",
+        '밝혔다', '말했다', '전했다', '했다', '입니다', '한다', '있습니다',
+        '따르면', '대해', '위해', '지난', '이번', '경우', '때문', '정도',
+        '뉴스', '기사', '사진', '오전', '오후', '정부', '시장'
 
     ]
 

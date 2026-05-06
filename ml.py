@@ -60,6 +60,7 @@ es = Elasticsearch(
 # ==========================================
 # 2 분석 핵심 로직 (BERT, Z-Score, 제미나이)
 # ==========================================
+# 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
 # 라벨링 학습한 bert가 긍정/부정 판단 - (위에서 tokenizer 가져온 이후 점수 매김)
 def get_bert_score(analysis_text):
     """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출"""
@@ -73,7 +74,7 @@ def get_bert_score(analysis_text):
             padding=True,
             max_length=512
         ).to(device)
-        # 모델이 벡터를 보고 판단
+        # 모델이 문맥(벡터화)을 보고 판단
         with torch.no_grad():
             outputs = bert_model(**inputs)
         # 모델의 예측값을 확률(0~1 사이)로 변환
@@ -87,7 +88,7 @@ def get_bert_score(analysis_text):
         print(f"BERT 오류: {e}")
         return 0.0
 
-
+# 기사 라벨링 3 - [리스크 사전 라벨링]: 가중치 스코어링
 # 사전 기반 위험도 측정 및 문맥 추출 - (utils.py에서 extract_keywords함수를 한 이후 실행)
 def get_weighted_keyword_score(title, content):
     """
@@ -190,6 +191,8 @@ def aggregate_indicator(scores):
 # ==========================================
 # 4. 메인 분석 실행 함수 (run_analysis)
 # ==========================================
+# 기사 라벨링 5 [최종 통합 라벨링(벡엔드 저장)]: 30일치 지표(Z-Score) + BERT 감성 점수=>risk_lv
+# 그 다음은 main.py
 def run_analysis():
     """
     [핵심 분석 엔진]
@@ -261,15 +264,15 @@ def run_analysis():
         # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15)
         total = (final_sent_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
 
-        if total <= -0.1:
+        if total <= 0.1:
             risk_lv = "심각"
-        elif total <= 0.4:
+        elif total <= 0.5:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
 
         # [STEP 4] Gemini 리포트
-        ai_rep = get_ai_prediction_report(risk_lv, data['title'], data.get('keywords', []),
+        ai_rep = get_ai_prediction_report(risk_lv, data['title'], data.get('extracted_keyword', []),
                                           {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
 
         # 한국 표준시(KST)로 정확하게 설정
@@ -280,7 +283,7 @@ def run_analysis():
         labelled_doc = {
             "analyzed_at": now_kst.isoformat(),
             "title": data['title'],
-            "keywords": data.get('keywords', []),
+            "keywords": data.get('extracted_keyword', []),
             "url": data.get('url', ''),
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
@@ -302,7 +305,7 @@ def run_analysis():
                     "ng": float(indicator_stats.get(11, 1.0))
                 }
             },
-            "publish_date": data.get('publish_date'),
+            "published_date": data.get('published_date'),
             "country_name": data.get('country_name', 'Global')
         }
 
