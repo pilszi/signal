@@ -421,10 +421,11 @@
         }
         // 알림 데이터 (로그인 여부에 따라 세팅 가능)
         let myNotifs = [
-            { id: 1, type: "signal", title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
-            { id: 2, type: "keyword", title: "키워드 알림: 반도체", message: "중국 반도체 관련 새로운 뉴스가 등록되었습니다", time: "1시간 전", isRead: false },
-            { id: 3, type: "signal", title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "2시간 전", isRead: false },
-            { id: 4, type: "profile", title: "개인정보 수정 완료", message: "프로필 정보가 성공적으로 업데이트되었습니다", time: "3시간 전", isRead: true }
+            { id: 1, title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
+            { id: 2, title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "30분 전", isRead: false },
+            { id: 3, title: "3단계 위험 시그널", message: "글로벌 반도체 공급망 병목 현상 가속화", time: "1시간 전", isRead: false },
+            { id: 4, title: "2단계 경계 시그널", message: "원-달러 환율 급등에 따른 수출 채산성 악화 우려", time: "2시간 전", isRead: true },
+            { id: 5, title: "3단계 위험 시그널", message: "주요 자동차 부품 원자재(니켈) 가격 변동성 확대", time: "3시간 전", isRead: true }
         ];
 
         const trigger = document.getElementById('notifTrigger');
@@ -518,23 +519,23 @@
         }       
 
         // 아이콘 매칭 함수
-        function getIcon(type) {
-            if (type === 'signal') return 'alert-triangle';
-            if (type === 'keyword') return 'tag';
+        function getIcon() {
             return 'user';
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
-        function readItem(id, type) {
-            myNotifs = myNotifs.map(n => n.id === id ? {...n, isRead: true} : n);
+        function readItem(id) {
+            myNotifs = myNotifs.map(n => {
+                if (n.id === id) {
+                    // ID가 일치하면 읽음 처리된 복사본 반환
+                    return { ...n, isRead: true };
+                } else {
+                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
+                    return n;
+                }
+            });
             updateNotifUI();
-            if (type === 'signal') {
-                location.href = 'signal_log.html';
-            } else if (type === 'keyword') {
-                location.href = 'custom_news.html';
-            } else {
-                location.href = 'profile.html';
-            }
+            location.href = 'signal_log.html';
         }
 
         // 아이템 삭제
