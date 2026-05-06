@@ -35,7 +35,7 @@ def get_cny_rate_with_rotation():
             continue
     return None
 
-
+# 환율/원자재 라벨링 1: 지표 실시간 수치 가져와서 db에 저장 -> 그 다음 main
 def collect_market_data_job():
     """60분 간격으로 실행될 수집 및 DB 저장 작업"""
     print(f"\n🚀 [수집 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

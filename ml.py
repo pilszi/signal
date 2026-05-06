@@ -60,6 +60,7 @@ es = Elasticsearch(
 # ==========================================
 # 2 분석 핵심 로직 (BERT, Z-Score, 제미나이)
 # ==========================================
+# 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
 # 라벨링 학습한 bert가 긍정/부정 판단 - (위에서 tokenizer 가져온 이후 점수 매김)
 def get_bert_score(analysis_text):
     """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출"""
@@ -73,7 +74,7 @@ def get_bert_score(analysis_text):
             padding=True,
             max_length=512
         ).to(device)
-        # 모델이 벡터를 보고 판단
+        # 모델이 문맥(벡터화)을 보고 판단
         with torch.no_grad():
             outputs = bert_model(**inputs)
         # 모델의 예측값을 확률(0~1 사이)로 변환
@@ -87,7 +88,7 @@ def get_bert_score(analysis_text):
         print(f"BERT 오류: {e}")
         return 0.0
 
-
+# 기사 라벨링 3 - [리스크 사전 라벨링]: 가중치 스코어링
 # 사전 기반 위험도 측정 및 문맥 추출 - (utils.py에서 extract_keywords함수를 한 이후 실행)
 def get_weighted_keyword_score(title, content):
     """
@@ -190,6 +191,8 @@ def aggregate_indicator(scores):
 # ==========================================
 # 4. 메인 분석 실행 함수 (run_analysis)
 # ==========================================
+# 기사 라벨링 5 [최종 통합 라벨링(벡엔드 저장)]: 30일치 지표(Z-Score) + BERT 감성 점수=>risk_lv
+# 그 다음은 main.py
 def run_analysis():
     """
     [핵심 분석 엔진]

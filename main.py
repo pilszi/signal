@@ -251,14 +251,32 @@ def delete_member(info: Dict[str, str]):
 # ==========================================
 # 3. 실시간 알림 API (ml.py 활용)
 # ==========================================
+# 기사 라벨링 6 -[최종 리스크 라벨링(브라우저용)]: 키워드 점수 + AI 점수 => 최종 등급(색상 부여)
+# 그 다음으로 아래 get_risk_signals() 함수에서 브라우저로 보내는 작업 실행
+def get_risk_status(score: float) -> str:
+    """숫자로 된 리스크 점수를 설계서 기준 텍스트로 변환"""
+    if score >= 70: return "위기"
+    if score >= 40: return "주의"
+    return "안정"
+
+
 @app.get("/api/risk-signals")
 async def get_risk_signals():
-    """Elasticsearch 기반 최신 리스크 뉴스 데이터 제공"""
+    """Elasticsearch 기반 데이터를 가져오되, 점수를 텍스트로 변환해서 전달"""
     try:
-        # ml.py에 만든 get_latest_signals 함수를 호출
+        # ml.py의 검색 함수(get_latest_signals) 호출
         results = ml.get_latest_signals(size=10)
+
+        # 점수를 텍스트(안정/주의/위기)로 변환하는 매핑 작업
+        for item in results:
+            score = item.get("risk_score", 0)
+            item["risk_status"] = get_risk_status(score)
+            # HTML에서 쓸 색상 클래스도 미리 정의해주면 편함.
+            item["risk_color"] = "red" if item["risk_status"] == "위기" else "orange" if item[
+                                                                                           "risk_status"] == "주의" else "green"
         return {"status": "success", "data": results or []}
     except Exception as e:
+        logger.error(f"Error in get_risk_signals: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 # 시그널 로그를 브라우저 알림에 뜨게 해주는 함수
@@ -272,6 +290,45 @@ async def stream_risk():
             await asyncio.sleep(60)
 
     return EventSourceResponse(event_generator())
+
+
+# ==========================================
+# 4. 시장 지표(환율/원자재) 조회 API
+# ==========================================
+# indicator_map으로 환율/원자재 라벨링 2: 매핑해줌 -> 그 다음 main.html
+@app.get("/api/market-indicators")
+def get_market_indicators():
+    """DB에서 각 지표별 최신 수치를 가져와 브라우저로 전달"""
+    # indicator_no 매핑 (indicator.py와 동일하게 맞춤)
+    indicator_map = {
+        1: "usd", 2: "eur", 3: "jpy", 4: "cny",
+        5: "gold", 6: "silver", 7: "copper",
+        8: "wti", 9: "brent", 10: "gas", 11: "oil_mini"
+    }
+
+    with get_db() as db:
+        # 각 지표(indicator_no)별로 가장 최신(MAX gathering_time) 데이터만 추출하는 SQL
+        sql = sqlalchemy.text("""
+            SELECT t1.indicator_no, t1.price, t1.gathering_time
+            FROM indicator_data t1
+            INNER JOIN (
+                SELECT indicator_no, MAX(gathering_time) as max_time
+                FROM indicator_data
+                GROUP BY indicator_no
+            ) t2 ON t1.indicator_no = t2.indicator_no AND t1.gathering_time = t2.max_time
+        """)
+
+        results = db.execute(sql).mappings().all()
+
+        # 프론트엔드가 쓰기 편하게 JSON 형태로 변환
+        # 예: {"usd": 1350.5, "cny": 192.4, ...}
+        formatted_data = {
+            indicator_map.get(row["indicator_no"], f"unknown_{row['indicator_no']}"): row["price"]
+            for row in results
+        }
+
+        return {"status": "success", "data": formatted_data}
+
 
 
 if __name__ == "__main__":

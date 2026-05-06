@@ -7,7 +7,7 @@ import hashlib
 def generate_article_id(url):
     return hashlib.sha256(url.strip().encode('utf-8')).hexdigest()
 
-# 기사를 수집한 후 먼저 normalize, clean_html을 거침
+# 기사 라벨링 1 -[라벨링 전처리]: 기사를 수집한 후 먼저 normalize, clean_html을 거침
 # 1. 텍스트 정규화 (가장 많이 쓰임)
 def normalize(text):
     if not text: return ""
@@ -38,6 +38,7 @@ def find_target_country(title, content):
 
 
 # 4. 키워드 필터링 도구 (STOPWORDS/NOISE_WORDS 활용)
+# 지저분한 단어들 제외하고 핵심 단어들만 뽑기
 def filter_keywords(keywords, filter_set):
     return [
         k for k in keywords
@@ -62,7 +63,8 @@ def extract_noun_number_pairs(text):
 
     return results
 
-
+# 기사 라벨링 2 -[속성 라벨링]: utils.py / extract_noun_number_pairs, filter_keywords
+# 그 다음 ml.py로 넘어감
 # 키워드 추출 함수 - 위에 normalize와 clean_html을 거치면 본문에서 중요한 키워드만 추출
 def extract_keywords(title, content):
     """

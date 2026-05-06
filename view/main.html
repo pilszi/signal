@@ -143,12 +143,19 @@
         const countryNamesKOR = { "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국", "Iran": "이란", "Russia": "러시아", "India": "인도" };
 
         const myChart = echarts.init(document.getElementById('map'));
-
-        // 1. 데이터 로드: ml.py가 Elasticsearch에 쌓은 데이터를 가져옴
+         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
+        // 1. 데이터 로드: ml.py가 서버(main.py)에 받은 뉴스 데이터와 환율/원자재 데이터
         async function fetchMainData() {
             try {
+                // 뉴스 데이터 가져오기
                 const res = await axios.get('/api/risk-signals');
                 allSignals = res.data.data;
+
+                // 2. 시장 지표 데이터 가져오기
+                const indicatorRes = await axios.get('/api/market-indicators');
+                if (indicatorRes.data.status === "success") {
+                    renderExchangeRates(indicatorRes.data.data);
+                }
 
                 if (allSignals && allSignals.length > 0) {
                     document.getElementById('update-time').innerText = `${new Date(allSignals[0].analyzed_at).toLocaleString()} 갱신`;
@@ -237,21 +244,41 @@
             searchQuery = document.getElementById('search-input').value;
             applyFilters();
         }
-
+        // 환율/원자재 라벨링 4[위에 함수에서 데이터 가져와서 환율 가격 보여줌]
         // 5. 환율 및 뉴스 렌더링
         function renderExchangeRates(rates) {
             const container = document.getElementById('exchange-rates');
-            if (!rates) return;
-            const currencies = [{k:'USD', v:rates.usd}, {k:'EUR', v:rates.eur}, {k:'JPY', v:rates.jpy}];
+            if (!rates) {
+                container.innerHTML = '<p class="text-xs text-gray-400">데이터를 불러올 수 없습니다.</p>';
+                return;
+            }
+
+            // 1. 환율 데이터 구성 (위안화 추가)
+            const currencies = [
+                { label: '달러/KRW', val: rates.usd, key: 'USD' },
+                { label: '유로/KRW', val: rates.eur, key: 'EUR' },
+                { label: '엔화/KRW', val: rates.jpy, key: 'JPY' },
+                { label: '위안화/KRW', val: rates.cny, key: 'CNY' } // 드디어 추가!
+            ];
+
+            // 2. 원자재 데이터 구성 (main.py에서 보낸 raw_material_score 참고)
+            // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
+
             container.innerHTML = currencies.map(c => `
-                <div class="flex items-center justify-between">
-                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.k}/KRW</p><p class="text-lg font-bold">${c.v.toLocaleString()}원</p></div>
-                    <div class="text-blue-500"><i data-lucide="trending-up" class="w-4 h-4"></i></div>
+                <div class="flex items-center justify-between border-b border-gray-50 pb-2">
+                    <div>
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">${c.label}</p>
+                        <p class="text-lg font-bold">${c.val ? c.val.toLocaleString() : '---'}원</p>
+                    </div>
+                    <div class="${c.val > 1000 ? 'text-red-500' : 'text-blue-500'}">
+                        <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    </div>
                 </div>
             `).join('');
-            lucide.createIcons();
-        }
 
+            lucide.createIcons(); // 아이콘 재생성
+}
+        // 뉴스 그리드 설정
         function renderNewsGrid() {
             const grid = document.getElementById('news-grid');
             const title = document.getElementById('news-title');
@@ -266,7 +293,11 @@
                 <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all group cursor-pointer" onclick="location.href='custom_news.html'">
                     <div class="p-4">
                         <div class="flex justify-between items-start mb-3">
-                            <span class="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1 rounded">RISK ${Math.round((n.final_total_score.total + 1) * 50)}</span>
+                            <!-- 숫자 대신 서버에서 보낸 risk_status(안정/주의/위기)와 risk_color를 사용합니다 -->
+                            <span class="text-[10px] font-bold px-2 py-1 rounded"
+                                  style="background-color: ${n.risk_color}20; color: ${n.risk_color};">
+                                ${n.risk_status} (RISK ${Math.round((n.final_total_score.total + 1) * 50)})
+                            </span>
                             <span class="text-[10px] text-gray-400">${n.analyzed_at.split('T')[0]}</span>
                         </div>
                         <h4 class="font-bold text-sm leading-snug group-hover:text-blue-600 transition-colors line-clamp-2">${n.title}</h4>
