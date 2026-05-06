@@ -5,6 +5,7 @@ import asyncio
 from typing import Dict, Any
 import traceback
 import sqlalchemy
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Body, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -82,6 +83,33 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
 # ==========================================
 # 1. 서버 생애주기(Lifespan) 설정
 # ==========================================
+# 서버 시작 시 순차적으로 실행될 초기화 함수 정의
+executor = ThreadPoolExecutor(max_workers=5)
+async def run_initial_batch(scheduler):
+    loop = asyncio.get_event_loop()
+    try:
+        logger.info("🎬 [초기화 시퀀스] 시작")
+        # 동기 수집 함수들을 스레드 풀에서 실행
+        await loop.run_in_executor(executor, naver.run_naver_collect)
+        await loop.run_in_executor(executor, yna.run_yna_collect)
+        await loop.run_in_executor(executor, RSS.run_reuters_collect)
+
+        # 지표 수집 (동기 함수라면 executor 사용)
+        await loop.run_in_executor(executor, indicator.collect_market_data_job)
+
+        logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행 (news_origin 생성)")
+        # 수집된 데이터를 번역해서 news_origin으로 넘김
+        await loop.run_in_executor(executor, translator_worker.process_translation)
+
+        logger.info("🎬 [초기화 시퀀스] 3단계: AI 분석 파이프라인 가동")
+        await manage_ml_pipeline(scheduler)
+
+        logger.info("✅ [초기화 시퀀스] 모든 초기 배치 작업 완료")
+    except Exception as e:
+        logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
+
+
+# 실행시킬 스케줄러 함수
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
@@ -89,12 +117,12 @@ async def lifespan(app: FastAPI):
     global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=10, id='yc')
     global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=10, id='rc')
     global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=2, id='tw')
-    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=5, id='ic')
+    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
     # 학습/분석 파이프라인 관리 (5분마다 체크)
     global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=5, args=[global_scheduler], id='ml_pipeline')
 
     # 서버 시작과 동시에 즉시 실행 (백그라운드 태스크)
-    asyncio.create_task(manage_ml_pipeline(global_scheduler))
+    asyncio.create_task(run_initial_batch(global_scheduler))
 
     global_scheduler.start()
     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")

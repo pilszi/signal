@@ -11,6 +11,7 @@ import cloudscraper
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from dateutil import parser as date_parser
+from config import Config as AppConfig
 
 # --- 0. Python 3.14+ 호환성 패치 ---
 try:
@@ -26,7 +27,7 @@ except ImportError:
     sys.modules["six"] = six
     sys.modules["six.moves"] = six.moves
 
-from newspaper import Article, Config
+from newspaper import Article, Config as NewsConfig
 from elasticsearch import Elasticsearch
 from apscheduler.schedulers.blocking import BlockingScheduler
 from bs4 import BeautifulSoup
@@ -60,15 +61,6 @@ RSS_FEEDS = [
     "https://www.ft.com/?format=rss"
 ]
 
-TARGET_KEYWORDS = [
-    'korea', 'china', 'taiwan', 'russia', 'ukraine', 'middle east', 'israel', 'iran',
-    'sanction', 'conflict', 'geopolitical', 'military', 'security', 'war',
-    'economy', 'fed', 'fomc', 'interest rate', 'inflation', 'cpi', 'recession',
-    'semiconductor', 'nvidia', 'supply chain', 'tariff', 'trade war', 'price', 'stock', 'bank', 'rate',
-    'breaking', 'urgent', 'alert', 'exclusive',
-    'oil', 'gas', 'energy', 'battery', 'ev', 'lithium', 'crude', 'biden', 'trump',
-    'market', 'crash', 'yield', 'bond'
-]
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -79,7 +71,7 @@ USER_AGENTS = [
 
 
 def get_config():
-    cfg = Config()
+    cfg = NewsConfig()
     cfg.browser_user_agent = random.choice(USER_AGENTS)
     cfg.request_timeout = 20
     cfg.memoize_articles = False
@@ -245,7 +237,7 @@ def fetch_and_save(data):
 
 # --- 4. 실행부 ---
 
-def crawl_job():
+def crawl_job(keywords):
     logging.info(f"🚀 Signal 글로벌 뉴스 수집 가동: {len(RSS_FEEDS)}개 피드 탐색")
     link_data = {}
 
@@ -254,7 +246,8 @@ def crawl_job():
             feed = feedparser.parse(feed_url)
             for entry in feed.entries:
                 search_text = (entry.title + " " + entry.get('summary', '')).lower()
-                if any(kw in search_text for kw in TARGET_KEYWORDS):
+                # [중요] 전역 변수 TARGET_KEYWORDS 대신, 인자로 받은 keywords를 사용합니다.
+                if any(kw in search_text for kw in keywords):
                     raw_url = entry.link
                     norm_url = raw_url.split('?')[0].split('#')[0].strip().rstrip('/')
 
@@ -282,14 +275,25 @@ def run_reuters_collect():
     """main.py의 스케줄러와 연결되는 글로벌 뉴스 수집 메인 함수"""
     logging.info("📡 [글로벌 뉴스 수집 시작] RSS 피드 탐색 중...")
 
-    return crawl_job()
+    # 영문 키워드 전체를 하나의 리스트로 통합 (필터링용)
+    TARGET_KEYWORDS = [kw.lower() for sublist in AppConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
+
+    # 이 키워드들을 가지고 수집 로직 실행
+    return crawl_job(TARGET_KEYWORDS)
 
 
 if __name__ == "__main__":
     scheduler = BlockingScheduler()
     random_second = random.randint(0, 59)
-    scheduler.add_job(crawl_job, "cron", minute="10,25,40,55", second=random_second,
-                      next_run_time=datetime.datetime.now())
+
+    # 혼자 실행할 때도 키워드가 필요하므로 args를 추가해줘야 에러가 x
+    # Config에서 키워드를 미리 뽑아서 전달
+    initial_keywords = [kw.lower() for sublist in NewsConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
+
+    scheduler.add_job(
+        crawl_job, "cron", minute="0,10,20,30,40,50", second=random_second,
+        args=[initial_keywords],
+        next_run_time=datetime.datetime.now())
     try:
         logging.info("⏰ Signal 뉴스 엔진 가동 (고속 병렬 수집 모드)")
         scheduler.start()

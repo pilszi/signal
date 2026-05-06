@@ -58,42 +58,6 @@ def get_detailed_news(url):
         return None
 
 
-def process_single_article(item):
-    """개별 기사를 상세 수집하고 ES에 저장하는 단위 작업 (스레드에서 실행)"""
-    try:
-        # 1. 상세 수집 실행
-        details = get_detailed_news(item['link'])
-        if not details:
-            return False
-
-        # 2. 날짜 파싱
-        try:
-            dt_obj = date_parser.parse(item['pubDate'])
-            final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
-        except:
-            return False
-
-        # 3. 국가 및 키워드 분석
-        target_country = find_target_country(item['title'], details['content'])
-
-        doc = {
-            "title": html.unescape(item['title'].replace('<b>', '').replace('</b>', '')),
-            "content": html.unescape(details['content']),
-            "press_name": details['press_name'],
-            "published_date": final_pub_date,
-            "main_image": details['main_image'],
-            "url": item['link'],
-            "extracted_keyword": extract_keywords(item['title'], details['content']),
-            "country_name": target_country,
-            "is_processed": False
-        }
-
-        # 4. 개별 저장
-        doc_id = generate_article_id(item['link'])
-        es.index(index=INDEX_NAME, id=doc_id, document=doc)
-        return True
-    except:
-        return False
 
 
 def bulk_search_naver_news():
@@ -116,7 +80,11 @@ def bulk_search_naver_news():
                     if not item.get('pubDate') or not item.get('title') or not item.get('link'):
                         continue
 
-                    doc_id = generate_article_id(item['link'])
+                    # 제목에서 HTML 태그 제거 및 특수문자 변환
+                    raw_title = item['title'].replace('<b>', '').replace('</b>', '')
+                    clean_title = html.unescape(raw_title)
+
+                    doc_id = generate_article_id(clean_title)
 
                     # [최적화 1] 상세 페이지 접속 전 ES 중복 체크
                     if es.exists(index=INDEX_NAME, id=doc_id):
@@ -140,6 +108,49 @@ def bulk_search_naver_news():
     logging.info(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
     return {"status": "success", "newly_saved": newly_saved}
 
+
+
+def process_single_article(item):
+    """개별 기사를 상세 수집하고 ES에 저장하는 단위 작업 (스레드에서 실행)"""
+    try:
+        # 1. 상세 수집 실행
+        details = get_detailed_news(item['link'])
+        if not details:
+            return False
+
+        # 2. 날짜 파싱
+        try:
+            dt_obj = date_parser.parse(item['pubDate'])
+            final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
+        except:
+            return False
+
+        # 3. 국가 및 키워드 분석
+        target_country = find_target_country(item['title'], details['content'])
+
+        # 4. 제목 정제 -> 이걸로 연합뉴스와 중복 제거할 예정
+        raw_title = item['title'].replace('<b>', '').replace('</b>', '')
+        clean_title = html.unescape(raw_title)
+
+        doc = {
+            "title": clean_title,
+            "content": html.unescape(details['content']),
+            "press_name": details['press_name'],
+            "published_date": final_pub_date,
+            "main_image": details['main_image'],
+            "url": item['link'],
+            "extracted_keyword": extract_keywords(clean_title, details['content']),
+            "country_name": target_country,
+            "is_processed": False
+        }
+
+        # 4. 개별 저장
+        doc_id = generate_article_id(clean_title)
+        es.index(index=INDEX_NAME, id=doc_id, document=doc)
+        return True
+    except Exception as e:
+        logging.error(f"Error in process_single_article: {e}")
+        return False
 
 # --- 이후 스케줄러 설정 및 시스템 가동 코드는 이전과 동일하게 유지 ---
 scheduler = BackgroundScheduler(timezone="Asia/Seoul")

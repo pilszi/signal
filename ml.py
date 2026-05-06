@@ -264,15 +264,15 @@ def run_analysis():
         # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15)
         total = (final_sent_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
 
-        if total <= -0.1:
+        if total <= 0.1:
             risk_lv = "심각"
-        elif total <= 0.4:
+        elif total <= 0.5:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
 
         # [STEP 4] Gemini 리포트
-        ai_rep = get_ai_prediction_report(risk_lv, data['title'], data.get('keywords', []),
+        ai_rep = get_ai_prediction_report(risk_lv, data['title'], data.get('extracted_keyword', []),
                                           {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
 
         # 한국 표준시(KST)로 정확하게 설정
@@ -283,7 +283,7 @@ def run_analysis():
         labelled_doc = {
             "analyzed_at": now_kst.isoformat(),
             "title": data['title'],
-            "keywords": data.get('keywords', []),
+            "keywords": data.get('extracted_keyword', []),
             "url": data.get('url', ''),
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
@@ -305,7 +305,7 @@ def run_analysis():
                     "ng": float(indicator_stats.get(11, 1.0))
                 }
             },
-            "publish_date": data.get('publish_date'),
+            "published_date": data.get('published_date'),
             "country_name": data.get('country_name', 'Global')
         }
 

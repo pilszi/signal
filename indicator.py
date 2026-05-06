@@ -90,7 +90,7 @@ def collect_market_data_job():
 
         # yield가 끝나면 get_db 내부에서 자동으로 commit()이 호출됩니다.
 
-    print(f"💤 수집 완료. 60분 대기...\n")
+    print(f"📊 [INDICATOR] {datetime.now().strftime('%H:%M:%S')} 기준 11종 지표 업데이트 완료")
 
 # --- 스케줄러 설정 ---
 
