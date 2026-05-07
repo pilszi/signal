@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 
 
+
 # 모델 학습
 # 1. 환경 설정 및 경로
 model_name = "klue/bert-base"
@@ -135,6 +136,7 @@ training_args = TrainingArguments(
     eval_strategy="epoch",     # 에포크마다 검증 수행
     save_strategy="epoch",
     load_best_model_at_end=True,     # 가장 성적이 좋았던 모델을 최종 선택
+    metric_for_best_model="accuracy", # 정확도가 가장 높은 모델 저장
 )
 
 # 5. 트레이너 가동 (진짜 학습 시작)
@@ -152,5 +154,6 @@ trainer.train()
 # 6. 최종 모델 저장
 model.save_pretrained(save_path)
 tokenizer.save_pretrained(save_path)
+
 print(f"\n✅ 모든 과정이 완료되었습니다!")
 print(f"📦 학습된 모델이 '{save_path}' 폴더에 저장되었습니다.")

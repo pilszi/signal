@@ -3,9 +3,10 @@ import html
 from collections import Counter
 import hashlib
 from config import Config
-from konlpy.tag import Okt
-from config import Config
 
+from konlpy.tag import Okt
+
+okt = Okt()
 
 
 # 기사 고유 ID 생성 (제목 기반 중복 제거)
