@@ -708,7 +708,7 @@
             }
 
             let {data} = await axios.get("/public_signals");
-            console.log(data.msg);
+            console.log(data.msg);  
 
             //  (RISK ${Math.round((n.final_total_score.total + 1) * 50)})
             grid.innerHTML = data.msg.map(n => `
