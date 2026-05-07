@@ -239,7 +239,8 @@
     <script>
         let savedUserId = sessionStorage.getItem("savedUserId");
         let selectedKeyword = null;
-
+        let noti = [];
+        
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
@@ -279,14 +280,6 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 알림 데이터 (로그인 여부에 따라 세팅 가능)
-        let myNotifs = [
-            { id: 1, title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
-            { id: 2, title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "30분 전", isRead: false },
-            { id: 3, title: "3단계 위험 시그널", message: "글로벌 반도체 공급망 병목 현상 가속화", time: "1시간 전", isRead: false },
-            { id: 4, title: "2단계 경계 시그널", message: "원-달러 환율 급등에 따른 수출 채산성 악화 우려", time: "2시간 전", isRead: true },
-            { id: 5, title: "3단계 위험 시그널", message: "주요 자동차 부품 원자재(니켈) 가격 변동성 확대", time: "3시간 전", isRead: true }
-        ];
 
         const trigger = document.getElementById('notifTrigger');
         const dropdown = document.getElementById('notifDropdown');
@@ -306,12 +299,15 @@
         });
 
         // 알림 렌더링 함수
-        function updateNotifUI() {
+        async function updateNotifUI() {
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
             // 1. 로그인 여부 확인 (React 코드의 로직 반영)
             
+            const {data} = await axios.get("/noti/signal?id="+savedUserId);
+            console.log(data);
+            noti = data.noti;
             // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
             if (!savedUserId || savedUserId === "guest") {
                 badge.style.display = 'none'; // 배지 숨김
@@ -323,7 +319,7 @@
                 return;
             }
             
-            const unreads = myNotifs.filter(n => !n.isRead);
+            const unreads = noti.filter(n => !n.is_read);
             
             // 새 알림이 있을 때만 배지 표시
             if (unreads.length > 0) {
@@ -337,35 +333,42 @@
             countText.innerText = `${unreads.length}개의 새 알림`;
 
             // 알림 리스트 렌더링 로직 (기존과 동일)
-            renderList(list);
+            renderList(list, noti);
         }
 
-        function renderList(container) {
-            if (myNotifs.length === 0) {
+        function renderList(container, noti) {
+            if (noti.length === 0) {
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
                 return;
             }
             
-            container.innerHTML = myNotifs.map(n => {
+            container.innerHTML = noti.map(n => {
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
-                    <div class="notif-item ${n.isRead ? '' : 'unread'}" 
-                        onclick="readItem(${n.id}, '${n.type}')" 
+                    <div class="notif-item ${n.is_read ? '' : 'unread'}" 
+                        onclick="readItem(${n.signal_no})" 
                         style="cursor: pointer;">
                         <div class="notif-icon">
                             ${iconTag}
                         </div>
                         <div class="notif-content">
-                            <div class="notif-title">${n.title}</div>
-                            <div class="notif-message">${n.message}</div>
-                            <div class="notif-time">${n.time} ${n.isRead ? '' : '<span class="unread-dot"></span>'}</div>
+                            <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
+                            <div class="notif-message">${n.prediction}</div>
+                            <div class="notif-time">${n.signal_time} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
+                        </div>
+                        <div class="notif-delete" 
+                            onclick="deleteItem(event, ${n.signal_no})" 
+                            style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
+                            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
                         </div>
                     </div>
-                `;
-            }).join('');
+                    `;               
+            }).join('')+`<div class="hover:cursor-pointer" style="padding: 5px; text-align: center; color: #9ca3af;" onclick=allRead()>
+                            모두읽음
+                        </div>`;
             lucide.createIcons();
         }
 
@@ -375,30 +378,41 @@
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
-        function readItem(id, type) {
-            myNotifs = myNotifs.map(n => {
+        async function readItem(id) {
+            noti = noti.map(n => {
                 if (n.id === id) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, isRead: true };
+                    return { ...n, is_read: 1 };
                 } else {
                     // ID가 일치하지 않으면 기존 데이터 그대로 반환
                     return n;
                 }
             });
+            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
             updateNotifUI();
             location.href = 'signal_log.html';
         }
 
         // 아이템 삭제
-        function deleteItem(e, id) {
+        async function deleteItem(e, id) {
             e.stopPropagation();
-            myNotifs = myNotifs.filter(n => n.id !== id);
+            noti = noti.map(n => {
+                if (n.id === id) {
+                    // ID가 일치하면 읽음 처리된 복사본 반환
+                    return { ...n, is_read: 1 };
+                } else {
+                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
+                    return n;
+                }
+            });
+            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
             updateNotifUI();
         }
 
         // 모두 읽음
-        function allRead() {
-            myNotifs = myNotifs.map(n => ({...n, isRead: true}));
+        async function allRead() {
+            noti = noti.map(n => ({...n, is_read: 1}));
+            await axios.get("/noti/read_all?id="+savedUserId);
             updateNotifUI();
         }
 

@@ -91,7 +91,7 @@ es = Elasticsearch(
     [f"http://{host}:9200"],
     request_timeout=30
 )
-es_index = "news_labelling_es_3"
+es_index = "news_labeling"
 
 
 # ==========================================
@@ -313,25 +313,15 @@ def delete_member(info: Dict[str, str]):
 @app.get("/public_signals")
 def public_signals():
     # print('뉴스 요청')
-    # body = {
-    #     "query": {
-    #         "bool": {
-    #             "filter": [
-    #                 {
-    #                     "range": {
+    # body = {"query": {"bool": {"filter": [{"range": {
     #                         "published_date": {
-    #                             "gte": "now-12h", # 현재 시각 기준 12시간 전부터
-    #                             "lte": "now",      # 현재 시각까지
-    #                         }
-    #                     }
-    #                 }
-    #             ]
+    #                             "gte": "now-12h",     # 현재 시각 기준 12시간 전부터
+    #                             "lte": "now",         # 현재 시각까지
+    #                         }}}]
     #         }
     #     },
-    #     "sort": [
-    #         { "published_date": { "order": "desc" } } # 최신 기사가 먼저 나오도록 정렬
-    #     ],
-    #     "size": 100
+    #     "sort": [{ "published_date": "desc" }]        # 최신 기사가 먼저 나오도록 정렬
+    #     ,"size": 100
     # }
     body = {
         "sort": [
@@ -374,7 +364,7 @@ def news_view(info:Dict[str, str]):
                 sql = sqlalchemy.text("""INSERT INTO news_view (member_no, news_url)VALUES(:member_no, :news_url)""")
                 res = db.execute(sql, {"member_no": m_no, "news_url": info["url"]})
                 print(f'기사열람 DB 삽입 성공 {res.rowcount}개')
-    return {"msg": "DB 저장완료"}
+    return
 
 
 # 맞춤형뉴스 요청
@@ -481,6 +471,65 @@ async def get_risk_signals():
         return {"status": "success", "data": results or []}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+
+# 네이게이션바 signal 알림 토글 요청
+@app.get("/noti/signal")
+def noti_signal(id:str):
+    # logger.info(f'----{id}----')
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+            SELECT
+                t1.signal_no
+                ,t1.risk_level
+                ,t1.signal_time
+                ,t1.prediction
+                ,t2.alarm_view
+            FROM signal_message t1 JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
+                JOIN member_info t3 ON t2.member_no = t3.member_no
+                    WHERE t3.id = :id and t2.alarm_view = 0 ORDER BY t2.alarm_time DESC LIMIT 10
+        """)
+        res = db.execute(sql, {"id": id}).mappings().fetchall()
+        notis = []
+        for n in res:
+            noti = {
+                "signal_no": n["signal_no"],
+                "risk_level": n["risk_level"],
+                "prediction": n["prediction"],
+                "is_read": n["alarm_view"],
+                "signal_time": n["signal_time"]
+            }
+            notis.append(noti)
+    return {"noti": notis}
+
+# 알림토글 읽음 요청
+@app.post("/noti/read")
+def noti_read(info: Dict[str, Any]):
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+                UPDATE alarm_log t1 JOIN member_info t2 
+                    ON t1.member_no = t2.member_no 
+	                    SET t1.alarm_view = 1 
+	                        WHERE t1.signal_no = :signal_no AND t2.id = :id
+            """)
+        res = db.execute(sql, {"signal_no": info["id"], "id": info["user_id"]})
+        logger.info(f'알림 확인 업데이트 = {res.rowcount}개')
+    return
+
+# 모든 알림트글 읽음 요청
+@app.get("/noti/read_all")
+def noti_raed_all(id:str):
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+            UPDATE alarm_log t1 JOIN member_info t2 
+                ON t1.member_no = t2.member_no
+	                SET t1.alarm_view = 1 
+	                    WHERE t1.alarm_view = 0 AND t2.id = :id
+        """)
+        res = db.execute(sql, {"id": id})
+        logger.info(f'{id} 의 모든 알림 읽음 업데이트 = {res.rowcount}개')
+    return
 
 
 # ==========================================
