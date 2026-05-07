@@ -133,35 +133,51 @@
     </main>
 
     <script>
-        // --- 전역 상태 관리 ---
-        let allSignals = [];
-        let filteredNews = [];
+        // --- 1. 전역 상태 관리 ---
+        let allSignals = [];      // 하단 뉴스 그리드용 (전체 뉴스)
+        let filteredNews = [];    // 필터링된 뉴스
+        let heatmapData = {};     // 서버에서 받은 리스크 통계 ({score, level})
         let selectedCountry = null;
         let selectedDate = null;
         let searchQuery = "";
-        let calendarMonth = new Date(2026, 3);
-        const countryNamesKOR = { "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국", "Iran": "이란", "Russia": "러시아", "India": "인도" };
+        let calendarMonth = new Date(2026, 4); // 2026년 5월
+
+        const countryNamesKOR = {
+            "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국",
+            "Russia": "러시아", "India": "인도", "Iran": "이란", "Israel": "이스라엘",
+            "Saudi Arabia": "사우디아라비아", "UAE": "아랍에미리트", "Qatar": "카타르",
+            "Iraq": "이라크", "Egypt": "이집트", "Turkey": "튀르키예", "Syria": "시리아",
+            "Ukraine": "우크라이나", "United Kingdom": "영국", "France": "프랑스",
+            "Germany": "독일", "Italy": "이탈리아", "Vietnam": "베트남",
+            "Indonesia": "인도네시아", "ASEAN": "동남아시아", "EU": "유럽연합"
+        };
 
         const myChart = echarts.init(document.getElementById('map'));
-         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
-        // 1. 데이터 로드: ml.py가 서버(main.py)에 받은 뉴스 데이터와 환율/원자재 데이터
+
+        // 환율/원자재 라벨링 3[서버에서 데이터 로드]
+        // --- 2. 데이터 통합 로드 (백엔드 API 호출) ---
         async function fetchMainData() {
             try {
-                // 뉴스 데이터 가져오기
-                const res = await axios.get('/api/risk-signals');
-                allSignals = res.data.data;
+                // 콤마(,) 누락 수정 및 heatmapRes 추가
+                const [riskRes, indicatorRes, heatmapRes] = await Promise.all([
+                    axios.get('/api/risk-signals'),
+                    axios.get('/api/market-indicators'),
+                    axios.get('/stats/heatmap') // 리더님이 백엔드에 만든 합산 점수 API
+                ]);
 
-                // 2. 시장 지표 데이터 가져오기
-                const indicatorRes = await axios.get('/api/market-indicators');
+                allSignals = riskRes.data.data;
+                heatmapData = heatmapRes.data; // { "Iran": { "score": 15.2, "level": "Serious" }, ... }
+
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
                 }
 
-                if (allSignals && allSignals.length > 0) {
-                    document.getElementById('update-time').innerText = `${new Date(allSignals[0].analyzed_at).toLocaleString()} 갱신`;
-                    renderExchangeRates(allSignals[0].final_total_score.exchange_details);
+                if (allSignals.length > 0) {
+                    document.getElementById('update-time').innerText =
+                        `${new Date().toLocaleString()} 갱신 (분석 데이터: ${allSignals.length}건)`;
                 }
 
+                // UI 업데이트 함수들 실행
                 applyFilters();
                 renderHeatmap();
                 updateStation();
@@ -182,48 +198,122 @@
         }
 
         // 3. ECharts 지도: 위기단계별 색상 매핑
-        function renderHeatmap() {
-            fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json')
-                .then(res => res.json())
-                .then(worldJson => {
-                    echarts.registerMap('world', worldJson);
-                    const levelMap = { "심각": 3, "주의": 2, "안정": 1 };
+        async function renderHeatmap() {
+            try {
+                // 1. 세계지도 JSON 로드
+                const worldRes = await fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json');
+                const worldJson = await worldRes.json();
+                echarts.registerMap('world', worldJson);
 
-                    const mapData = [];
-                    const processed = new Set();
-                    allSignals.forEach(s => {
-                        if (!processed.has(s.country_name)) {
-                            mapData.push({
-                                name: s.country_name,
-                                value: levelMap[s.risk_level] || 1,
-                                score: Math.round((s.final_total_score.total + 1) * 50)
-                            });
-                            processed.add(s.country_name);
-                        }
-                    });
+                // 2. heatmapData를 ECharts용 리스트로 변환
+                const chartData = Object.entries(heatmapData).map(([name, info]) => {
+                    let visualValue = 1; // 기본 Stable(초록)
 
-                    myChart.setOption({
-                        visualMap: {
-                            type: 'piecewise',
-                            pieces: [
-                                {value: 1, label: '안정', color: '#2ECC71'},
-                                {value: 2, label: '주의', color: '#FFD400'},
-                                {value: 3, label: '심각', color: '#FF4B4B'}
-                            ],
-                            show: false
-                        },
-                        series: [{
-                            type: 'map', map: 'world', data: mapData, roam: true,
-                            emphasis: { itemStyle: { areaColor: '#f3f4f6' } },
-                            selectedMode: 'single'
-                        }]
-                    });
+                    // 한글과 영어 등급을 모두 체크하는 방어적 코드
+                    const level = info.level;
+                    if (level === "심각" || level === "Serious" || level === "Critical") {
+                        visualValue = 3; // 빨강
+                    } else if (level === "주의" || level === "주의" || level === "Caution" || level === "Warning") {
+                        visualValue = 2; // 노랑
+                    } else {
+                        visualValue = 1; // 초록
+                    }
 
-                    myChart.on('click', (p) => { if (p.data) selectCountry(p.name, p.data.score); });
+                    return {
+                        name: name,
+                        value: visualValue,
+                        realScore: info.score, // 툴팁용 실제 점수
+                        riskLevel: level  // 툴팁용 레벨
+                    };
                 });
+
+                // 3. 차트 설정 업데이트
+                myChart.setOption({
+                    tooltip: {
+                        trigger: 'item',
+                        formatter: function(params) {
+                            if (!params.data) return params.name;
+                            const korName = countryNamesKOR[params.name] || params.name;
+                            return `<b>${korName}</b><br/>리스크 점수: ${params.data.realScore}<br/>등급: ${params.data.riskLevel}`;
+                        }
+                    },
+                    visualMap: {
+                        type: 'piecewise',
+                        pieces: [
+                            {value: 3, label: '심각 (Serious)', color: '#FF4B4B'}, // 빨강
+                            {value: 2, label: '주의 (Caution)', color: '#FFD400'}, // 노랑
+                            {value: 1, label: '안정 (Stable)', color: '#2ECC71'}   // 초록
+                        ],
+                        show: false
+                    },
+                    series: [{
+                        type: 'map',
+                        map: 'world',
+                        data: chartData,
+                        roam: true,
+                        emphasis: {
+                            itemStyle: { areaColor: '#f3f4f6' },
+                            label: { show: false }
+                        },
+                        selectedMode: 'single'
+                    }]
+                });
+
+                // 클릭 이벤트 연결
+                myChart.off('click'); // 중복 이벤트 방지
+                myChart.on('click', (p) => {
+                    if (p.data) selectCountry(p.name, p.data.realValue);
+                });
+            } catch (e) {
+                console.error("히트맵 로드 에러:", e);
+            }
+        }
+        // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
+        function updateStation() {
+            const list = document.getElementById('station-list');
+
+            // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
+            const sortedRisks = Object.entries(heatmapData)
+                .map(([name, info]) => ({ name, ...info }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 3);
+
+            if (sortedRisks.length === 0) {
+                list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
+                return;
+            }
+
+            list.innerHTML = sortedRisks.map((item, index) => {
+                // 등급에 따른 텍스트 색상 결정
+                const scoreColor = item.level === "Serious" ? "text-red-300" : "text-yellow-200";
+                const badgeIcon = item.level === "Serious" ? "🔥" : "⚠️";
+
+                return `
+                    <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-blue-200 font-medium">RANK 0${index + 1}</span>
+                            <span class="font-bold text-sm">${countryNamesKOR[item.name] || item.name} ${badgeIcon}</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="block font-bold text-lg ${scoreColor}">${item.score}</span>
+                            <span class="text-[9px] uppercase opacity-70">${item.level}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
+        function applyFilters() {
+            filteredNews = allSignals.filter(item => {
+                const matchCountry = !selectedCountry || item.country_name === selectedCountry;
+                const matchSearch = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchDate = !selectedDate || item.analyzed_at.startsWith(selectedDate);
+                return matchCountry && matchSearch && matchDate;
+            });
+            renderNewsGrid();
         }
 
-        // 4. 필터 핸들러
+        // 국가 선택 핸들러
         function selectCountry(name, score) {
             selectedCountry = name;
             const infoBox = document.getElementById('selected-country-info');
@@ -248,22 +338,17 @@
         // 5. 환율 및 뉴스 렌더링
         function renderExchangeRates(rates) {
             const container = document.getElementById('exchange-rates');
-            if (!rates) {
-                container.innerHTML = '<p class="text-xs text-gray-400">데이터를 불러올 수 없습니다.</p>';
-                return;
-            }
 
             // 1. 환율 데이터 구성 (위안화 추가)
             const currencies = [
                 { label: '달러/KRW', val: rates.usd, key: 'USD' },
                 { label: '유로/KRW', val: rates.eur, key: 'EUR' },
                 { label: '엔화/KRW', val: rates.jpy, key: 'JPY' },
-                { label: '위안화/KRW', val: rates.cny, key: 'CNY' } // 드디어 추가!
+                { label: '위안화/KRW', val: rates.cny, key: 'CNY' }
             ];
 
             // 2. 원자재 데이터 구성 (main.py에서 보낸 raw_material_score 참고)
             // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
-
             container.innerHTML = currencies.map(c => `
                 <div class="flex items-center justify-between border-b border-gray-50 pb-2">
                     <div>
@@ -275,36 +360,44 @@
                     </div>
                 </div>
             `).join('');
-
             lucide.createIcons(); // 아이콘 재생성
-}
+        }
+
+
         // 뉴스 그리드 설정
         function renderNewsGrid() {
             const grid = document.getElementById('news-grid');
-            const title = document.getElementById('news-title');
-            title.innerText = selectedCountry ? `${countryNamesKOR[selectedCountry] || selectedCountry} 리스크 뉴스` : "오늘의 주요 뉴스";
+            document.getElementById('news-title').innerText = selectedCountry
+                ? `${countryNamesKOR[selectedCountry] || selectedCountry} 리스크 뉴스`
+                : "오늘의 주요 뉴스";
 
             if (filteredNews.length === 0) {
                 grid.innerHTML = `<p class="col-span-2 text-center py-20 text-gray-400">일치하는 뉴스가 없습니다.</p>`;
                 return;
             }
 
-            grid.innerHTML = filteredNews.map(n => `
-                <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all group cursor-pointer" onclick="location.href='custom_news.html'">
-                    <div class="p-4">
-                        <div class="flex justify-between items-start mb-3">
-                            <!-- 숫자 대신 서버에서 보낸 risk_status(안정/주의/위기)와 risk_color를 사용합니다 -->
-                            <span class="text-[10px] font-bold px-2 py-1 rounded"
-                                  style="background-color: ${n.risk_color}20; color: ${n.risk_color};">
-                                ${n.risk_status} (RISK ${Math.round((n.final_total_score.total + 1) * 50)})
-                            </span>
-                            <span class="text-[10px] text-gray-400">${n.analyzed_at.split('T')[0]}</span>
+            grid.innerHTML = filteredNews.map(n => {
+                // 등급에 따른 색상 클래스 결정 로직 (이제 코드로 작동합니다)
+                let textColor = "text-green-600";
+                if (n.risk_level === "심각") textColor = "text-red-600";
+                else if (n.risk_level === "주의") textColor = "text-yellow-500";
+
+                // 실제 화면에 그려질 HTML 부분만 백틱(``)으로 감쌉니다.
+                return `
+                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all group cursor-pointer" onclick="location.href='custom_news.html'">
+                        <div class="p-4">
+                            <div class="flex justify-between items-start mb-3">
+                                <span class="font-bold text-[11px] ${textColor}">
+                                    ${n.risk_level || '안정'} (RISK ${Math.round(Math.abs((n.final_total_score?.total || 0) * 100))})
+                                </span>
+                                <span class="text-[10px] text-gray-400">${n.analyzed_at ? n.analyzed_at.split('T')[0] : ''}</span>
+                            </div>
+                            <h4 class="font-bold text-sm leading-snug group-hover:text-blue-600 transition-colors line-clamp-2">${n.title}</h4>
+                            <p class="text-[11px] text-gray-500 mt-2">${n.press_name}</p>
                         </div>
-                        <h4 class="font-bold text-sm leading-snug group-hover:text-blue-600 transition-colors line-clamp-2">${n.title}</h4>
-                        <p class="text-[11px] text-gray-500 mt-2">${n.press_name}</p>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         function updateStation() {
@@ -345,7 +438,7 @@
         }
         function changeMonth(step) { calendarMonth.setMonth(calendarMonth.getMonth() + step); initCalendar(); }
 
-        // 7. 공통 UI (Navbar, Logout)
+        // 6. 공통 UI (Navbar, Logout)
         function updateNavbar() {
             const id = sessionStorage.getItem('savedUserId');
             const authContainer = document.getElementById('authContainer');

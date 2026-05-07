@@ -4,7 +4,10 @@ import subprocess
 import asyncio
 from typing import Dict, Any
 import traceback
+
+import jsonify
 import sqlalchemy
+from elasticsearch import Elasticsearch
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Body, Request
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from sse_starlette.sse import EventSourceResponse
+
 
 # --- 이 코드를 반드시 추가하세요 ---
 if sys.platform == 'win32':
@@ -24,6 +28,8 @@ from logger import get_logger
 from dataReqType.regist import RegistModel
 from db import get_db, engine
 from hash import hash_password, verify_password
+from config import Config
+from utils import prepare_heatmap_data
 
 # 파일 연동 (수집 및 분석 모듈)
 import naver
@@ -39,6 +45,10 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 
 # 전역 스케줄러 객체 (함수 외부에서 접근 가능하도록 설정)
 global_scheduler = AsyncIOScheduler()
+
+# es 설정
+es = Elasticsearch(["http://localhost:9200"])
+
 
 # ==========================================
 # 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
@@ -77,7 +87,15 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
         # 이미 학습이 완료된 경우 바로 분석 작업 등록
         if not scheduler.get_job('ml_analysis'):
             logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
-            scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
+            # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
+            from datetime import datetime
+            scheduler.add_job(
+                ml.run_analysis,
+                'interval',
+                minutes=10,
+                id='ml_analysis',
+                next_run_time=datetime.now()  # 등록하자마자 바로 실행!
+            )
 
 
 # ==========================================
@@ -113,13 +131,13 @@ async def run_initial_batch(scheduler):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
-    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=10, id='nc')
-    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=10, id='yc')
-    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=10, id='rc')
-    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=2, id='tw')
+    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
+    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
+    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
+    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw')
     global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
     # 학습/분석 파이프라인 관리 (5분마다 체크)
-    global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=5, args=[global_scheduler], id='ml_pipeline')
+    global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=10, args=[global_scheduler], id='ml_pipeline')
 
     # 서버 시작과 동시에 즉시 실행 (백그라운드 태스크)
     asyncio.create_task(run_initial_batch(global_scheduler))
@@ -358,6 +376,55 @@ def get_market_indicators():
         return {"status": "success", "data": formatted_data}
 
 
+# ==========================================
+# 5. 히트맵
+# ==========================================
+@app.get("/stats/heatmap")
+async def get_heatmap_stats():
+    """
+    프론트엔드 히트맵 지도를 위한 리스크 통계 데이터 반환
+    """
+    try:
+        # 1. ES에서 분석 완료된 최신 데이터 100건 가져오기
+        query = {
+            "query": {"match_all": {}},
+            "sort": [{"analyzed_at": "desc"}],
+            "size": 100
+        }
+        res = es.search(index="news_labeling", body=query)
+        docs = [hit['_source'] for hit in res['hits']['hits']]
+
+        # 2. 모든 국가를 기본 '안정(Stable)'으로 초기화
+        # Config.G20_COUNTRY_MAP.values()에서 유니크한 영어 국가명들을 가져옵니다.
+        unique_countries = set(Config.G20_COUNTRY_MAP.values())
+        stats = {country: {"score": 0, "level": "Stable"} for country in unique_countries}
+
+        # 3. 데이터를 순회하며 국가별 최신 상태 업데이트
+        for doc in docs:
+            c_name = doc.get('country_name')
+
+            # [핵심] 'Middle East' 같은 지역명이 오면 해당 지역 국가 전체에 점수 전파
+            target_countries = [c_name]
+            if c_name in Config.REGION_TO_COUNTRIES:
+                target_countries = Config.REGION_TO_COUNTRIES[c_name]
+
+            for country in target_countries:
+                if country in stats:
+                    # 이미 데이터가 들어있다면(최신순 정렬이므로) 건너뜁니다.
+                    if stats[country]["score"] != 0: continue
+
+                    # ml.py에서 저장한 점수와 등급 가져오기
+                    raw_score = doc.get('final_total_score', {}).get('total', 0)
+                    # RISK 점수로 변환 (0~100 사이)
+                    risk_score = round(abs(raw_score * 100), 1)
+
+                    stats[country]["score"] = risk_score
+                    stats[country]["level"] = doc.get('risk_level', '안정')
+
+        return stats  # FastAPI는 jsonify 없이 그냥 리턴!
+    except Exception as e:
+        print(f"❌ 히트맵 통계 에러: {e}")
+        return {}
 
 if __name__ == "__main__":
     import uvicorn
