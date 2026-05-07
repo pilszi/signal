@@ -88,10 +88,10 @@ logger = get_logger(__name__)
 
 host = "100.123.232.79"
 es = Elasticsearch(
-    [f"http://{host}:9200"],
+    [f"http://localhost:9200"],
     request_timeout=30
 )
-es_index = "news_labeling"
+es_index = "news_labellin_es_3"
 
 
 # ==========================================
@@ -152,9 +152,6 @@ app.add_middleware(SessionMiddleware, secret_key="secret", max_age=1800)
 app.mount("/view", StaticFiles(directory="view"), name="view")
 
 
-# ==========================================
-# 2. API 엔드포인트
-# ==========================================
 # ==========================================
 # 2. API 엔드포인트
 # ==========================================
@@ -329,7 +326,7 @@ def public_signals():
         ],
         "size": 100
     }
-    res = es.search(index= es_index, body= body)
+    res = es.search(index= es_index, body={"size":100})
     print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
     # print(res['hits']['hits'])
     public_news = []
@@ -346,6 +343,37 @@ def public_signals():
         public_news.append(_news)
     # print(public_news)
     return {"msg": public_news}
+
+@app.get("/main/country")
+def country():
+    with (get_db() as db):
+        sql = sqlalchemy.text("""
+                SELECT
+                    t3.country_en_name as en_name,
+                    COUNT(CASE WHEN t2.risk_level = '안정' THEN 1 END) AS 안정_count,
+                    COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
+                    COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
+                    -- 바로 점수 계산까지!
+                    SUM(CASE 
+                        WHEN t2.risk_level = '안정' THEN 10 
+                        WHEN t2.risk_level = '주의' THEN 30 
+                        WHEN t2.risk_level = '위기' THEN 100 
+                        ELSE 0 
+                    END) AS total_score
+                FROM signal_country t1 
+                    JOIN signal_message t2 ON t1.signal_no = t2.signal_no
+                        JOIN country t3 ON t3.country_no = t1.country_no
+                        WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
+                            GROUP BY t1.country_no;
+            """)
+        country_all = db.execute(sql).mappings().fetchall()
+        signal_country = []
+        for country in country_all:
+            con = {
+                "en_name": country["en_name"],
+                "total_score": country["total_score"]
+            }
+    return {"country_signal": signal_country}
 
 
 # 기사 열람 기록 저장
@@ -459,19 +487,95 @@ def custom_news(id:str):
     return {"keyword": keywords, "total_val": len(custom_news), "news": custom_news}
 
 
-# ==========================================
-# 3. 실시간 알림 API (ml.py 활용)
-# ==========================================
-@app.get("/api/signals")
-async def get_risk_signals():
-    """Elasticsearch 기반 최신 리스크 뉴스 데이터 제공"""
-    try:
-        # ml.py에 만든 get_latest_signals 함수를 호출
-        results = ml.get_latest_signals(size=20)
-        return {"status": "success", "data": results or []}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+# # ==========================================
+# # 3. 실시간 알림 API (ml.py 활용)
+# # ==========================================
+# @app.get("/api/signals")
+# async def get_risk_signals():
+#     """Elasticsearch 기반 최신 리스크 뉴스 데이터 제공"""
+#     try:
+#         # ml.py에 만든 get_latest_signals 함수를 호출
+#         results = ml.get_latest_signals(size=20)
+#         return {"status": "success", "data": results or []}
+#     except Exception as e:
+#         return {"status": "error", "message": str(e)}
 
+# 시그널로그 페이지
+@app.get("signal_log")
+def signal_log(id:str):
+    logger.info(f'==={id}===')
+
+    with get_db() as db:
+        # 1. id에 맞는 관심키워드 조회(db 에서 키워드 조회)
+        sql = sqlalchemy.text("""
+                SELECT
+                    t1.keyword
+                FROM member_keyword t1 JOIN member_info t2 
+                    ON t1.member_no = t2.member_no
+                        WHERE t2.id = :id
+        """)
+        key_res = db.execute(sql, {"id": id}).mappings().fetchall()
+        keywords = []
+        for key in key_res:
+            keywords.append(key["keyword"])
+        logger.info(f'{id} 의 관심키워드 = {keywords}')
+        # 2. 키워드에 맞는 기사 조회(es 에서 _id 조회)
+        should_key = []
+        for key in keywords:
+            should_key.append(
+                {
+                    "match": {
+                        "extracted_keyword": {
+                            "query": key,
+                            "_name": key
+                        }
+                    }
+                }
+            )
+
+        body = {
+            "query": {
+                "bool": {
+                    "should": should_key,
+                    "minimum_match_query": 1
+                }
+            }
+        }
+
+        es_res = es.search(es_index, body=body)
+        _id = []
+        for i in es_res['hits']['hits']:
+            doc = {
+                "id": i["_id"],
+                "url": i["_source"]["url"],
+                "match_keyword": i.get("matched_queries", [])
+            }
+            _id.append(doc)
+        doc_no = set(_id)
+        logger.info(f'키워드에 해당하는 문서 = {doc_no}')
+
+        # 3. _id 에 해당하는 signal_no 조회(DB)
+        sql = sqlalchemy.text("""
+                SELECT
+                    risk_level
+                    ,signal_time
+                    ,prediction
+                    ,prediction_reason
+                FROM signal_message
+                    WHERE document_no = :doc_no
+        """)
+        sig_doc = []
+        for doc in doc_no:
+            db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchall()
+            d = {
+                "risk_level": db_res["risk_level"],
+                "signal_time": db_res["signal_time"],
+                "prediction": db_res["prediction"],
+                "prediction_reason": db_res["prediction_reason"],
+                "url": doc["url"]
+            }
+            sig_doc.append(d)
+    return {}
 
 
 # 네이게이션바 signal 알림 토글 요청
