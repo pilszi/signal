@@ -11,6 +11,7 @@ import cloudscraper
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from dateutil import parser as date_parser
+from config import Config as AppConfig
 
 # --- 0. Python 3.14+ 호환성 패치 ---
 try:
@@ -26,7 +27,7 @@ except ImportError:
     sys.modules["six"] = six
     sys.modules["six.moves"] = six.moves
 
-from newspaper import Article, Config
+from newspaper import Article, Config as NewsConfig
 from elasticsearch import Elasticsearch
 from apscheduler.schedulers.blocking import BlockingScheduler
 from bs4 import BeautifulSoup
@@ -39,10 +40,10 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("elastic_transport").setLevel(logging.WARNING)
 
 es = Elasticsearch(
-    ["http://localhost:9200"],
+    ["http://100.123.232.79:9200"],
     request_timeout=30
 )
-INDEX_NAME = "news_en_es1"
+INDEX_NAME = "news_en"
 scraper = cloudscraper.create_scraper()
 
 RSS_FEEDS = [
@@ -60,15 +61,6 @@ RSS_FEEDS = [
     "https://www.ft.com/?format=rss"
 ]
 
-TARGET_KEYWORDS = [
-    'korea', 'china', 'taiwan', 'russia', 'ukraine', 'middle east', 'israel', 'iran',
-    'sanction', 'conflict', 'geopolitical', 'military', 'security', 'war',
-    'economy', 'fed', 'fomc', 'interest rate', 'inflation', 'cpi', 'recession',
-    'semiconductor', 'nvidia', 'supply chain', 'tariff', 'trade war', 'price', 'stock', 'bank', 'rate',
-    'breaking', 'urgent', 'alert', 'exclusive',
-    'oil', 'gas', 'energy', 'battery', 'ev', 'lithium', 'crude', 'biden', 'trump',
-    'market', 'crash', 'yield', 'bond'
-]
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -79,7 +71,7 @@ USER_AGENTS = [
 
 
 def get_config():
-    cfg = Config()
+    cfg = NewsConfig()
     cfg.browser_user_agent = random.choice(USER_AGENTS)
     cfg.request_timeout = 20
     cfg.memoize_articles = False
@@ -100,6 +92,51 @@ def get_source_name(url):
     if 'yahoo' in domain: return "Yahoo Finance"
     if 'marketwatch' in domain: return "MarketWatch"
     return "Global News"
+
+
+def extract_exact_date(html, article_obj):
+    """
+    [방법 B 강화] 주요 외신별 맞춤형 시간 파싱 로직
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # 1. CNBC 전용: 'last_updated_datetime' 또는 'published_datetime' 메타 데이터
+    cnbc_meta = soup.find('meta', attrs={'name': 'last-modified'}) or \
+                soup.find('meta', attrs={'property': 'article:published_time'})
+    if cnbc_meta and cnbc_meta.get('content'):
+        try:
+            return date_parser.parse(cnbc_meta['content'])
+        except:
+            pass
+
+    # 2. Al Jazeera 전 "@type": "NewsArticle" 내의 datePublished 검색
+    import json
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            data = json.loads(script.string)
+            if isinstance(data, dict) and data.get('@type') == 'NewsArticle':
+                return date_parser.parse(data.get('datePublished'))
+            elif isinstance(data, list):  # 가끔 리스트 형태로 들어있음
+                for item in data:
+                    if item.get('@type') == 'NewsArticle':
+                        return date_parser.parse(item.get('datePublished'))
+        except:
+            pass
+
+    # 3. The Guardian 전용: 'article:published_time' 메타 태그
+    guardian_meta = soup.find('meta', attrs={'property': 'article:published_time'})
+    if guardian_meta and guardian_meta.get('content'):
+        try:
+            return date_parser.parse(guardian_meta['content'])
+        except:
+            pass
+
+    # 4. 공통: newspaper3k 결과가 있다면 활용
+    if article_obj.publish_date:
+        return article_obj.publish_date
+
+    return None
 
 
 def fallback_extract(html):
@@ -164,7 +201,10 @@ def fetch_and_save(data):
         if not main_image or len(main_image.strip()) < 5:
             return "FAILED"
 
-        raw_date = article.publish_date or rss_pub_date
+        # [방법 B 적용] 상세 페이지에서 다시 한번 정교하게 날짜 추출
+        exact_date = extract_exact_date(html, article)
+        raw_date = exact_date or rss_pub_date
+
         if not raw_date:
             return "FAILED"
 
@@ -197,7 +237,7 @@ def fetch_and_save(data):
 
 # --- 4. 실행부 ---
 
-def crawl_job():
+def crawl_job(keywords):
     logging.info(f"🚀 Signal 글로벌 뉴스 수집 가동: {len(RSS_FEEDS)}개 피드 탐색")
     link_data = {}
 
@@ -206,11 +246,13 @@ def crawl_job():
             feed = feedparser.parse(feed_url)
             for entry in feed.entries:
                 search_text = (entry.title + " " + entry.get('summary', '')).lower()
-                if any(kw in search_text for kw in TARGET_KEYWORDS):
+                # [중요] 전역 변수 TARGET_KEYWORDS 대신, 인자로 받은 keywords를 사용합니다.
+                if any(kw in search_text for kw in keywords):
                     raw_url = entry.link
                     norm_url = raw_url.split('?')[0].split('#')[0].strip().rstrip('/')
 
                     if norm_url not in link_data:
+                        # RSS 데이터에 상세 시간이 있으면 최대한 보존
                         link_data[norm_url] = entry.get('published') or entry.get('updated')
         except Exception as e:
             logging.error(f"Feed error ({feed_url}): {e}")
@@ -230,11 +272,29 @@ def crawl_job():
     return stats
 
 
+def run_reuters_collect():
+    """main.py의 스케줄러와 연결되는 글로벌 뉴스 수집 메인 함수"""
+    logging.info("📡 [글로벌 뉴스 수집 시작] RSS 피드 탐색 중...")
+
+    # 영문 키워드 전체를 하나의 리스트로 통합 (필터링용)
+    TARGET_KEYWORDS = [kw.lower() for sublist in AppConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
+
+    # 이 키워드들을 가지고 수집 로직 실행
+    return crawl_job(TARGET_KEYWORDS)
+
+
 if __name__ == "__main__":
     scheduler = BlockingScheduler()
     random_second = random.randint(0, 59)
-    scheduler.add_job(crawl_job, "cron", minute="10,25,40,55", second=random_second,
-                      next_run_time=datetime.datetime.now())
+
+    # 혼자 실행할 때도 키워드가 필요하므로 args를 추가해줘야 에러가 x
+    # Config에서 키워드를 미리 뽑아서 전달
+    initial_keywords = [kw.lower() for sublist in NewsConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
+
+    scheduler.add_job(
+        crawl_job, "cron", minute="0,10,20,30,40,50", second=random_second,
+        args=[initial_keywords],
+        next_run_time=datetime.datetime.now())
     try:
         logging.info("⏰ Signal 뉴스 엔진 가동 (고속 병렬 수집 모드)")
         scheduler.start()

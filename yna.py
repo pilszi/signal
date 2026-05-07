@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import random
 import time
@@ -15,7 +14,7 @@ from utils import generate_article_id
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import os
-from concurrent.futures import ThreadPoolExecutor
+from config import Config
 
 # webdriver-manager 로그 끄기
 os.environ['WDM_LOG_LEVEL'] = '0'
@@ -34,7 +33,7 @@ logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그
 logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
 
 def get_es():
-    return Elasticsearch("http://localhost:9200")
+    return Elasticsearch("http://100.123.232.79:9200")
 
 
 def close_es(es):
@@ -71,12 +70,15 @@ def article_crawling(driver, p: int, keyword):
         temp_list = []
         for elem in elements:
             try:
-                # 1. 링크 우선 추출 및 사전 중복 체크 (가장 중요)
+                # 1. 제목,링크 우선 추출 및 사전 중복 체크
+                title = elem.find_element(By.CSS_SELECTOR, "strong.tit-news").text
                 link = elem.find_element(By.CSS_SELECTOR, "div.item-box01 a").get_attribute("href")
-                doc_id = generate_article_id(link)
+                if not title: continue
 
-                # [최적화] 이미 있는 기사는 본문 페이지에 들어가지도 않음
-                if es.exists(index="news_origin_es2", id=doc_id):
+                doc_id = generate_article_id(title)
+
+                # 이미 있는 기사는 본문 페이지에 들어가지도 않음
+                if es.exists(index="news_origin", id=doc_id):
                     continue
 
                 # 2. 이미지 체크
@@ -84,8 +86,7 @@ def article_crawling(driver, p: int, keyword):
                 photo = photo_el.get_attribute("src")
                 if not photo or "data:image" in photo: continue
 
-                # 3. 제목 및 날짜
-                title = elem.find_element(By.CSS_SELECTOR, "strong.tit-news").text
+                # 3. 날짜
                 published_date = elem.find_element(By.CSS_SELECTOR, "span.txt-time").text
 
                 if not title or not published_date: continue
@@ -141,8 +142,8 @@ def article_save(news_list):
             actions = [
                 {
                     "_op_type": "create",
-                    "_index": "news_origin_es2",
-                    "_id": generate_article_id(row["url"]),
+                    "_index": "news_origin",
+                    "_id": generate_article_id(row["title"]),
                     "_source": {
                         "title": row["title"], "content": row["content"],
                         "published_date": row["published_date"],
@@ -183,21 +184,49 @@ def article_process(keywords, total_pages):
         logging.info("----- 연합뉴스 수집 종료 -----")
     return final_stats
 
+# 키워드를 하나로 합치고 랜덤으로 8~10개를 뽑는 보조 함수
+def get_random_strategic_keywords():
+    # 딕셔너리의 모든 리스트를 하나로 합침
+    all_flat_keywords = [kw for sublist in Config.STRATEGIC_KEYWORDS.values() for kw in sublist]
+    # 8~10개 사이로 랜덤 추출
+    sample_size = min(len(all_flat_keywords), random.randint(8, 10))
+    return random.sample(all_flat_keywords, sample_size)
+
+
+
 def get_scheduler():
-    # job_defaults 설정을 추가하여 인스턴스 제한을 풉니다.
+    # job_defaults 설정을 추가하여 인스턴스 제한을 풀기
     job_defaults = {
         'coalesce': False,
         'max_instances': 3  # 동시에 최대 3개까지 실행 허용 (기본값은 1)
     }
     sch = BackgroundScheduler(job_defaults=job_defaults)
-    keywords = ["유가", "중국", "미국", "전쟁", "중동", "환율", "수입", "수출"]
+
     random_second = random.randint(0, 59)
     sch.add_job(
-        article_process, "cron", minute="0,15,30,45", second=random_second,
-        args=[keywords, 2], id='yna_crawling_job', replace_existing=True,
-        next_run_time=datetime.now()
+        run_yna_collect, "cron", minute="0,10,20,30,40,50",
+        second=random_second,id='yna_crawling_job', next_run_time=datetime.now()
     )
     return sch
+
+
+def run_yna_collect():
+    """main.py에서 10분마다 호출하는 메인 함수"""
+    logging.info("📡 [연합뉴스 통합 수집 시작]")
+
+    # 1. 딕셔너리에 있는 모든 키워드를 리스트 하나로 합치기
+    all_flat_keywords = [kw for sublist in Config.STRATEGIC_KEYWORDS.values() for kw in sublist]
+
+    # 2. 함수가 호출되는 '지금 이 순간' 랜덤하게 8~10개를 뽑기
+    # 이렇게 해야 10분 뒤에 다시 호출될 때 또 새로운 단어를 뽑음
+    sample_size = random.randint(8, 10)
+    selected_keywords = random.sample(all_flat_keywords, sample_size)
+    logging.info(f"🎯 이번 회차 선정 키워드: {selected_keywords}")
+
+    total_pages = 1  # 테스트 시(1페이지), 운영 시(2페이지)
+
+    # 3. 뽑힌 키워드를 실제 크롤링 함수로 전달
+    return article_process(selected_keywords, total_pages)
 
 
 if __name__ == '__main__':

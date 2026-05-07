@@ -1,449 +1,372 @@
 <!DOCTYPE html>
 <html lang="ko">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Signal - 세계 리스크 히트맵</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://unpkg.com/lucide@latest"></script>
-        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-        <style>
-            /* 지도 내 국가 호버 효과 */
-            .country-path:hover {
-                opacity: 0.8;
-                cursor: pointer;
-            }
-            .selected-country {
-                stroke: #2563eb;
-                stroke-width: 2px;
-            }
-        </style>
-    </head>
-    <body class="bg-gray-50 text-gray-900">
-        <!-- Navbar -->
-        <nav class="border-b bg-white sticky top-0 z-50">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center h-20">
-                    <div class="flex items-center gap-8">
-                        <!-- href에서 / 제거 -->
-                        <a href="main.html" class="flex items-center gap-2">
-                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
-                                Signal
-                            </span>
-                        </a>
-                        
-                        <div class="hidden md:flex gap-1">
-                            <!-- 상대 경로 적용 -->
-                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">글로벌 현황</a>
-                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">맞춤형 뉴스</a>
-                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-50 font-medium">시그널 로그</a>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-3">
-                        <button class="p-2 rounded-lg hover:bg-gray-100 text-gray-600"><i data-lucide="bell" class="w-5 h-5"></i></button>
-                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-gray-600">
-                            <i data-lucide="user" class="w-5 h-5"></i>
-                        </a>
-                        <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors uppercase">Logout</button>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signal - 세계 리스크 히트맵</title>
+    <!-- 외부 라이브러리 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        .country-path:hover { opacity: 0.8; cursor: pointer; }
+        .notif-container { position: relative; display: inline-block; }
+        .notif-dropdown { position: absolute; right: 0; top: calc(100% + 8px); width: 350px; background: white; border: 1px solid #e5e7eb; border-radius: 0.75rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); z-index: 9999 !important; }
+        .hidden { display: none; }
+        .notif-item { padding: 16px; display: flex; gap: 12px; border-bottom: 1px solid #f3f4f6; cursor: pointer; }
+        .unread-dot { width: 6px; height: 6px; background-color: #3b82f6; border-radius: 50%; }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <!-- 1. Navbar: 인증 및 메뉴 이동 -->
+    <nav class="border-b bg-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <div class="flex items-center gap-8">
+                    <a href="main.html" class="flex items-center gap-2">
+                        <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">Signal</span>
+                    </a>
+                    <div class="hidden md:flex gap-1">
+                        <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-blue-600 bg-blue-50 font-bold">글로벌 현황</a>
+                        <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
+                        <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
                     </div>
                 </div>
-            </div>
-        </nav>
-
-        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <div class="grid lg:grid-cols-3 gap-8 relative">
-                
-                <!-- 왼쪽/중앙 컬럼 (지도 & 뉴스) -->
-                <div class="lg:col-span-2">
-                    
-                    <!-- 히트맵 카드 -->
-                    <div class="bg-white border rounded-xl p-6 mb-8 shadow-sm">
-                        <div class="flex items-center justify-between mb-4">
-                            <div>
-                                <h2 class="font-bold text-lg">세계 리스크 히트맵</h2>
-                                <p class="text-xs text-gray-400 mt-1">2026-04-27 09:30 갱신</p>
-                            </div>
-                            <div class="flex items-center gap-4 text-sm font-medium">
-                                <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-[#2ECC71]"></div><span class="text-gray-600">안정</span></div>
-                                <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-[#FFD400]"></div><span class="text-gray-600">주의</span></div>
-                                <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-[#FF4B4B]"></div><span class="text-gray-600">심각</span></div>
-                            </div>
-                        </div>
-
-                        <!-- 지도 영역 (React-simple-maps 대신 SVG 또는 이미지 플레이스홀더 사용) -->
-                        <div id="map" class="bg-gray-100 rounded-lg flex items-center justify-center relative overflow-hidden" style="height: 400px;">
-                            <!-- 실제 구현 시에는 react-simple-maps의 결과물인 SVG를 배치하거나 라이브러리를 호출해야 합니다. -->
-                            <!-- 여기서는 UI 구조를 위해 텍스트와 레이아웃을 배치합니다. -->
-                            <div class="text-center text-gray-400">
-                                <i data-lucide="map" class="w-16 h-16 mx-auto mb-2 opacity-20"></i>
-                                <p>전세계 리스크 분포도 (SVG Map)</p>
-                                <p class="text-xs mt-1">지도의 국가를 클릭하여 필터링하세요.</p>
-                            </div>
-                            
-                            <!-- 예시 클릭 버튼 (동작 확인용) -->
-                            <div class="absolute bottom-4 left-4 flex gap-2">
-                                <button onclick="selectCountry('USA')" class="px-3 py-1 bg-white border rounded shadow-sm text-xs hover:bg-gray-50">미국(USA) 선택</button>
-                                <button onclick="selectCountry('IRN')" class="px-3 py-1 bg-white border rounded shadow-sm text-xs hover:bg-gray-50 text-red-600 font-bold">이란(IRN) 선택</button>
-                            </div>
-                        </div>
-
-                        <div id="selected-country-info" class="mt-4 p-4 bg-blue-50 rounded-lg hidden transition-all">
-                            <p class="text-sm mb-1">선택된 국가: <span id="country-name" class="font-bold text-blue-700">-</span></p>
-                            <p class="text-sm">Signal 점수: <span id="country-score" class="font-bold">-</span></p>
+                <div class="flex items-center gap-3">
+                    <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
+                    <div class="notif-container" id="notifContainer">
+                        <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                            <span class="notif-badge" id="notifBadge" style="display: none;"></span>
+                        </button>
+                        <div class="notif-dropdown hidden" id="notifDropdown">
+                            <div class="notif-header"><span class="header-count" id="notifCountText">0개의 새 알림</span></div>
+                            <div id="notifList" class="max-h-80 overflow-y-auto"></div>
                         </div>
                     </div>
+                    <a href="profile.html" class="p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="user" class="w-5 h-5"></i></a>
+                    <div id="authContainer"></div>
+                </div>
+            </div>
+        </div>
+    </nav>
 
-                    <!-- 뉴스 검색 및 필터 -->
-                    <div class="mb-6 space-y-3">
-                        <h2 id="news-title" class="font-bold text-xl mb-4">오늘의 뉴스</h2>
-                        
-                        <div class="relative">
-                            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"></i>
-                            <input type="text" id="search-input" placeholder="키워드 또는 헤드라인 검색..." 
-                                class="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="grid lg:grid-cols-3 gap-8 relative">
+            <div class="lg:col-span-2">
+                <!-- 2. 히트맵 영역: 국가별 위기단계 시각화 -->
+                <div class="bg-white border rounded-xl p-6 mb-8 shadow-sm">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="font-bold text-lg">세계 리스크 히트맵</h2>
+                            <p id="update-time" class="text-xs text-gray-400 mt-1">데이터 로드 중...</p>
                         </div>
+                        <div class="flex items-center gap-4 text-sm font-medium">
+                            <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-[#2ECC71]"></div><span>안정</span></div>
+                            <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-[#FFD400]"></div><span>주의</span></div>
+                            <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-[#FF4B4B]"></div><span>심각</span></div>
+                        </div>
+                    </div>
+                    <div id="map" class="bg-gray-100 rounded-lg" style="height: 400px;"></div>
+                    <!-- 국가 선택 시 나타나는 정보 바 -->
+                    <div id="selected-country-info" class="mt-4 p-4 bg-blue-50 rounded-lg hidden flex justify-between items-center">
+                        <p class="text-sm">선택된 국가: <span id="country-name" class="font-bold text-blue-700">-</span> | Signal 점수: <span id="country-score" class="font-bold">-</span></p>
+                        <button onclick="resetCountryFilter()" class="text-xs text-blue-600 hover:underline">필터 해제</button>
+                    </div>
+                </div>
 
-                        <!-- 커스텀 캘린더 필터 -->
+                <!-- 3. 뉴스 검색 및 필터: 검색창 + 달력 -->
+                <div class="mb-6 space-y-3">
+                    <h2 id="news-title" class="font-bold text-xl mb-4">오늘의 주요 뉴스</h2>
+                    <div class="flex flex-col md:flex-row gap-3">
+                        <div class="relative flex-1">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"></i>
+                            <input type="text" id="search-input" oninput="handleSearch()" placeholder="키워드 또는 헤드라인 검색..."
+                                class="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                        </div>
                         <div class="relative">
-                            <div class="w-full pl-10 pr-12 py-3 border rounded-lg bg-white text-gray-700 flex items-center">
+                            <button onclick="toggleCalendar()" class="w-full md:w-48 pl-10 pr-4 py-3 border rounded-lg bg-white text-left flex items-center">
                                 <i data-lucide="calendar" class="absolute left-3 w-5 h-5 text-gray-400"></i>
-                                <span id="date-display">날짜를 선택해주세요</span>
-                            </div>
-                            <button onclick="toggleCalendar()" class="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-100 rounded transition-colors">
-                                <i data-lucide="calendar" class="w-5 h-5 text-blue-600"></i>
+                                <span id="date-display" class="text-sm">날짜 선택</span>
                             </button>
-
-                            <!-- 캘린더 드롭다운 -->
-                            <div id="calendar-dropdown" class="absolute top-full mt-2 left-0 bg-white border rounded-xl shadow-xl p-4 z-[60] w-80 hidden">
+                            <div id="calendar-dropdown" class="absolute top-full mt-2 right-0 bg-white border rounded-xl shadow-xl p-4 z-[60] w-72 hidden">
                                 <div class="flex items-center justify-between mb-4">
-                                    <button onclick="changeMonth(-1)" class="p-1 hover:bg-gray-100 rounded"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
-                                    <div id="calendar-header" class="font-bold text-lg">2026년 4월</div>
-                                    <button onclick="changeMonth(1)" class="p-1 hover:bg-gray-100 rounded"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+                                    <button onclick="changeMonth(-1)" class="p-1 hover:bg-gray-100 rounded"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                                    <div id="calendar-header" class="font-bold text-sm"></div>
+                                    <button onclick="changeMonth(1)" class="p-1 hover:bg-gray-100 rounded"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
                                 </div>
-                                <div class="grid grid-cols-7 gap-1 text-center text-xs font-bold text-gray-400 mb-2">
+                                <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-gray-400 mb-2">
                                     <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
                                 </div>
-                                <div id="calendar-days" class="grid grid-cols-7 gap-1">
-                                    <!-- JS에서 생성 -->
-                                </div>
+                                <div id="calendar-days" class="grid grid-cols-7 gap-1"></div>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- 뉴스 카드 그리드 -->
-                    <div id="news-grid" class="grid md:grid-cols-2 gap-6">
-                        <!-- NewsCard 컴포넌트들이 여기에 렌더링됨 -->
-                    </div>
-
-                    <!-- 페이지네이션 -->
-                    <div id="pagination" class="mt-8 flex items-center justify-center gap-2">
-                        <!-- JS에서 생성 -->
                     </div>
                 </div>
 
-                <!-- 오른쪽 사이드바 (고정) -->
-                <div class="lg:col-span-1">
-                    <div class="lg:sticky lg:top-24 space-y-6">
-                        
-                        <!-- 환율 카드 -->
-                        <div class="bg-white border rounded-xl p-6 shadow-sm">
-                            <h3 class="mb-6 font-bold text-gray-800 flex items-center gap-2">
-                                <i data-lucide="refresh-cw" class="w-4 h-4 text-blue-500"></i> 실시간 환율
-                            </h3>
-                            <div id="exchange-rates" class="space-y-5">
-                                <!-- 데이터 연동 영역 -->
-                            </div>
-                        </div>
+                <!-- 4. 뉴스 그리드 -->
+                <div id="news-grid" class="grid md:grid-cols-2 gap-6"></div>
+                <!-- 5. 페이지네이션 (필요 시 확장용) -->
+                <div id="pagination" class="mt-8 flex items-center justify-center gap-2"></div>
+            </div>
 
-                        <!-- Signal Station 카드 -->
-                        <div class="bg-gradient-to-br from-blue-600 to-blue-800 text-white rounded-xl p-6 shadow-lg">
-                            <h3 class="mb-2 font-bold flex items-center gap-2">
-                                <i data-lucide="radio" class="w-4 h-4"></i> Signal Station
-                            </h3>
-                            <p class="text-blue-100 text-sm mb-6 leading-relaxed">
-                                현재 signal 점수가 높은<br>주요 국가 리스크 상황입니다.
-                            </p>
-                            <div class="space-y-4">
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">이란 (IRN)</span>
-                                    <span class="font-bold text-xl text-red-300">92점</span>
-                                </div>
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">미국 (USA)</span>
-                                    <span class="font-bold text-xl">65점</span>
-                                </div>
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">한국 (KOR)</span>
-                                    <span class="font-bold text-xl text-green-300">45점</span>
-                                </div>
-                            </div>
-                        </div>
+            <!-- 오른쪽 사이드바: 환율 및 시그널 스테이션 -->
+            <div class="lg:col-span-1">
+                <div class="lg:sticky lg:top-24 space-y-6">
+                    <div class="bg-white border rounded-xl p-6 shadow-sm">
+                        <h3 class="mb-6 font-bold text-gray-800 flex items-center gap-2">
+                            <i data-lucide="refresh-cw" class="w-4 h-4 text-blue-500"></i> 실시간 환율
+                        </h3>
+                        <div id="exchange-rates" class="space-y-5"></div>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-blue-600 to-blue-800 text-white rounded-xl p-6 shadow-lg">
+                        <h3 class="mb-4 font-bold flex items-center gap-2"><i data-lucide="radio" class="w-4 h-4"></i> Signal Station</h3>
+                        <p class="text-blue-100 text-xs mb-6 leading-relaxed">현재 리스크 점수가 높은 주요 국가 상황입니다.</p>
+                        <div id="station-list" class="space-y-4"></div>
                     </div>
                 </div>
             </div>
-        </main>
+        </div>
+    </main>
 
-    </body>
     <script>
-        // 초기 상태 데이터
+        // --- 전역 상태 관리 ---
+        let allSignals = [];
+        let filteredNews = [];
         let selectedCountry = null;
-        let dateFilter = "";
-        let calendarMonth = new Date(2026, 3); // 2026년 4월
-        const countryNames = { "United States": "미국", "India": "이란", "Korea": "대한민국", "China": "중국", "Japan": "일본" };
+        let selectedDate = null;
+        let searchQuery = "";
+        let calendarMonth = new Date(2026, 3);
+        const countryNamesKOR = { "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국", "Iran": "이란", "Russia": "러시아", "India": "인도" };
 
-        const mockRates = [
-            { currency: "USD/KRW", rate: 1384.50, change: 0.45 },
-            { currency: "JPY/KRW", rate: 8.92, change: -0.12 },
-            { currency: "EUR/KRW", rate: 1482.10, change: 0.22 }
-        ];
+        const myChart = echarts.init(document.getElementById('map'));
+         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
+        // 1. 데이터 로드: ml.py가 서버(main.py)에 받은 뉴스 데이터와 환율/원자재 데이터
+        async function fetchMainData() {
+            try {
+                // 뉴스 데이터 가져오기
+                const res = await axios.get('/api/risk-signals');
+                allSignals = res.data.data;
 
-        // 초기화
-        document.addEventListener('DOMContentLoaded', () => {
-            renderExchangeRates();
-            renderNews();
-            initCalendar();
-            lucide.createIcons();
-        });
+                // 2. 시장 지표 데이터 가져오기
+                const indicatorRes = await axios.get('/api/market-indicators');
+                if (indicatorRes.data.status === "success") {
+                    renderExchangeRates(indicatorRes.data.data);
+                }
 
-        var chartDom = document.getElementById('map');
-        var myChart = echarts.init(chartDom);
+                if (allSignals && allSignals.length > 0) {
+                    document.getElementById('update-time').innerText = `${new Date(allSignals[0].analyzed_at).toLocaleString()} 갱신`;
+                    renderExchangeRates(allSignals[0].final_total_score.exchange_details);
+                }
 
-        // 세계 지도 데이터를 불러온 뒤 차트
-        fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json')
-            .then(response => response.json())
-            .then(worldJson => {
-                echarts.registerMap('world', worldJson);
-                
-                // ES_3에서 가져올 데이터 예시 (국가 이름은 world.json 기준)
-                var data = [
-                    {name: 'Korea', value: 1}, // 1단계: 초록
-                    {name: 'United States', value: 1}, // 3단계: 빨강
-                    {name: 'China', value: 1}, // 2단계: 노랑
-                    {name: 'Japan', value: 2}
-                ];
-
-                var option = {
-                    tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
-                    // 위험단계별 컬러 설정 (기획안 반영)
-                    visualMap: {
-                        type: 'piecewise',
-                        pieces: [
-                            {value: 1, label: '1단계 (안정)', color: '#2ECC71'},
-                            {value: 2, label: '2단계 (주의)', color: '#FFD400'},
-                            {value: 3, label: '3단계 (위험)', color: '#FF4B4B'}
-                        ],
-                        left: 'left'
-                    },
-                    series: [{
-                        type: 'map',
-                        map: 'world',// 지도가 박스 안에 꽉 차도록 설정
-                        top: '10%',    // 상단 여백
-                        bottom: '10%', // 하단 여백
-                        left: '5%',    // 좌측 여백
-                        right: '5%',   // 우측 여백
-                        layoutCenter: ['50%', '50%'], // 지도를 정중앙에 배치
-                        layoutSize: '120%',
-                        data: data, // ES_3에서 가져온 1~3단계 데이터
-                        roam: true,
-                        
-                        // [추가] 마우스 오버(Hover) 시 스타일
-                        emphasis: { 
-                            label: { show: true },
-                            itemStyle: { 
-                                areaColor: '#eee' // 마우스 올렸을 때는 연한 회색
-                            }
-                        },
-
-                        // [핵심 추가] 클릭해서 '선택(Select)'되었을 때 스타일
-                        selectedMode: 'single', // 한 번에 하나의 국가만 선택 가능
-                        select: {
-                            itemStyle: {
-                                areaColor: '#995EFF', // [추가] 선택된 국가를 진한 회색으로 고정!
-                                borderColor: '#fff', // 테두리를 흰색으로 강조
-                                borderWidth: 2
-                            },
-                            label: {
-                                show: true,
-                                color: '#fff' // 글자색도 흰색으로 변경
-                            }
-                        }
-                    }]
-                };
-                window.addEventListener('resize', function() {
-                    myChart.resize();
-                });
-                myChart.setOption(option);
-            });
-        myChart.on('click', function (params) {
-        // params.name에 클릭한 국가 이름이 들어있습니다.
-        console.log(params.name + "의 뉴스를 불러옵니다.");
-        selectCountry(params.name);
-        // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
-        
-        });
-
-        // 환율 렌더링
-        function renderExchangeRates() {
-            const container = document.getElementById('exchange-rates');
-            container.innerHTML = mockRates.map(rate => `
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-xs font-bold text-gray-400 uppercase">${rate.currency.split('/')[0]} 환율</p>
-                        <p class="text-xl font-bold">${rate.rate.toLocaleString()}원</p>
-                    </div>
-                    <div class="flex items-center gap-1 ${rate.change >= 0 ? "text-red-500" : "text-blue-500"}">
-                        <i data-lucide="${rate.change >= 0 ? 'trending-up' : 'trending-down'}" class="w-4 h-4"></i>
-                        <span class="text-sm font-bold">${Math.abs(rate.change)}%</span>
-                    </div>
-                </div>
-            `).join('');
-            lucide.createIcons();
+                applyFilters();
+                renderHeatmap();
+                updateStation();
+            } catch (e) {
+                console.error("데이터 로드 에러:", e);
+            }
         }
 
-        // 뉴스 렌더링 (단순화된 예시 카드)
-        function renderNews() {
-            const grid = document.getElementById('news-grid');
-            const newsTitle = document.getElementById('news-title');
-            // newsTitle.innerText = selectedCountry ? `${countryNames[selectedCountry]} 관련 리스크 뉴스` : "오늘의 뉴스";
-            
-            if (selectedCountry) {
-                // 사용자가 지도에서 국가를 선택했을 때
-                const countryName = countryNames[selectedCountry];
-                newsTitle.innerText = countryName + " 관련 리스크 뉴스";
-            } else {
-                // 페이지 접속시 초기 상태
-                newsTitle.innerText = "오늘의 뉴스";
-            }           
+        // 2. 통합 필터: 국가 + 검색 + 날짜 동시 처리
+        function applyFilters() {
+            filteredNews = allSignals.filter(item => {
+                const matchCountry = !selectedCountry || item.country_name === selectedCountry;
+                const matchSearch = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchDate = !selectedDate || item.analyzed_at.startsWith(selectedDate);
+                return matchCountry && matchSearch && matchDate;
+            });
+            renderNewsGrid();
+        }
 
-            // 가상의 데이터 4개 출력
-            const newsData = [
-                { title: "중동 지정학적 리스크 확산 우려", media: "글로벌경제", risk: 85, time: "2시간 전" },
-                { title: "미 국채 금리 변동성에 따른 시장 영향", media: "금융타임즈", risk: 42, time: "4시간 전" },
-                { title: "반도체 공급망 재편과 신규 규제", media: "산업뉴스", risk: 68, time: "5시간 전" },
-                { title: "환율 급등에 따른 수출 기업 비상", media: "경제매일", risk: 75, time: "7시간 전" }
+        // 3. ECharts 지도: 위기단계별 색상 매핑
+        function renderHeatmap() {
+            fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json')
+                .then(res => res.json())
+                .then(worldJson => {
+                    echarts.registerMap('world', worldJson);
+                    const levelMap = { "심각": 3, "주의": 2, "안정": 1 };
+
+                    const mapData = [];
+                    const processed = new Set();
+                    allSignals.forEach(s => {
+                        if (!processed.has(s.country_name)) {
+                            mapData.push({
+                                name: s.country_name,
+                                value: levelMap[s.risk_level] || 1,
+                                score: Math.round((s.final_total_score.total + 1) * 50)
+                            });
+                            processed.add(s.country_name);
+                        }
+                    });
+
+                    myChart.setOption({
+                        visualMap: {
+                            type: 'piecewise',
+                            pieces: [
+                                {value: 1, label: '안정', color: '#2ECC71'},
+                                {value: 2, label: '주의', color: '#FFD400'},
+                                {value: 3, label: '심각', color: '#FF4B4B'}
+                            ],
+                            show: false
+                        },
+                        series: [{
+                            type: 'map', map: 'world', data: mapData, roam: true,
+                            emphasis: { itemStyle: { areaColor: '#f3f4f6' } },
+                            selectedMode: 'single'
+                        }]
+                    });
+
+                    myChart.on('click', (p) => { if (p.data) selectCountry(p.name, p.data.score); });
+                });
+        }
+
+        // 4. 필터 핸들러
+        function selectCountry(name, score) {
+            selectedCountry = name;
+            const infoBox = document.getElementById('selected-country-info');
+            document.getElementById('country-name').innerText = countryNamesKOR[name] || name;
+            document.getElementById('country-score').innerText = `${score}점`;
+            infoBox.classList.remove('hidden');
+            applyFilters();
+        }
+
+        function resetCountryFilter() {
+            selectedCountry = null;
+            document.getElementById('selected-country-info').classList.add('hidden');
+            myChart.dispatchAction({ type: 'unSelect', seriesIndex: 0 });
+            applyFilters();
+        }
+
+        function handleSearch() {
+            searchQuery = document.getElementById('search-input').value;
+            applyFilters();
+        }
+        // 환율/원자재 라벨링 4[위에 함수에서 데이터 가져와서 환율 가격 보여줌]
+        // 5. 환율 및 뉴스 렌더링
+        function renderExchangeRates(rates) {
+            const container = document.getElementById('exchange-rates');
+            if (!rates) {
+                container.innerHTML = '<p class="text-xs text-gray-400">데이터를 불러올 수 없습니다.</p>';
+                return;
+            }
+
+            // 1. 환율 데이터 구성 (위안화 추가)
+            const currencies = [
+                { label: '달러/KRW', val: rates.usd, key: 'USD' },
+                { label: '유로/KRW', val: rates.eur, key: 'EUR' },
+                { label: '엔화/KRW', val: rates.jpy, key: 'JPY' },
+                { label: '위안화/KRW', val: rates.cny, key: 'CNY' } // 드디어 추가!
             ];
 
-            grid.innerHTML = newsData.map(n => `
-                <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group cursor-pointer">
-                    <div class="h-40 bg-gray-200 relative overflow-hidden">
-                        <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                        <div class="absolute bottom-3 left-3 text-white">
-                            <span class="text-xs font-medium px-2 py-1 bg-red-600 rounded mb-2 inline-block">RISK ${n.risk}</span>
-                        </div>
+            // 2. 원자재 데이터 구성 (main.py에서 보낸 raw_material_score 참고)
+            // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
+
+            container.innerHTML = currencies.map(c => `
+                <div class="flex items-center justify-between border-b border-gray-50 pb-2">
+                    <div>
+                        <p class="text-[10px] font-bold text-gray-400 uppercase">${c.label}</p>
+                        <p class="text-lg font-bold">${c.val ? c.val.toLocaleString() : '---'}원</p>
                     </div>
+                    <div class="${c.val > 1000 ? 'text-red-500' : 'text-blue-500'}">
+                        <i data-lucide="trending-up" class="w-4 h-4"></i>
+                    </div>
+                </div>
+            `).join('');
+
+            lucide.createIcons(); // 아이콘 재생성
+}
+        // 뉴스 그리드 설정
+        function renderNewsGrid() {
+            const grid = document.getElementById('news-grid');
+            const title = document.getElementById('news-title');
+            title.innerText = selectedCountry ? `${countryNamesKOR[selectedCountry] || selectedCountry} 리스크 뉴스` : "오늘의 주요 뉴스";
+
+            if (filteredNews.length === 0) {
+                grid.innerHTML = `<p class="col-span-2 text-center py-20 text-gray-400">일치하는 뉴스가 없습니다.</p>`;
+                return;
+            }
+
+            grid.innerHTML = filteredNews.map(n => `
+                <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all group cursor-pointer" onclick="location.href='custom_news.html'">
                     <div class="p-4">
-                        <div class="flex justify-between items-start mb-2">
-                            <span class="text-xs font-bold text-blue-600 uppercase">${n.media}</span>
-                            <span class="text-xs text-gray-400">${n.time}</span>
+                        <div class="flex justify-between items-start mb-3">
+                            <!-- 숫자 대신 서버에서 보낸 risk_status(안정/주의/위기)와 risk_color를 사용합니다 -->
+                            <span class="text-[10px] font-bold px-2 py-1 rounded"
+                                  style="background-color: ${n.risk_color}20; color: ${n.risk_color};">
+                                ${n.risk_status} (RISK ${Math.round((n.final_total_score.total + 1) * 50)})
+                            </span>
+                            <span class="text-[10px] text-gray-400">${n.analyzed_at.split('T')[0]}</span>
                         </div>
-                        <h4 class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${n.title}</h4>
+                        <h4 class="font-bold text-sm leading-snug group-hover:text-blue-600 transition-colors line-clamp-2">${n.title}</h4>
+                        <p class="text-[11px] text-gray-500 mt-2">${n.press_name}</p>
                     </div>
                 </div>
             `).join('');
         }
 
-        // 국가 선택 로직
-        function selectCountry(code) {
-            selectedCountry = code;
-            console.log(code);
-            const infoBox = document.getElementById('selected-country-info');
-            const nameEl = document.getElementById('country-name');
-            const scoreEl = document.getElementById('country-score');
+        function updateStation() {
+            const list = document.getElementById('station-list');
+            const top = allSignals
+                .map(s => ({ name: s.country_name, score: Math.round((s.final_total_score.total + 1) * 50) }))
+                .filter((v, i, a) => a.findIndex(t => t.name === v.name) === i)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 3);
 
-            nameEl.innerText = countryNames[code];
-            
-            // test 
-            if(code === 'India'){
-                scoreEl.innerText = '92점 (심각)';
-                scoreEl.className = 'font-bold text-red-600';
-            }else{
-                scoreEl.innerText = '65점 (주의)';
-                scoreEl.className = 'font-bold text-yellow-600';
-            };
-            
-            infoBox.classList.remove('hidden');
-            renderNews();
+            list.innerHTML = top.map(c => `
+                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
+                    <span class="font-medium text-sm">${countryNamesKOR[c.name] || c.name}</span>
+                    <span class="font-bold text-lg ${c.score > 70 ? 'text-red-300' : 'text-blue-100'}">${c.score}점</span>
+                </div>
+            `).join('');
         }
 
-        // 캘린더 로직
-        function toggleCalendar() {
-            const dropdown = document.getElementById('calendar-dropdown');
-            dropdown.classList.toggle('hidden');
-        }
-
+        // 6. 달력 기능
+        function toggleCalendar() { document.getElementById('calendar-dropdown').classList.toggle('hidden'); }
         function initCalendar() {
             const container = document.getElementById('calendar-days');
             const header = document.getElementById('calendar-header');
             container.innerHTML = '';
-            
-            const year = calendarMonth.getFullYear();
-            const month = calendarMonth.getMonth();
-            header.innerText = `${year}년 ${month + 1}월`;
-
-            const firstDay = new Date(year, month, 1).getDay();
-            const lastDate = new Date(year, month + 1, 0).getDate();
-
-            for (let i = 0; i < firstDay; i++) {
-                container.innerHTML += `<div></div>`;
-            }
-
-            for (let d = 1; d <= lastDate; d++) {
-                const isToday = d === 27; // 예시용
-                container.innerHTML += `
-                    <button onclick="selectDate(${d})" class="p-2 text-sm rounded-lg hover:bg-blue-50 transition-colors ${isToday ? 'bg-blue-600 text-white font-bold' : ''}">
-                        ${d}
-                    </button>
-                `;
+            const y = calendarMonth.getFullYear(), m = calendarMonth.getMonth();
+            header.innerText = `${y}년 ${m + 1}월`;
+            const first = new Date(y, m, 1).getDay(), last = new Date(y, m + 1, 0).getDate();
+            for (let i = 0; i < first; i++) container.innerHTML += `<div></div>`;
+            for (let d = 1; d <= last; d++) {
+                const dateStr = `${y}-${String(m + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                container.innerHTML += `<button onclick="selectDate('${dateStr}')" class="p-1 text-[10px] rounded hover:bg-blue-50 ${selectedDate === dateStr ? 'bg-blue-600 text-white' : ''}">${d}</button>`;
             }
         }
-
-        function changeMonth(step) {
-            calendarMonth.setMonth(calendarMonth.getMonth() + step);
-            initCalendar();
+        function selectDate(date) {
+            selectedDate = date;
+            document.getElementById('date-display').innerText = date;
+            toggleCalendar(); initCalendar(); applyFilters();
         }
+        function changeMonth(step) { calendarMonth.setMonth(calendarMonth.getMonth() + step); initCalendar(); }
 
-        function selectDate(day) {
-            const dateStr = `${calendarMonth.getFullYear()}-${calendarMonth.getMonth() + 1}-${day}`;
-            document.getElementById('date-display').innerText = dateStr;
-            document.getElementById('date-display').classList.remove('text-gray-400');
-            toggleCalendar();
-            renderNews();
+        // 7. 공통 UI (Navbar, Logout)
+        function updateNavbar() {
+            const id = sessionStorage.getItem('savedUserId');
+            const authContainer = document.getElementById('authContainer');
+            if (id && id !== 'guest') {
+                document.getElementById('user-greeting').classList.remove('hidden');
+                document.getElementById('user_name').innerText = id;
+                authContainer.innerHTML = `<button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 uppercase">LOG OUT</button>`;
+            } else {
+                authContainer.innerHTML = `<a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 uppercase">LOG IN</a>`;
+            }
         }
+        function handleLogout() { if(confirm("로그아웃 하시겠습니까?")) { axios.get("/logout"); sessionStorage.clear(); location.href="login.html"; }}
 
+        // 초기 실행
         document.addEventListener('DOMContentLoaded', () => {
-            // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
-            const navItems = document.querySelectorAll('.nav-item');
-
-            navItems.forEach(item => {
-                // href 속성값에서 파일명만 가져와서 비교
-                const itemHref = item.getAttribute('href').split("/").pop();
-                
-                if (currentPath === itemHref) {
-                    if (item.querySelector('i')) {
-                        item.classList.replace('text-gray-600', 'text-blue-600');
-                        item.classList.add('bg-blue-50');
-                    } else {
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
-                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
-                    }
-                }
-            });
-
-            if (window.lucide) lucide.createIcons();
-        });
-
-        function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")) location.href = "login.html";
-        }
-
-        // 바깥 클릭 시 캘린더 닫기
-        window.addEventListener('click', (e) => {
-            const dropdown = document.getElementById('calendar-dropdown');
-            if (!dropdown.contains(e.target) && !e.target.closest('button[onclick="toggleCalendar()"]')) {
-                dropdown.classList.add('hidden');
-            }
+            fetchMainData();
+            updateNavbar();
+            initCalendar();
+            lucide.createIcons();
+            setInterval(fetchMainData, 600000); // 10분 자동 갱신
         });
     </script>
+</body>
 </html>

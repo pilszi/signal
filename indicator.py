@@ -1,6 +1,4 @@
 import json
-import logging
-
 import requests
 import numpy as np
 import yfinance as yf
@@ -13,11 +11,6 @@ from db import get_db
 from sqlalchemy import text
 import random
 # 전역 변수 유지
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-logging.getLogger("elasticsearch").setLevel(logging.WARNING)  # ES 내부 로그 숨기기
-logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그 숨기기
-logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
 cny_key_index = 0
 
 
@@ -32,7 +25,7 @@ def get_cny_rate_with_rotation():
             data = response.json()
             if data.get('result') == 'success':
                 rate = data['conversion_rate']
-                # logging.info(f"✅ [API #{cny_key_index + 1}] 위안화: {rate}")
+                # print(f"✅ [API #{cny_key_index + 1}] 위안화: {rate}")
                 return rate
             elif data.get('result') == 'error':
                 cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
@@ -42,10 +35,10 @@ def get_cny_rate_with_rotation():
             continue
     return None
 
-
+# 환율/원자재 라벨링 1: 지표 실시간 수치 가져와서 db에 저장 -> 그 다음 main
 def collect_market_data_job():
     """60분 간격으로 실행될 수집 및 DB 저장 작업"""
-    logging.info(f"\n🚀 [수집 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\n🚀 [수집 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     ticker_to_no = {
         "USDKRW=X": 1, "EURKRW=X": 2, "JPYKRW=X": 3, "CNY=X": 4,
         "GC=F": 5, "SI=F": 6, "HG=F": 7, "CL=F": 8, "BZ=F": 9, "NG=F": 10, "QM=F": 11
@@ -88,16 +81,16 @@ def collect_market_data_job():
                             """)
                         session.execute(query, {"no": i_no, "time": current_time, "price": final_price})
 
-                        logging.info(f"  ✅ [DB저장] {t:10} (No.{i_no}) | {final_price}")
+                        print(f"  ✅ [DB저장] {t:10} (No.{i_no}) | {final_price}")
                     else:
-                        logging.info(f"  ⚠️ [데이터없음] {t}")
+                        print(f"  ⚠️ [데이터없음] {t}")
 
                 except Exception as e:
-                    logging.error(f"  ❌ [오류] {t}: {e}")
+                    print(f"  ❌ [오류] {t}: {e}")
 
         # yield가 끝나면 get_db 내부에서 자동으로 commit()이 호출됩니다.
 
-    logging.info(f"💤 수집 완료. 60분 대기...\n")
+    print(f"📊 [INDICATOR] {datetime.now().strftime('%H:%M:%S')} 기준 11종 지표 업데이트 완료")
 
 # --- 스케줄러 설정 ---
 
@@ -112,11 +105,11 @@ if __name__ == "__main__":
 
     # 스케줄러 시작
     scheduler.start()
-    logging.info("⏰ APScheduler 가동 중... (Ctrl+C로 종료)")
+    print("⏰ APScheduler 가동 중... (Ctrl+C로 종료)")
 
     try:
         while True:
             time.sleep(1)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
-        logging.info("정지되었습니다.")
+        print("정지되었습니다.")

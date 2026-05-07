@@ -1,24 +1,34 @@
 import time
 import random
+import html
+import logging
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+
+import pandas as pd
 from elasticsearch import Elasticsearch
 from deep_translator import GoogleTranslator
 from konlpy.tag import Okt
-from collections import Counter
-import re
-from utils import extract_keywords, find_target_country
-from concurrent.futures import ThreadPoolExecutor
-from utils import generate_article_id
-import logging
+from dateutil import parser as date_parser
+
+# 커스텀 유틸리티 함수 (기존 파일에서 불러오기)
+from utils import extract_keywords, find_target_country, generate_article_id
+
+# 로그 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-
-logging.getLogger("elasticsearch").setLevel(logging.WARNING)  # ES 내부 로그 숨기기
-logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그 숨기기
-logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
-
+logging.getLogger("elasticsearch").setLevel(logging.WARNING)
+logging.getLogger("elastic_transport").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 okt = Okt()
-es = Elasticsearch(["http://localhost:9200"])
-TARGET_INDICES = ["news_en_es1"]
+es = Elasticsearch(
+    ["http://100.123.232.79:9200"],
+    request_timeout=30,
+    retry_on_timeout=True
+)
+
+TARGET_INDICES = ["news_en"]
+DEST_INDEX = "news_origin"
 
 
 def translate_chunk(chunk):
@@ -26,42 +36,40 @@ def translate_chunk(chunk):
     if not chunk or not chunk.strip():
         return ""
     try:
-        # 병렬 처리 시 구글 차단을 막기 위해 약간의 지연시간 추가
-        time.sleep(random.uniform(0.1, 0.4))
+        time.sleep(random.uniform(0.1, 0.3))
         result = GoogleTranslator(source='en', target='ko').translate(chunk)
-        # 번역 결과가 None이면 빈 문자열 반환 (중요!)
         return result if result else ""
     except Exception:
-        # 에러 발생 시 None이 아닌 문자열을 반환하여 join 에러 방지
         return "[번역 실패]"
 
 
 def translate_full_text_fast(text, limit=1500):
     """본문을 쪼갠 뒤 여러 스레드로 동시에 번역"""
-    if not text: return ""
+    if not text:
+        return ""
 
     chunks = [text[i:i + limit] for i in range(0, len(text), limit)]
 
-    with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         translated_chunks = list(executor.map(translate_chunk, chunks))
 
-    # [수정 포인트] 리스트 안에 None이 있을 경우를 대비해 한 번 더 필터링
-    # 모든 요소를 문자열로 강제 변환(str)하여 join 에러를 원천 차단합니다.
     safe_chunks = [str(c) if c is not None else "" for c in translated_chunks]
-
     return "".join(safe_chunks)
 
 
-def start_worker():
-    logging.info(f"[{time.strftime('%H:%M:%S')}] 다중 인덱스 번역 및 분석 워커 가동 시작...")
-    logging.info(f"대상 인덱스: {TARGET_INDICES} -> 목적지: news_origin_es2")
+def process_translation():
+    """
+    영어 기사를 번역하고, 시간을 KST(+9h)로 변환하여 저장하는 메인 함수
+    연속 처리를 위해 while 루프를 추가함.
+    """
+    logging.info(f"[{datetime.now().strftime('%H:%M:%S')}] 번역 및 시간 변환 작업 시작...")
 
-    while True:
-        found_any_job = False
+    while True: # [수정] 번역 대상이 없을 때까지 무한 반복
+        found_job_in_this_turn = False
 
         for index_name in TARGET_INDICES:
             try:
-                # 1. ES1에서 번역되지 않은 기사 검색
+                # 1. ES에서 번역되지 않은 기사 1개 가져오기
                 query = {"query": {"term": {"is_translated": False}}}
                 res = es.search(index=index_name, body={**query, "size": 1}, ignore_unavailable=True)
                 hits = res['hits']['hits']
@@ -69,39 +77,52 @@ def start_worker():
                 if not hits:
                     continue
 
-                found_any_job = True
+                found_job_in_this_turn = True
                 doc_id = hits[0]['_id']
                 source = hits[0]['_source']
 
-                logging.info(f"\n[{time.strftime('%H:%M:%S')}] [{index_name}] 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
+                logging.info(f"[{index_name}] 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
 
-                # 2. 번역 진행
+                # 2. 날짜 KST(+9시간) 변환 로직
+                raw_date = source.get('published_date')
+                final_pub_date = raw_date
+
+                if raw_date:
+                    try:
+                        dt_obj = date_parser.parse(raw_date)
+                        kst_dt = dt_obj + timedelta(hours=9)
+                        final_pub_date = kst_dt.strftime('%Y-%m-%dT%H:%M:%S')
+                    except Exception as date_err:
+                        logging.warning(f"날짜 변환 오류 ({raw_date}): {date_err}")
+
+                # 3. 번역 진행
                 translator = GoogleTranslator(source='en', target='ko')
 
-                # 제목 번역 (짧으므로 직접 실행)
+                # 제목 번역
                 raw_title = source.get('title_en', '')
                 ko_title = translator.translate(raw_title) if raw_title else ""
-                if not ko_title: ko_title = ""  # None 방어
+                ko_title = html.unescape(ko_title) if ko_title else ""
 
-                # 본문 번역 (길어서 병렬 처리)
-                ko_content = translate_full_text_fast(source.get('content_en', ''))
+                # 본문 번역 (멀티스레딩)
+                raw_content = source.get('content_en', '')
+                ko_content = translate_full_text_fast(raw_content)
+                ko_content = html.unescape(ko_content)
 
-                # 3. 키워드 및 국가 추출 (한글 데이터 기준)
+                # 4. 키워드 및 국가 추출
                 extracted_ks = extract_keywords(ko_title, ko_content)
                 target_country = find_target_country(ko_title, ko_content)
 
-                logging.info(f"🔍 추출 완료: 국가({target_country}), 키워드({len(extracted_ks)}개)")
-
-                # 4. [ES1 업데이트] 번역 완료 상태로 변경 (refresh=True 필수)
+                # 5. [ES1 업데이트] 원본 인덱스 상태 변경 (반드시 필요!)
+                # 이 업데이트를 안 하면 다음 루프에서 똑같은 기사를 또 가져옵니다.
                 es.update(index=index_name, id=doc_id, body={
                     "doc": {"is_translated": True}
                 }, refresh=True)
 
-                # 5. [ES2 저장]
+                # 6. [ES2 저장]
                 analysis_doc = {
                     "title": ko_title,
                     "content": ko_content,
-                    "published_date": source.get('published_date'),
+                    "published_date": final_pub_date,
                     "is_processed": False,
                     "url": source.get('url'),
                     "main_image": source.get('main_image'),
@@ -110,17 +131,20 @@ def start_worker():
                     "country_name": target_country
                 }
 
-                es.index(index="news_origin_es2", id=doc_id, document=analysis_doc)
-                logging.info(f"✅ ES2 저장 완료 및 상태 업데이트 성공")
+                es.index(index=DEST_INDEX, id=doc_id, document=analysis_doc)
+                logging.info(f"✅ 저장 완료 (KST: {final_pub_date})")
 
             except Exception as e:
-                logging.info(f"❌ 에러 발생 ({index_name}): {e}")
-                time.sleep(5)  # 에러 시 5초 대기
+                logging.error(f"❌ [{index_name}] 처리 중 오류 발생: {e}")
+                # 오류 발생 시 무한 루프에 빠지지 않도록 잠시 대기
+                time.sleep(1)
                 continue
 
-        if not found_any_job:
-            time.sleep(10)  # 1분은 너무 기니 10초로 단축 제안
+        # 모든 인덱스를 확인했는데 할 작업이 없다면 루프 종료
+        if not found_job_in_this_turn:
+            logging.info("대기 중: 모든 번역 작업이 완료되었습니다.")
+            break
 
 
 if __name__ == "__main__":
-    start_worker()
+    process_translation()
