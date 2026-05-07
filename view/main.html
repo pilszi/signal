@@ -435,6 +435,27 @@
             }
         });
 
+        // signal 분석 시간 변화 함수(예. 방금전, 30분전, 1시간전...)
+        function timeAgo(dateString) {
+            const now = new Date();
+            const past = new Date(dateString);
+            const diffInSeconds = Math.floor((now - past) / 1000);
+
+            if (diffInSeconds < 60) return '방금 전';
+            
+            const diffInMinutes = Math.floor(diffInSeconds / 60);
+            if (diffInMinutes < 60) return `${diffInMinutes}분 전`;
+            
+            const diffInHours = Math.floor(diffInMinutes / 60);
+            if (diffInHours < 24) return `${diffInHours}시간 전`;
+            
+            const diffInDays = Math.floor(diffInHours / 24);
+            if (diffInDays < 7) return `${diffInDays}일 전`;
+            
+            // 일주일이 넘어가면 그냥 원래 날짜(년-월-일)를 보여줍니다.
+            return dateString.split('T')[0]; 
+        }
+
         // 알림 렌더링 함수
         async function updateNotifUI() {
             const badge = document.getElementById('notifBadge');
@@ -494,7 +515,7 @@
                         <div class="notif-content">
                             <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
                             <div class="notif-message">${n.prediction}</div>
-                            <div class="notif-time">${n.signal_time} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
+                            <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
                         </div>
                         <div class="notif-delete" 
                             onclick="deleteItem(event, ${n.signal_no})" 
