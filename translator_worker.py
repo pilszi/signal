@@ -27,7 +27,7 @@ es = Elasticsearch(
     retry_on_timeout=True
 )
 
-TARGET_INDICES = ["news_en"]
+TARGET_INDICES = ["news_en1"]
 DEST_INDEX = "news_origin"
 
 

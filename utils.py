@@ -3,6 +3,9 @@ import html
 from collections import Counter
 import hashlib
 from config import Config
+from konlpy.tag import Okt
+
+okt = Okt()
 
 def generate_article_id(url):
     return hashlib.sha256(url.strip().encode('utf-8')).hexdigest()
