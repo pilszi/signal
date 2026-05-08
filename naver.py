@@ -105,8 +105,9 @@ def bulk_search_naver_news():
             results = list(executor.map(process_single_article, tasks))
             newly_saved = results.count(True)
 
-    logging.info(f"📊 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
-    return {"newly_saved": newly_saved, "already_exists": already_exists}
+    logging.info(f"📊 네이버 수집 요약: 신규 저장 {newly_saved}건 / 중복 제외 {already_exists}건")
+    logging.info(f"---네이버 수집 끝---")
+    return {"status": "success", "newly_saved": newly_saved}
 
 
 

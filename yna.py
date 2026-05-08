@@ -56,9 +56,13 @@ def article_crawling(driver, p: int, keyword):
     logging.info(f'url = {url}')
 
     try:
-        driver.get(url)
-        time.sleep(2)
-
+        # [수정 포인트] 기존 driver.get(url)과 time.sleep(2)를 이 블록으로 교체합니다.
+        try:
+            driver.get(url)
+            time.sleep(2)  # 로딩 대기
+        except Exception as e:
+            logging.warning(f"⚠️ 페이지 로딩 타임아웃 발생(30초 초과): {url}")
+            return []  # 현재 페이지/키워드는 포기하고 즉시 종료 (함수 밖으로 나감)
         try:
             temp_press = driver.find_element(By.CSS_SELECTOR, "a.logo-yna03").get_attribute("aria-label")
             if temp_press: press = temp_press
@@ -167,6 +171,10 @@ def article_process(keywords, total_pages):
     logging.info("----- 연합뉴스 수집 시작 -----")
     final_stats = {"success": 0, "failed": 0, "skipped": 0}
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    driver.set_page_load_timeout(30)  # 페이지 로딩 30초 제한
+    driver.implicitly_wait(5)  # 요소 찾기 5초 제한
+
     try:
         for key in keywords:
             for p in range(1, total_pages + 1):
