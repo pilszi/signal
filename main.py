@@ -8,8 +8,12 @@ import traceback
 import jsonify
 import sqlalchemy
 from datetime import datetime
-from elasticsearch import Elasticsearch
+
 from concurrent.futures import ThreadPoolExecutor
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+from elasticsearch import Elasticsearch
 from fastapi import FastAPI, Body, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -100,6 +104,7 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
         # 이미 학습이 완료된 경우 바로 분석 작업 등록
         if not scheduler.get_job('ml_analysis'):
             logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
+            # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
             from datetime import datetime
             scheduler.add_job(
                 ml.run_analysis,
@@ -205,7 +210,7 @@ def regist(info: RegistModel):
         child_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES (:member_no, :keyword)")
         for key in info.keyword:
             db.execute(child_sql, {"member_no": member_no, "keyword": key})
-    return {"msg": "regist OK!"}
+    return
 
 
 @app.post('/login')
@@ -225,7 +230,8 @@ def login(info: Dict[str, str], req: Request):
             req.session['user_name'] = result.user_name
             req.session["current_log_no"] = res.lastrowid
             return {"msg": True}
-    return {"msg": False}
+        else:
+            return {"msg": False}
 
 
 @app.get("/logout")
@@ -238,8 +244,20 @@ def logout(req: Request):
                 sqlalchemy.text("UPDATE member_login_log SET logout_time = NOW(), status = 0 WHERE log_no = :log_no"),
                 {"log_no": log_no})
     req.session.clear()
-    return {"msg": "logout OK!"}
+    return
 
+# session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
+@app.get('/session_out')
+def session_out():
+    count = 0
+    with get_db() as db:
+        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
+                                    WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
+        result = db.execute(logout_sql)
+        count = result.rowcount
+
+    print(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
+    return
 
 @app.get("/profile")
 def get_profile(id: str):
@@ -290,7 +308,7 @@ def update_profile(info: Dict[str, Any]):
             res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
             key_insert += res.rowcount
 
-    return {"msg": "ok", "updated_keywords": key_insert}
+    return {"updated_keywords": key_insert}
 
 
 @app.post("/delete_member")
@@ -311,7 +329,347 @@ def delete_member(info: Dict[str, str]):
             db.execute(sqlalchemy.text("DELETE FROM member_login_log WHERE member_no = :m_no"), {"m_no": m_no})
             db.execute(sqlalchemy.text("DELETE FROM member_info WHERE member_no = :m_no"), {"m_no": m_no})
             return {"msg": True}
-    return {"msg": False}
+        else:
+            return {"msg": False}
+
+
+# main 페이지 오늘의 뉴스 조회
+@app.get("/public_signals")
+def public_signals():
+    # print('뉴스 요청')
+    # body = {"query": {"bool": {"filter": [{"range": {
+    #                         "published_date": {
+    #                             "gte": "now-12h",     # 현재 시각 기준 12시간 전부터
+    #                             "lte": "now",         # 현재 시각까지
+    #                         }}}]
+    #         }
+    #     },
+    #     "sort": [{ "published_date": "desc" }]        # 최신 기사가 먼저 나오도록 정렬
+    #     ,"size": 100
+    # }
+    body = {
+        "sort": [
+            {"published_date": {"order": "desc"}}  # 최신 기사가 먼저 나오도록 정렬
+        ],
+        "size": 100
+    }
+    res = es.search(index= "news_labeling", body={"size":100})
+    print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
+    # print(res['hits']['hits'])
+    public_news = []
+    for news in res['hits']['hits']:
+        # print(news["_source"])
+        _news = {
+            'title' : news["_source"]["title"],
+            'url' : news["_source"]["url"],
+            'main_image' : news["_source"]["main_image"],
+            'published_date' : news["_source"]["published_date"],
+            'press_name' : news["_source"]["press_name"],
+            'risk_level' : news["_source"]["risk_level"],
+            'risk_score' : news["_source"]["final_total_score"]["total"]
+        }
+        public_news.append(_news)
+    # print(public_news)
+    return {"msg": public_news}
+
+@app.get("/main/country")
+def country():
+    with (get_db() as db):
+        sql = sqlalchemy.text("""
+                SELECT
+                    t3.country_en_name as en_name,
+                    COUNT(CASE WHEN t2.risk_level = '안정' THEN 1 END) AS 안정_count,
+                    COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
+                    COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
+                    -- 바로 점수 계산까지!
+                    SUM(CASE 
+                        WHEN t2.risk_level = '안정' THEN 10 
+                        WHEN t2.risk_level = '주의' THEN 30 
+                        WHEN t2.risk_level = '위기' THEN 100 
+                        ELSE 0 
+                    END) AS total_score
+                FROM signal_country t1 
+                    JOIN signal_message t2 ON t1.signal_no = t2.signal_no
+                        JOIN country t3 ON t3.country_no = t1.country_no
+                        WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
+                            GROUP BY t1.country_no;
+            """)
+        country_all = db.execute(sql).mappings().fetchall()
+        signal_country = []
+        for country in country_all:
+            con = {
+                "en_name": country["en_name"],
+                "total_score": country["total_score"]
+            }
+    return {"country_signal": signal_country}
+
+
+# 기사 열람 기록 저장
+@app.post("/news_view")
+def news_view(info:Dict[str, str]):
+    print(f'{info["id"]} 가 열람한 기사 url = {info["url"]}')
+    with get_db() as db:
+        sql = sqlalchemy.text("""SELECT member_no FROM member_info WHERE id = :id""")
+        user = db.execute(sql, {"id": info["id"]}).mappings().fetchone()
+        if user:
+            m_no = user["member_no"]
+            sql = sqlalchemy.text("""SELECT count(news_url) as cnt FROM news_view WHERE member_no = :member_no AND news_url = :news_url""")
+            chk_res = db.execute(sql, {"member_no": m_no, "news_url": info["url"]}).mappings().fetchone()
+
+            if chk_res["cnt"] == 0:
+                sql = sqlalchemy.text("""INSERT INTO news_view (member_no, news_url)VALUES(:member_no, :news_url)""")
+                res = db.execute(sql, {"member_no": m_no, "news_url": info["url"]})
+                print(f'기사열람 DB 삽입 성공 {res.rowcount}개')
+    return
+
+
+# 맞춤형뉴스 요청
+@app.get("/custom_news")
+def custom_news(id:str):
+    print(f'맞춤형 요청 id = {id}')
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+                    SELECT 
+                        t1.member_no
+                        ,t2.keyword
+                        ,t3.news_url
+                    FROM member_info t1 JOIN member_keyword t2 ON t1.member_no = t2.member_no
+                        JOIN news_view t3 ON t1.member_no = t3.member_no
+                            WHERE t1.id = :id
+            """)
+        res = db.execute(sql, {"id": id}).mappings().fetchall()
+        keyword = []
+        read_url = []
+        for key in res:
+            # print(keywords['keyword'])
+            clean_key = key["keyword"].strip()
+            if clean_key:
+                keyword.append(clean_key)
+            read_url.append(key["news_url"])
+
+        keywords = list(set(keyword))
+        print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
+
+        # 키워드가 들어간 뉴스기사 조회
+        """ 추후 es_3 에서 데이터 가져올 때 사용할 쿼리"""
+        body = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "terms": {
+                                "extracted_keywords": keyword  # 특정 키워드 조건
+                            }
+                        }
+                    ],
+                    "filter": [
+                        {
+                            "range": {
+                                "analyzed_at": {
+                                    "gte": "now-24h",  # 현재(now) 기준 24시간 전(24h) 이상(gte)
+                                    "lt": "now"  # 현재 미만(lt)
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "sort": [
+                {"published_date": "desc"} # 최신 기사가 먼저 나오도록 정렬
+            ],
+            "size": 100
+        }
+        res = es.search(index="news_labeling", body=body)
+        print(f"검색 된 기사 갯수 = {res['hits']['total']['value']}")
+        custom_news = []
+        for news in res['hits']['hits']:
+            # print(news["_source"])
+            source_keywords = news["_source"].get("extracted_keyword", [])
+            matched_list = list(set(source_keywords) & set(keyword))
+            display_keyword = ''
+            if matched_list:
+                display_keyword = matched_list[0]
+            else:
+                display_keyword = '리스크'
+            _news = {
+                'title': news["_source"]["title"],
+                'url': news["_source"]["url"],
+                'main_image': news["_source"]["main_image"],
+                'published_date': news["_source"]["published_date"],
+                'press_name': news["_source"]["press_name"],
+                'keyword': display_keyword,
+                'is_read': news["_source"]["url"] in read_url
+            }
+            custom_news.append(_news)
+        print(f'custom_news 갯수 = {len(custom_news)}')
+    return {"keyword": keywords, "total_val": len(custom_news), "news": custom_news}
+
+
+# # ==========================================
+# # 3. 실시간 알림 API (ml.py 활용)
+# # ==========================================
+# @app.get("/api/signals")
+# async def get_risk_signals():
+#     """Elasticsearch 기반 최신 리스크 뉴스 데이터 제공"""
+#     try:
+#         # ml.py에 만든 get_latest_signals 함수를 호출
+#         results = ml.get_latest_signals(size=20)
+#         return {"status": "success", "data": results or []}
+#     except Exception as e:
+#         return {"status": "error", "message": str(e)}
+
+# 시그널로그 페이지
+@app.get("/signal_log")
+def signal_log(id:str):
+    logger.info(f'==={id}===')
+
+    with get_db() as db:
+        # 1. id에 맞는 관심키워드 조회(db 에서 키워드 조회)
+        sql = sqlalchemy.text("""
+                SELECT
+                    t1.keyword
+                FROM member_keyword t1 JOIN member_info t2 
+                    ON t1.member_no = t2.member_no
+                        WHERE t2.id = :id
+        """)
+        key_res = db.execute(sql, {"id": id}).mappings().fetchall()
+        keywords = []
+        for key in key_res:
+            clean_key = key["keyword"].strip()
+            if clean_key:
+                keywords.append(clean_key)
+
+        logger.info(f'{id} 의 관심키워드 = {keywords}')
+        # 2. 키워드에 맞는 기사 조회(es 에서 _id 조회)
+        should_key = []
+        for key in keywords:
+            should_key.append(
+                {
+                    "match": {
+                        "extracted_keywords": {
+                            "query": key,
+                            "_name": key
+                        }
+                    }
+                }
+            )
+
+        body = {
+            "query": {
+                "bool": {
+                    "should": should_key,
+                    "minimum_should_match": 1
+                }
+            }
+        }
+        es_res = es.search(index="news_labeling", body=body)
+        logger.info(f'관심키워드에 맞는 뉴스기사 = {len(es_res["hits"]["hits"])}')
+        unique_ids = set()
+        doc_no = []
+
+        for i in es_res['hits']['hits']:
+            doc_id = i["_id"]
+            if doc_id not in unique_ids:
+                unique_ids.add(doc_id)
+                doc = {
+                    "id": i["_id"],
+                    "url": i["_source"]["url"],
+                    "match_keyword": i.get("matched_queries", []),
+                    "risk_level": i["_source"]["risk_level"],
+                    "signal_time": i["_source"]["analyzed_at"],
+                    "prediction": i["_source"]["prediction"],
+                    "prediction_reason": i["_source"]["prediction_reason"],
+                }
+                doc_no.append(doc)
+
+        logger.info(f'키워드에 해당하는 문서 = {len(doc_no)}')
+
+        # 3. _id 에 해당하는 signal_no 조회(DB)
+        sql = sqlalchemy.text("""
+        #         SELECT
+        #             risk_level
+        #             ,signal_time
+        #             ,prediction
+        #             ,prediction_reason
+        #         FROM signal_message
+        #             WHERE document_no = :doc_no
+        # """)
+        # DB에서 데이터를 가져올 경우 사용
+        # sig_doc = []
+        # for doc in doc_no:
+        #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
+        #     logger.info(f'--------')
+        #     if db_res:
+        #         d = {
+        #             "risk_level": db_res["risk_level"],
+        #             "signal_time": db_res["signal_time"],
+        #             "prediction": db_res["prediction"],
+        #             "prediction_reason": db_res["prediction_reason"],
+        #             "url": doc["url"],
+        #             "match_keyword": doc["match_keyword"]
+        #         }
+        #         sig_doc.append(d)
+        # logger.info(f'맞춤 signal_log = {len(sig_doc)} 개')
+    return {"data": doc_no}
+
+
+# 네이게이션바 signal 알림 토글 요청
+@app.get("/noti/signal")
+def noti_signal(id:str):
+    # logger.info(f'----{id}----')
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+            SELECT
+                t1.signal_no
+                ,t1.risk_level
+                ,t1.signal_time
+                ,t1.prediction
+                ,t2.alarm_view
+            FROM signal_message t1 JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
+                JOIN member_info t3 ON t2.member_no = t3.member_no
+                    WHERE t3.id = :id and t2.alarm_view = 0 ORDER BY t2.alarm_time DESC LIMIT 10
+        """)
+        res = db.execute(sql, {"id": id}).mappings().fetchall()
+        notis = []
+        for n in res:
+            noti = {
+                "signal_no": n["signal_no"],
+                "risk_level": n["risk_level"],
+                "prediction": n["prediction"],
+                "is_read": n["alarm_view"],
+                "signal_time": n["signal_time"]
+            }
+            notis.append(noti)
+    return {"noti": notis}
+
+# 알림토글 읽음 요청
+@app.post("/noti/read")
+def noti_read(info: Dict[str, Any]):
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+                UPDATE alarm_log t1 JOIN member_info t2 
+                    ON t1.member_no = t2.member_no 
+	                    SET t1.alarm_view = 1 
+	                        WHERE t1.signal_no = :signal_no AND t2.id = :id
+            """)
+        res = db.execute(sql, {"signal_no": info["id"], "id": info["user_id"]})
+        logger.info(f'알림 확인 업데이트 = {res.rowcount}개')
+    return
+
+# 모든 알림트글 읽음 요청
+@app.get("/noti/read_all")
+def noti_raed_all(id:str):
+    with get_db() as db:
+        sql = sqlalchemy.text("""
+            UPDATE alarm_log t1 JOIN member_info t2 
+                ON t1.member_no = t2.member_no
+	                SET t1.alarm_view = 1 
+	                    WHERE t1.alarm_view = 0 AND t2.id = :id
+        """)
+        res = db.execute(sql, {"id": id})
+        logger.info(f'{id} 의 모든 알림 읽음 업데이트 = {res.rowcount}개')
+    return
+
 
 # ==========================================
 # 3. 실시간 알림 API (ml.py 활용)

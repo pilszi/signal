@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>TradePulse 히트맵</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div id="main" style="width: 100%; height: 80vh;"></div>
+</body>
+    <script>
+        var chartDom = document.getElementById('main');
+        var myChart = echarts.init(chartDom);
+
+        // 세계 지도 데이터를 불러온 뒤 차트를 그립니다.
+        fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json')
+            .then(response => response.json())
+            .then(worldJson => {
+                echarts.registerMap('world', worldJson);
+                
+                // ES_3에서 가져올 데이터 예시 (국가 이름은 world.json 기준)
+                var data = [
+                    {name: 'Korea', value: 1}, // 1단계: 초록
+                    {name: 'United States', value: 1}, // 3단계: 빨강
+                    {name: 'China', value: 1}, // 2단계: 노랑
+                    {name: 'Japan', value: 2}
+                ];
+
+                var option = {
+                    title: { text: 'G20 국가 위기단계 히트맵', left: 'center' },
+                    tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
+                    // 위험단계별 컬러 설정 (기획안 반영)
+                    visualMap: {
+                        type: 'piecewise',
+                        pieces: [
+                            {value: 1, label: '1단계 (안정)', color: '#2ECC71'},
+                            {value: 2, label: '2단계 (주의)', color: '#FFD400'},
+                            {value: 3, label: '3단계 (위험)', color: '#FF4B4B'}
+                        ],
+                        left: 'left'
+                    },
+                    series: [{
+                        type: 'map',
+                        map: 'world',// 지도가 박스 안에 꽉 차도록 설정
+                        top: '10%',    // 상단 여백
+                        bottom: '10%', // 하단 여백
+                        left: '5%',    // 좌측 여백
+                        right: '5%',   // 우측 여백
+                        layoutCenter: ['50%', '50%'], // 지도를 정중앙에 배치
+                        layoutSize: '120%',
+                        data: data, // ES_3에서 가져온 1~3단계 데이터
+                        roam: true,
+                        
+                        // [추가] 마우스 오버(Hover) 시 스타일
+                        emphasis: { 
+                            label: { show: true },
+                            itemStyle: { 
+                                areaColor: '#eee' // 마우스 올렸을 때는 연한 회색
+                            }
+                        },
+
+                        // [핵심 추가] 클릭해서 '선택(Select)'되었을 때 스타일
+                        selectedMode: 'single', // 한 번에 하나의 국가만 선택 가능
+                        select: {
+                            itemStyle: {
+                                areaColor: '#995EFF', // [추가] 선택된 국가를 진한 회색으로 고정!
+                                borderColor: '#fff', // 테두리를 흰색으로 강조
+                                borderWidth: 2
+                            },
+                            label: {
+                                show: true,
+                                color: '#fff' // 글자색도 흰색으로 변경
+                            }
+                        }
+                    }]
+                };
+                window.addEventListener('resize', function() {
+                    myChart.resize();
+                });
+                myChart.setOption(option);
+            });
+        myChart.on('click', function (params) {
+        // params.name에 클릭한 국가 이름이 들어있습니다.
+        console.log(params.name + "의 뉴스를 불러옵니다.");
+        // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
+        
+        });
+    </script>
+</html>
