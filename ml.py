@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 # ==========================================
 # 1. bert 모델 설정 및 es 연결
 # ==========================================
-MODEL_PATH = "./fine_tuned_finance_model_2"  # 학습시킨 모델 경로
+MODEL_PATH = "./final_finance_model_v2"  # 학습시킨 모델 경로
 
 # # 학습 완료된 모델 및 토크나이저 로드
 # 1. 실행 장치 설정 (GPU가 있으면 사용, 없으면 CPU)
