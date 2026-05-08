@@ -1,159 +1,138 @@
 import pandas as pd
 import torch
-import numpy as np
-import os
 from torch.utils.data import Dataset
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, EarlyStoppingCallback
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
-
-
-# 모델 학습
-# 1. 환경 설정 및 경로
+# 1. 환경 설정 및 데이터 로드
 model_name = "klue/bert-base"
-data_path_old = 'data/finance_data_balanced.csv'
-data_path_new = 'data/balanced_labeled_data.csv'
-save_path = "./fine_tuned_finance_model_3"
+data_path = 'balanced_labeled_data.csv'
 
-# --- [Step 1] 기존 데이터 로드 (finance_data_balanced.csv) ---
-print("📂 기존 데이터를 로드 중...")
-try:
-    try:
-        df_old = pd.read_csv(data_path_old, encoding='utf-8')
-    except UnicodeDecodeError:
-        df_old = pd.read_csv(data_path_old, encoding='cp949')
+print("📂 제목과 본문을 통합하여 데이터를 불러오는 중입니다...")
+df = pd.read_csv(data_path)
 
-    # 🔥 [핵심] 모든 컬럼 이름의 앞뒤 공백을 싹 제거 (' labels' -> 'labels')
-    df_old.columns = df_old.columns.str.strip()
-    print(f"   🔎 기존 파일 컬럼명(정제후): {df_old.columns.tolist()}")
+# [핵심] 제목(title)과 본문(content)을 합친 새로운 컬럼 생성
+# 제목이 비어있을 경우를 대비해 fillna('')를 처리해줍니다.
+df['combined_text'] = df['title'].fillna('') + " [SEP] " + df['content'].fillna('')
 
-    # 라벨 매핑: 문자열 -> 숫자 (0:중립, 1:긍정, 2:부정)
-    old_label_map = {'neutral': 0, 'positive': 1, 'negative': 2}
-    df_old['label'] = df_old['labels'].map(old_label_map)
-    df_old = df_old[['sentence', 'label']]
+# 라벨 매핑 (1, 2, 3 -> 0, 1, 2)
+df['label'] = df['label'] - 1
 
-    print(f"✅ 기존 데이터 로드 완료: {len(df_old)}건")
-except Exception as e:
-    print(f"⚠️ 기존 데이터 로드 중 예상치 못한 오류: {e}")
-    df_old = pd.DataFrame(columns=['sentence', 'label']) # 에러 시 빈 틀 유지
-
-
-# --- [Step 2] 신규 데이터 로드 (balanced_labeled_data.csv) ---
-print("📂 신규 데이터를 로드 중...")
-try:
-    try:
-        df_new = pd.read_csv(data_path_new, encoding='utf-8')
-    except UnicodeDecodeError:
-        df_new = pd.read_csv(data_path_new, encoding='cp949')
-
-    # 여기도 혹시 모르니 공백 제거!
-    df_new.columns = df_new.columns.str.strip()
-    print(f"   🔎 신규 파일 컬럼명(정제후): {df_new.columns.tolist()}")
-
-    # 제목과 본문을 합쳐서 학습 문장 생성
-    df_new['sentence'] = df_new['title'].fillna("") + " " + df_new['content'].fillna("")
-
-    # 라벨 재매핑: (기존 1:안정/Pos, 2:주의/Neu, 3:심각/Neg) -> (변경 1:긍정, 0:중립, 2:부정)
-    new_label_map = {1: 1, 2: 0, 3: 2}
-    df_new['label'] = df_new['labels'].map(new_label_map)
-
-    df_new = df_new[['sentence', 'label']]
-    print(f"✅ 신규 데이터 로드 완료: {len(df_new)}건")
-
-except Exception as e:
-    print(f"⚠️ 신규 데이터 로드 중 예상치 못한 오류: {e}")
-    df_new = pd.DataFrame(columns=['sentence', 'label'])
-
-
-# --- [Step 3] 데이터 병합 및 최종 정제 ---
-df = pd.concat([df_old, df_new], axis=0).reset_index(drop=True)
-df = df.dropna(subset=['sentence', 'label'])
-df['label'] = df['label'].astype(int)
-
-print(f"📊 최종 통합 데이터 수: {len(df)}건")
-print(df['label'].value_counts()) # 라벨별 분포 확인
-
-# 학습용/검증용 분리
+# 학습용/검증용 분리 (combined_text 사용)
 train_texts, val_texts, train_labels, val_labels = train_test_split(
-    df['sentence'].tolist(),
+    df['combined_text'].tolist(),
     df['label'].tolist(),
     test_size=0.2,
     random_state=42
 )
 
 # 2. 토크나이저 준비
-print("📝 토크나이저를 준비 중입니다...")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-
-# 3. 데이터셋 클래스 정의
+# 3. 데이터셋 클래스
 class FinanceDataset(Dataset):
     def __init__(self, encodings, labels):
         self.encodings = encodings
         self.labels = labels
-
     def __getitem__(self, idx):
         item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        item['labels'] = torch.tensor(self.labels[idx])
+        item['label'] = torch.tensor(self.labels[idx])
         return item
-
     def __len__(self):
         return len(self.labels)
 
-# 텍스트 토큰화 진행
-train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=128)
-val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=128)
+# 토큰화 (제목이 들어갔으므로 길이를 256으로 늘려주는 것이 안전합니다)
+print("📝 통합 텍스트 토큰화 진행 중...")
+train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=256)
+val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=256)
 
 train_dataset = FinanceDataset(train_encodings, train_labels)
 val_dataset = FinanceDataset(val_encodings, val_labels)
 
-
-# 3. 평가 지표 및 모델 설정
+# 4. 지표 계산 함수
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions.argmax(-1)
+    precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average='macro')
     acc = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, average='weighted')
-    return {'accuracy': acc, 'f1': f1}
+    return {'accuracy': acc, 'f1': f1, 'precision': precision, 'recall': recall}
 
-
-# 4. 모델 로드 및 학습 설정
-print("🤖 모델을 빌드 중입니다...")
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# 5. 모델 로드 및 학습 설정
+print("🤖 제목 인지형 모델 빌드 중...")
 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=3)
-model.to(device)
 
 training_args = TrainingArguments(
-    output_dir='./results_3',          # 중간 결과 저장 폴더
-    num_train_epochs=3,              # 전체 데이터 학습 횟수
-    per_device_train_batch_size=16,  # 한 번에 학습할 데이터 양
+    output_dir='./results_title_model', # 폴더명 구분
+    num_train_epochs=7,
+    per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
-    warmup_steps=100,                # 학습 초기 안정화 단계
+    learning_rate=2e-5,
+    warmup_steps=500,
     weight_decay=0.01,
-    logging_dir='./logs',            # 로그 기록 폴더
-    logging_steps=10,
-    eval_strategy="epoch",     # 에포크마다 검증 수행
+    eval_strategy="epoch",
     save_strategy="epoch",
-    load_best_model_at_end=True,     # 가장 성적이 좋았던 모델을 최종 선택
-    metric_for_best_model="accuracy", # 정확도가 가장 높은 모델 저장
+    load_best_model_at_end=True,
+    metric_for_best_model="f1",
+    report_to="none",
 )
 
-# 5. 트레이너 가동 (진짜 학습 시작)
-print(f"🚀 학습 시작! (사용 장치: {device.upper()})")
+# 6. 트레이너 가동
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=val_dataset,
-    compute_metrics=compute_metrics # 성능 기록
+    compute_metrics=compute_metrics,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=2)]
 )
 
+print("🚀 학습 시작! (제목+본문)")
 trainer.train()
 
-# 6. 최종 모델 저장
+# 7. 최종 모델 저장
+save_path = "./fine_tuned_finance_model_with_title"
 model.save_pretrained(save_path)
 tokenizer.save_pretrained(save_path)
 
-print(f"\n✅ 모든 과정이 완료되었습니다!")
-print(f"📦 학습된 모델이 '{save_path}' 폴더에 저장되었습니다.")
+print(f"\n✅ 완료! 제목 통합 모델이 '{save_path}'에 저장되었습니다.")
+import pandas as pd
+import torch
+
+
+# 모델이 분석에 어려움을 느끼는 기사 본문들을 csv 화하여 재라벨링
+
+print("\n🔍 오답 분석을 위한 예측을 진행합니다...")
+
+# 1. 검증 데이터셋에 대해 예측 수행
+# trainer는 위에서 정의한 객체를 그대로 사용합니다.
+output = trainer.predict(val_dataset)
+predictions = output.predictions.argmax(-1) # 확률이 가장 높은 라벨 인덱스(0,1,2)
+
+# 2. 결과 데이터프레임 생성
+# val_texts에 들어있는 '[SEP]'를 기준으로 제목과 본문을 다시 나눕니다.
+analysis_df = pd.DataFrame({
+    'combined_text': val_texts,
+    'actual_label': [l + 1 for l in val_labels],      # 0,1,2 -> 1,2,3단계로 복구
+    'predicted_label': [p + 1 for p in predictions]   # 0,1,2 -> 1,2,3단계로 복구
+})
+
+# 3. 틀린 데이터만 필터링
+# 실제 라벨과 예측 라벨이 다른 경우만 추출
+errors = analysis_df[analysis_df['actual_label'] != analysis_df['predicted_label']].copy()
+
+# 4. 보기 편하게 제목과 본문 분리 (선택 사항)
+# [SEP]를 기준으로 쪼개서 가독성을 높입니다.
+errors['title'] = errors['combined_text'].apply(lambda x: x.split(' [SEP] ')[0] if ' [SEP] ' in x else x)
+errors['content'] = errors['combined_text'].apply(lambda x: x.split(' [SEP] ')[1] if ' [SEP] ' in x else "")
+
+# 필요한 컬럼만 순서대로 정리
+errors = errors[['title', 'content', 'actual_label', 'predicted_label']]
+
+# 5. CSV 저장 및 다운로드
+error_file_name = 'wrong_predictions.csv'
+errors.to_csv(error_file_name, index=False, encoding='utf-8-sig')
+
+print(f"✅ 총 {len(errors)}개의 오답 데이터를 찾았습니다.")
+from google.colab import files
+files.download(error_file_name)
