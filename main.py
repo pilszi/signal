@@ -125,23 +125,22 @@ executor = ThreadPoolExecutor(max_workers=5)
 async def run_initial_batch(scheduler):
     loop = asyncio.get_event_loop()
     try:
-        logger.info("🎬 [초기화 시퀀스] 시작")
+        logger.info("🎬 [초기화 시퀀스] 1단계: 뉴스 수집 시작")
         # 동기 수집 함수들을 스레드 풀에서 실행
         await loop.run_in_executor(executor, naver.run_naver_collect)
         await loop.run_in_executor(executor, yna.run_yna_collect)
         await loop.run_in_executor(executor, RSS.run_reuters_collect)
-
-        # 지표 수집 (동기 함수라면 executor 사용)
         await loop.run_in_executor(executor, indicator.collect_market_data_job)
 
-        logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행 (news_origin 생성)")
+        logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행")
         # 수집된 데이터를 번역해서 news_origin으로 넘김
         await loop.run_in_executor(executor, translator_worker.process_translation)
 
-        logger.info("🎬 [초기화 시퀀스] 3단계: AI 분석 파이프라인 가동")
-        await manage_ml_pipeline(scheduler)
+        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 파이프라인 즉시 가동")
+        await ml.run_analysis()
+        await manage_ml_pipeline(scheduler) # 그 다음 앞으로 10분마다 돌 수 있게 스케줄러에 등록
 
-        logger.info("✅ [초기화 시퀀스] 모든 초기 배치 작업 완료")
+        logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
     except Exception as e:
         logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
 
