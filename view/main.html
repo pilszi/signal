@@ -350,6 +350,7 @@
         let myChart = echarts.init(chartDom);
         let noti = [];
         const SIGNALS_PER_PAGE = 10;
+        let currentPage = 1;
 
         const countryNamesKOR = {
             "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국",
@@ -372,6 +373,7 @@
             lucide.createIcons();
             updateNotifUI();
             renderNews();
+            renderPagination();
         });
 
         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
@@ -510,6 +512,7 @@
         }
 
         function renderList(container, noti) {
+
             if (noti.length === 0) {
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
                 return;
@@ -776,7 +779,10 @@
         function renderNews() {
             const grid = document.getElementById('news-grid'); // 뉴스가 들어갈 컨테이너 ID
             if (!grid) return;
-            
+            const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
+            const endIndex = startIndex + SIGNALS_PER_PAGE;
+            const currentSignals = allSignals.slice(startIndex, endIndex);
+
             // 1. 리스크 단계별 테일윈드 컬러 설정
             const riskColors = {
                 "안정": "bg-blue-100 text-blue-700",
@@ -785,7 +791,7 @@
             };
             
             // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
-            const sorted = [...allSignals].sort((a, b) => {
+            const sorted = [...currentSignals].sort((a, b) => {
                 // 리스크 점수 기준 정렬
 
                 // 1) 실제 점수(낮은순: 심각 - 주의 - 안정 순서)
@@ -917,7 +923,7 @@
         function renderPagination() {
             const paginationContainer = document.getElementById('pagination');
             const totalPages = Math.ceil(allSignals.length / SIGNALS_PER_PAGE);
-            
+            // console.log(allSignals.length);
             if (totalPages <= 1) {
                 paginationContainer.innerHTML = '';
                 return;
