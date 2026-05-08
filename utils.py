@@ -30,8 +30,11 @@ def clean_html(text):
     return re.sub(clean, '', decoded_text).strip()
 
 def is_hanja(char):
-    """한자인지 확인하는 보조 함수"""
-    return '\u4e00' <= char <= '\u9fff'
+    """문자열의 첫 글자가 한자 범위인지 확인하는 함수"""
+    if not char:
+        return False
+    # Unicode 한자 범위: 4E00(一) ~ 9FFF(鿿)
+    return 0x4E00 <= ord(char[0]) <= 0x9FFF
 
 # 3. 국가 매칭 (G20_COUNTRY_MAP 활용)
 def find_target_country(title, content):
@@ -42,70 +45,65 @@ def find_target_country(title, content):
     3. 본문 가중치 매칭 (인트로 500자 중심)
     4. 도시명 매칭 (Fallback)
     """
-    # [Step 1] 한국 우선 키워드 체크
-    # 제목에 정부, 코스피 등이 있으면 본문 내용과 상관없이 Korea로 분류
-    for k_word in Config.KOREA_PRIORITY_KEYWORDS:
-        if k_word in title:
-            return "Korea"
-
-    # [Step 2] 전처리: 노이즈 제거 (언론사, 기관명 등)
+    # [Step 1] 전처리: 노이즈 제거 (언론사, 기관명 등)
+    # 분석 시작 전에 노이즈를 밀어버려야 정확한 매칭이 가능합니다.
     noise_pattern = "|".join(Config.COUNTRY_NOISE_INSTITUTIONS)
     clean_title = re.sub(noise_pattern, "", title)
     clean_content = re.sub(noise_pattern, "", content)
+    clean_full_text = f"{clean_title} {clean_content}"
 
-    # [Step 3] 제목(Title) 매칭 (핵심 키워드 우선)
+    # [Step 2] 최우선 키워드 체크 (강제 고정 로직)
+    # 한국 키워드는 제목 위주, 미국 키워드는 전체 텍스트에서 찾습니다.
+    for k_word in Config.KOREA_PRIORITY_KEYWORDS:
+        if k_word in clean_title:
+            return "Korea"
+
+    for us_word in Config.US_PRIORITY_KEYWORDS:
+        if us_word.lower() in clean_full_text.lower():
+            return "United States"
+
+    # [Step 3] 제목(Title) 기반 국가 매칭
+    # 본문을 읽기 전, 제목에 명시된 국가가 있다면 즉시 반환합니다.
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-        # 영문 국가명인 경우만 유효한 매칭으로 인정
-        if not re.match(r'^[a-zA-Z\s]+$', str(en_name)):
-            continue
-
-        # 한자(美, 中 등)는 제목에 있으면 즉시 인정
+        # 한자(美, 中 등) 매칭
         if is_hanja(kr_name) and kr_name in clean_title:
             return en_name
 
-        # 한글 한 글자(한, 미 등)는 특수 패턴일 때만 인정
-        if len(kr_name) == 1 and not is_hanja(kr_name):
-            if re.search(rf'{kr_name}[\s\-·\.]', clean_title) or clean_title.startswith(kr_name):
+        # 한글 한 글자(한, 미 등) - '한-미', '한·미' 등 특수 기호나 공백이 붙은 경우만 인정
+        if len(kr_name) == 1:
+            if re.search(rf'{kr_name}[\s\-·\.]', clean_title):
                 return en_name
 
-        # 일반적인 두 글자 이상 단어는 제목에 있으면 즉시 인정
+        # 일반적인 두 글자 이상 단어
         elif kr_name in clean_title:
             return en_name
 
-    # [Step 4] 본문 가중치 기반 최다 언급 국가 산출
-    # 인트로(상단 500자)와 나머지 본문 분리
+    # [Step 4] 도시명 매칭 (제목 기반 Fallback)
+    # 제목에 "파리", "도쿄" 등이 있으면 본문 점수보다 우선합니다.
+    for city_name, en_name in Config.CITY_TO_COUNTRY_MAP.items():
+        if city_name in clean_title:
+            return en_name
+
+    # [Step 5] 본문 가중치 기반 언급 국가 산출
+    # 인트로(상단 500자) 가중치 3.0 적용
     intro = clean_content[:500]
     body = clean_content[500:]
-
     country_scores = {}
 
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-        if not re.match(r'^[a-zA-Z\s]+$', str(en_name)):
-            continue
-
-        # 한자는 1글자 이상, 한글은 2글자 이상일 때만 카운트
         if is_hanja(kr_name) or len(kr_name) >= 2:
-            # 인트로 가중치 적용 (예: 3.0)
-            intro_count = intro.count(kr_name)
-            # 일반 본문 가중치 적용 (예: 1.0)
-            body_count = body.count(kr_name)
+            score = (intro.count(kr_name) * 3.0) + (body.count(kr_name) * 1.0)
+            if score > 0:
+                country_scores[en_name] = country_scores.get(en_name, 0) + score
 
-            total_weight_score = (intro_count * 3.0) + (body_count * 1.0)
-
-            if total_weight_score > 0:
-                country_scores[en_name] = country_scores.get(en_name, 0) + total_weight_score
-
-    # 가중치 합계가 가장 높은 국가 반환
+    # 최다 점수 국가 반환
     if country_scores:
         return max(country_scores, key=country_scores.get)
 
-    # [Step 5] 도시명 매칭 (제목 기반 Fallback)
-    for city_name, en_name in Config.CITY_TO_COUNTRY_MAP.items():
-        if city_name in title:
-            return en_name
-
-    # [Step 6] 끝까지 없으면 Global 반환
+    # [Step 6] 끝까지 매칭되지 않으면 Global
     return "Global"
+
+
 
 # 히트맵 데이터 가공
 # EU, 동남아시아, 중동처럼 여러 나라들 포함됐을 때 히트맵으로 매핑
@@ -209,54 +207,12 @@ def get_top_risk_countries(heatmap_data):
         for country, info in top_3
     ]
 
-
 def extract_country(title, content):
     """
-    제목과 본문을 분석하여 가장 연관성 높은 국가 1개를 추출합니다.
-    1. 한국 관련 키워드 가중치 부여 (Korea 우선)
-    2. 제목 가중치 부여
-    3. G20 국가 맵 매핑
+    혹시 다른 파일에서 extract_country를 호출하더라도
+    에러 없이 find_target_country이 돌아가게 함
     """
-    try:
-        text = (title + " ") + content
-        # 모든 국가를 0점으로 초기화
-        # Config.COUNTRIES가 리스트 형태여야 합니다.
-        unique_countries = set(Config.G20_COUNTRY_MAP.values())
-        country_scores = {country: 0 for country in unique_countries}
-
-
-        # [1] 한국 보너스 강화: '한국', 'K-' 등이 보이면 무조건 점수 대폭 추가
-        # 리더님, 여기에 '한국', '대한민국', 'K-'를 꼭 넣어주세요!
-
-        for kw in Config.KOREA_PRIORITY_KEYWORDS:
-            if kw in text:
-                country_scores["Korea"] += 15  # 보너스를 15점으로 상향
-
-        # [2] 한국 주요 기업명 보너스 (매우 중요!)
-        # 본문에 한국 기업이 나오면 그건 한국 산업 뉴스
-        for firm in Config.KOREA_FIRM_KEYWORDS:
-            if firm in text:
-                country_scores["Korea"] += 10  # 기업당 10점씩 추가
-
-        # [3] 전체 텍스트에서 국가명 매핑 점수 계산
-        for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-            if kr_name in text:
-                # 제목에 있으면 5점, 본문에만 있으면 1점
-                score = 5 if kr_name in title else 1
-                country_scores[en_name] = country_scores.get(en_name, 0) + score
-
-        # [3] 최고점 국가 찾기
-        best_country = max(country_scores, key=country_scores.get)
-
-        # 만약 최고점이 0점이라면(찾은 국가가 없다면) Global 반환
-        if country_scores[best_country] == 0:
-            return "Global"
-
-        return best_country
-
-    except Exception as e:
-        print(f"⚠️ 국가 추출 오류: {e}")
-        return "Global"
+    return find_target_country(title, content)
 
 # 4. 키워드 필터링 도구 (STOPWORDS/NOISE_WORDS 활용)
 # 지저분한 단어들 제외하고 핵심 단어들만 뽑기
@@ -321,13 +277,11 @@ def extract_keywords(title, content, top_n=10):
     """
     try:
         # [1] 데이터 전처리: 사진 설명, 기자명, 이메일 등 뉴스 특유의 노이즈 제거
-        # 본문 앞부분(800자)만 사용하여 분석 속도와 정확도 향상
         clean_content = re.sub(r'[가-힣]{2,4}\s?기자.*', '', content[:800])
         clean_content = re.sub(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '', clean_content)
         clean_content = re.sub(r'홈페이지\s?=\s?\S+', '', clean_content)
 
         # [2] 제목 가중치 부여: 제목에 나온 단어는 본문에 나온 것보다 중요하므로 제목을 2번 합칩니다.
-        # 이렇게 하면 Counter가 제목 단어를 훨씬 높게 평가합니다.
         combined_text = (title + " ") * 2 + clean_content
 
         # [3] 명사 추출: Okt를 사용하여 '제조업에', '충격에'에서 조사('에')를 자동으로 떼어냅니다.

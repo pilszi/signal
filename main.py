@@ -7,6 +7,7 @@ import traceback
 
 import jsonify
 import sqlalchemy
+from datetime import datetime
 from elasticsearch import Elasticsearch
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Body, Request
@@ -70,10 +71,22 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
             )
             stdout, stderr = await process.communicate()
 
+            #  학습이 갓 끝난 직후 등록할 때
             if process.returncode == 0:
                 logger.info("🎊 [Pipeline] 모델 학습 완료! 분석 모드로 전환합니다.")
+                # 학습이 끝났다는 '락 파일'을 생성
                 with open(TRAIN_LOCK_FILE, "w") as f:
                     f.write(f"Finished at {os.path.getmtime('train_model.py')}")
+                # BERT 분석 작업 등록 (10분 주기로 실전 투입)
+                if not scheduler.get_job('ml_analysis'):
+                    scheduler.add_job(
+                        ml.run_analysis,
+                        'interval',
+                        minutes=10,
+                        id='ml_analysis',
+                        max_instances=1,  # 작업 겹침 방지
+                        replace_existing=True  # 기존 작업 교체
+                    )
 
                 # BERT 분석 작업 등록 (10분)
                 if not scheduler.get_job('ml_analysis'):
@@ -87,14 +100,15 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
         # 이미 학습이 완료된 경우 바로 분석 작업 등록
         if not scheduler.get_job('ml_analysis'):
             logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
-            # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
             from datetime import datetime
             scheduler.add_job(
                 ml.run_analysis,
                 'interval',
                 minutes=10,
                 id='ml_analysis',
-                next_run_time=datetime.now()  # 등록하자마자 바로 실행!
+                max_instances=1,  # 추가
+                replace_existing=True,  # 추가
+
             )
 
 
@@ -134,18 +148,24 @@ async def lifespan(app: FastAPI):
     global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
     global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
     global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
-    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw')
+    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
     global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
     # 학습/분석 파이프라인 관리 (5분마다 체크)
-    global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=10, args=[global_scheduler], id='ml_pipeline')
+    global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=10, args=[global_scheduler], id='ml_pipeline',)
 
     # 서버 시작과 동시에 즉시 실행 (백그라운드 태스크)
     asyncio.create_task(run_initial_batch(global_scheduler))
 
     global_scheduler.start()
     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
+
     yield
-    global_scheduler.shutdown()
+
+    # --- 서버 종료 시 정리 로직 ---
+    logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")        # 서버가 돌아가는 지점
+
+    global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
+    executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
 
 
 # FastAPI 앱 초기화
@@ -429,4 +449,4 @@ async def get_heatmap_stats():
 if __name__ == "__main__":
     import uvicorn
     # reload=True는 개발 중에만 사용하기
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

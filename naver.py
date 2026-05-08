@@ -16,7 +16,7 @@ from utils import generate_article_id
 from dateutil import parser as date_parser
 from concurrent.futures import ThreadPoolExecutor  # 멀티스레딩용
 
-es = Elasticsearch(["http://100.123.232.79:9200"])
+es = Elasticsearch(["http://localhost:9200"])
 INDEX_NAME = "news_origin"
 
 
