@@ -237,12 +237,6 @@
                                 <p>전세계 리스크 분포도 (SVG Map)</p>
                                 <p class="text-xs mt-1">지도의 국가를 클릭하여 필터링하세요.</p>
                             </div>
-
-                            <!-- 예시 클릭 버튼 (동작 확인용) -->
-                            <div class="absolute bottom-4 left-4 flex gap-2">
-                                <button onclick="selectCountry('USA')" class="px-3 py-1 bg-white border rounded shadow-sm text-xs hover:bg-gray-50">미국(USA) 선택</button>
-                                <button onclick="selectCountry('IRN')" class="px-3 py-1 bg-white border rounded shadow-sm text-xs hover:bg-gray-50 text-red-600 font-bold">이란(IRN) 선택</button>
-                            </div>
                         </div>
 
                         <div id="selected-country-info" class="mt-4 p-4 bg-blue-50 rounded-lg hidden transition-all">
@@ -253,14 +247,13 @@
 
                     <!-- 뉴스 검색 및 필터 -->
                     <div class="mb-6 space-y-3">
-                        <h2 id="news-title" class="font-bold text-xl mb-4">오늘의 뉴스</h2>
+                        <h2 id="news-title" class="font-bold text-xl mb-4"></h2>
 
                         <div class="relative">
                             <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"></i>
                             <input type="text" id="search-input" placeholder="키워드 또는 헤드라인 검색..."
                                 class="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
-
                         <!-- 커스텀 캘린더 필터 -->
                         <div class="relative">
                             <div class="w-full pl-10 pr-12 py-3 border rounded-lg bg-white text-gray-700 flex items-center">
@@ -353,6 +346,10 @@
         let selectedDate = null;
         let searchQuery = "";
         let calendarMonth = new Date(2026, 4); // 2026년 5월
+        let chartDom = document.getElementById('map');
+        let myChart = echarts.init(chartDom);
+        let noti = [];
+        const SIGNALS_PER_PAGE = 10;
 
         const countryNamesKOR = {
             "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국",
@@ -364,27 +361,36 @@
             "Indonesia": "인도네시아", "ASEAN": "동남아시아", "EU": "유럽연합"
         };
         let dateFilter = "";
-        let calendarMonth = new Date(2026, 3); // 2026년 4월
-        const countryNames = { "United States": "미국", "India": "인도", "Korea": "대한민국", "China": "중국", "Japan": "일본" };
 
-        // let myChart = echarts.init(document.getElementById('map'));
-         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
-        // 1. 데이터 로드: ml.py가 서버(main.py)에 받은 뉴스 데이터와 환율/원자재 데이터
-        const myChart = echarts.init(document.getElementById('map'));
+        // 페이지 오픈시 실행
+        document.addEventListener('DOMContentLoaded', async() => {
+            axios.get("/session_out");
+            updateNavbar();
+            await fetchMainData();
+            renderExchangeRates();
+            initCalendar();
+            lucide.createIcons();
+            updateNotifUI();
+            renderNews();
+        });
 
         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
         // --- 2. 데이터 통합 로드 (백엔드 API 호출) ---
         async function fetchMainData() {
             try {
-                // 뉴스 데이터 가져오기
-                const res = await axios.get('/api/risk-signals');
-                allSignals = res.data.data;
-                const mockRates = [
-                    { currency: "USD/KRW", rate: 1384.50, change: 0.45 },
-                    { currency: "JPY/KRW", rate: 8.92, change: -0.12 },
-                    { currency: "EUR/KRW", rate: 1482.10, change: 0.22 }
-                ];
-            }catch (error) { // 원래 try 뒤에는 catch가 있어야 짝이 맞습니다.
+                const [riskRes, indicatorRes, heatmapRes] = await Promise.all([
+                    // axios.get('/api/risk-signals'),
+                    axios.get("/public_signals"),
+                    axios.get('/api/market-indicators'),
+                    axios.get('/stats/heatmap') // 리더님이 백엔드에 만든 합산 점수 API
+                ]);
+                console.log(riskRes, indicatorRes, heatmapRes);
+                allSignals = riskRes.data.msg;
+                heatmapData = heatmapRes.data;
+                if (indicatorRes.data.status === "success") {
+                    renderExchangeRates(indicatorRes.data.data);
+                }
+            }catch (error) {
                     console.error(error);
             }
         }
@@ -428,16 +434,6 @@
 
             if (window.lucide) lucide.createIcons();
         }
-
-
-        // 알림 데이터 (로그인 여부에 따라 세팅 가능)
-        let myNotifs = [
-            { id: 1, title: "3단계 위험 시그널", message: "이란 석유 수출 관련 높은 위험도 감지", time: "5분 전", isRead: false },
-            { id: 2, title: "3단계 위험 시그널", message: "우크라이나 곡물 수출 중단 감지", time: "30분 전", isRead: false },
-            { id: 3, title: "3단계 위험 시그널", message: "글로벌 반도체 공급망 병목 현상 가속화", time: "1시간 전", isRead: false },
-            { id: 4, title: "2단계 경계 시그널", message: "원-달러 환율 급등에 따른 수출 채산성 악화 우려", time: "2시간 전", isRead: true },
-            { id: 5, title: "3단계 위험 시그널", message: "주요 자동차 부품 원자재(니켈) 가격 변동성 확대", time: "3시간 전", isRead: true }
-        ];
 
         const trigger = document.getElementById('notifTrigger');
         const dropdown = document.getElementById('notifDropdown');
@@ -510,27 +506,9 @@
 
             // 드롭다운 내부 문구 업데이트
             countText.innerText = `${unreads.length}개의 새 알림`;
-                // 콤마(,) 누락 수정 및 heatmapRes 추가
-                const [riskRes, indicatorRes, heatmapRes] = await Promise.all([
-                    axios.get('/api/risk-signals'),
-                    axios.get('/api/market-indicators'),
-                    axios.get('/stats/heatmap') // 리더님이 백엔드에 만든 합산 점수 API
-                ]);
-
-                allSignals = riskRes.data.data;
-                heatmapData = heatmapRes.data; // { "Iran": { "score": 15.2, "level": "Serious" }, ... }
-
-                if (indicatorRes.data.status === "success") {
-                    renderExchangeRates(indicatorRes.data.data);
-                }
-            // 알림 리스트 렌더링 로직 (기존과 동일)
-            renderList(list, noti);
+        
         }
 
-                if (allSignals.length > 0) {
-                    document.getElementById('update-time').innerText =
-                        `${new Date().toLocaleString()} 갱신 (분석 데이터: ${allSignals.length}건)`;
-                }
         function renderList(container, noti) {
             if (noti.length === 0) {
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
@@ -541,17 +519,10 @@
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
 
-                // UI 업데이트 함수들 실행
-                applyFilters();
-                renderHeatmap();
-                updateStation();
-            } catch (e) {
-                console.error("데이터 로드 에러:", e);
-            }
-                // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
+                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
-                    <div class="notif-item ${n.is_read ? '' : 'unread'}"
-                        onclick="readItem(${n.signal_no})"
+                    <div class="notif-item ${n.is_read ? '' : 'unread'}" 
+                        onclick="readItem(${n.signal_no})" 
                         style="cursor: pointer;">
                         <div class="notif-icon">
                             ${iconTag}
@@ -561,13 +532,13 @@
                             <div class="notif-message">${n.prediction}</div>
                             <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
                         </div>
-                        <div class="notif-delete"
-                            onclick="deleteItem(event, ${n.signal_no})"
+                        <div class="notif-delete" 
+                            onclick="deleteItem(event, ${n.signal_no})" 
                             style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
                             <i data-lucide="x" style="width: 16px; height: 16px;"></i>
                         </div>
                     </div>
-                    `;
+                    `;               
             }).join('')+`<div class="hover:cursor-pointer" style="padding: 5px; text-align: center; color: #9ca3af;" onclick=allRead()>
                             모두읽음
                         </div>`;
@@ -595,13 +566,6 @@
             location.href = 'signal_log.html';
         }
 
-        // 3. ECharts 지도: 위기단계별 색상 매핑
-        async function renderHeatmap() {
-            try {
-                // 1. 세계지도 JSON 로드
-                const worldRes = await fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json');
-                const worldJson = await worldRes.json();
-                echarts.registerMap('world', worldJson);
         // 아이템 삭제
         async function deleteItem(e, id) {
             e.stopPropagation();
@@ -625,16 +589,13 @@
             updateNotifUI();
         }
 
-        let chartDom = document.getElementById('map');
-        let myChart = echarts.init(chartDom);
 
         // 세계 지도 데이터를 불러온 뒤 차트
         fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json')
             .then(response => response.json())
             .then(worldJson => {
                 echarts.registerMap('world', worldJson);
-
-                // 2. heatmapData를 ECharts용 리스트로 변환
+                
                 const chartData = Object.entries(heatmapData).map(([name, info]) => {
                     let visualValue = 1; // 기본 Stable(초록)
 
@@ -647,7 +608,7 @@
                     } else {
                         visualValue = 1; // 초록
                     }
-
+                    
                     return {
                         name: name,
                         value: visualValue,
@@ -655,14 +616,7 @@
                         riskLevel: level  // 툴팁용 레벨
                     };
                 });
-                // ES_3에서 가져올 데이터 예시 (국가 이름은 world.json 기준)
-                var data = [
-                    {name: 'Korea', value: 1}, // 1단계: 초록
-                    {name: 'United States', value: 1}, // 3단계: 빨강
-                    {name: 'China', value: 1}, // 2단계: 노랑
-                    {name: 'Japan', value: 2}
-                ];
-
+    
                 var option = {
                     tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
                     // 위험단계별 컬러 설정 (기획안 반영)
@@ -684,9 +638,9 @@
                         right: '5%',   // 우측 여백
                         layoutCenter: ['50%', '50%'], // 지도를 정중앙에 배치
                         layoutSize: '120%',
-                        data: data, // ES_3에서 가져온 1~3단계 데이터
+                        data: chartData, // ES_3에서 가져온 1~3단계 데이터
                         roam: true,
-
+    
                         // [추가] 마우스 오버(Hover) 시 스타일
                         emphasis: {
                             label: { show: true },
@@ -712,56 +666,21 @@
                 window.addEventListener('resize', function() {
                     myChart.resize();
                 });
+                // console.log(option);
                 myChart.setOption(option);
-            });
-            myChart.on('click', function (params) {
-                // params.name에 클릭한 국가 이름이 들어있습니다.
-                console.log(params.name + "의 뉴스를 불러옵니다.");
-                selectCountry(params.name);
-                // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
 
+                renderList(list, noti);
             });
-                // 3. 차트 설정 업데이트
-                myChart.setOption({
-                    tooltip: {
-                        trigger: 'item',
-                        formatter: function(params) {
-                            if (!params.data) return params.name;
-                            const korName = countryNamesKOR[params.name] || params.name;
-                            return `<b>${korName}</b><br/>리스크 점수: ${params.data.realScore}<br/>등급: ${params.data.riskLevel}`;
-                        }
-                    },
-                    visualMap: {
-                        type: 'piecewise',
-                        pieces: [
-                            {value: 3, label: '심각 (Serious)', color: '#FF4B4B'}, // 빨강
-                            {value: 2, label: '주의 (Caution)', color: '#FFD400'}, // 노랑
-                            {value: 1, label: '안정 (Stable)', color: '#2ECC71'}   // 초록
-                        ],
-                        show: false
-                    },
-                    series: [{
-                        type: 'map',
-                        map: 'world',
-                        data: chartData,
-                        roam: true,
-                        emphasis: {
-                            itemStyle: { areaColor: '#f3f4f6' },
-                            label: { show: false }
-                        },
-                        selectedMode: 'single'
-                    }]
-                });
 
-                // 클릭 이벤트 연결
-                myChart.off('click'); // 중복 이벤트 방지
-                myChart.on('click', (p) => {
-                    if (p.data) selectCountry(p.name, p.data.realValue);
-                });
-            } catch (e) {
-                console.error("히트맵 로드 에러:", e);
-            }
-        }
+        myChart.on('click', function (params) {
+            // params.name에 클릭한 국가 이름이 들어있습니다.
+            console.log(params.name + "의 뉴스를 불러옵니다.");
+            selectCountry(params.name);
+            renderNews(params.name);
+            // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
+        });
+            
+            
         // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
         function updateStation() {
             const list = document.getElementById('station-list');
@@ -798,13 +717,13 @@
         }
         // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
         function applyFilters() {
+            console.log(allSignals);
             filteredNews = allSignals.filter(item => {
                 const matchCountry = !selectedCountry || item.country_name === selectedCountry;
                 const matchSearch = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase());
                 const matchDate = !selectedDate || item.analyzed_at.startsWith(selectedDate);
                 return matchCountry && matchSearch && matchDate;
             });
-            renderNewsGrid();
         }
 
         // 국가 선택 핸들러
@@ -833,7 +752,6 @@
         function renderExchangeRates(rates) {
             const container = document.getElementById('exchange-rates');
             if (!rates) return;
-            const currencies = [{k:'USD', v:rates.usd}, {k:'EUR', v:rates.eur}, {k:'JPY', v:rates.jpy}];
 
             // 1. 환율 데이터 구성 (위안화 추가)
             const currencies = [
@@ -847,151 +765,83 @@
             // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
             container.innerHTML = currencies.map(c => `
                 <div class="flex items-center justify-between">
-                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.k}/KRW</p><p class="text-lg font-bold">${c.v.toLocaleString()}원</p></div>
+                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p><p class="text-lg font-bold">${c.val.toLocaleString()}원</p></div>
                     <div class="text-blue-500"><i data-lucide="trending-up" class="w-4 h-4"></i></div>
                 </div>
             `).join('');
             lucide.createIcons();
         }
-        // 환율 렌더링
-        // function renderExchangeRates() {
-        //     const container = document.getElementById('exchange-rates');
-        //     if (!rates) {
-        //         container.innerHTML = '<p class="text-xs text-gray-400">데이터를 불러올 수 없습니다.</p>';
-        //         return;
-        //     }
 
-        //     // 1. 환율 데이터 구성 (위안화 추가)
-        //     const currencies = [
-        //         { label: '달러/KRW', val: rates.usd, key: 'USD' },
-        //         { label: '유로/KRW', val: rates.eur, key: 'EUR' },
-        //         { label: '엔화/KRW', val: rates.jpy, key: 'JPY' },
-        //         { label: '위안화/KRW', val: rates.cny, key: 'CNY' } // 드디어 추가!
-        //     ];
-
-        //     // 2. 원자재 데이터 구성 (main.py에서 보낸 raw_material_score 참고)
-        //     // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
-
-        //     container.innerHTML = currencies.map(c => `
-        //         <div class="flex items-center justify-between border-b border-gray-50 pb-2">
-        //             <div>
-        //                 <p class="text-[10px] font-bold text-gray-400 uppercase">${c.label}</p>
-        //                 <p class="text-lg font-bold">${c.val ? c.val.toLocaleString() : '---'}원</p>
-        //             </div>
-        //             <div class="${c.val > 1000 ? 'text-red-500' : 'text-blue-500'}">
-        //                 <i data-lucide="trending-up" class="w-4 h-4"></i>
-        //             </div>
-        //     container.innerHTML = mockRates.map(rate =>
-        //         // <div class="flex items-center justify-between">
-        //         //     <div>
-        //         //         <p class="text-xs font-bold text-gray-400 uppercase">${rate.currency.split('/')[0]} 환율</p>
-        //         //         <p class="text-xl font-bold">${rate.rate.toLocaleString()}원</p>
-        //         //     </div>
-        //         //     <div class="flex items-center gap-1 ${rate.change >= 0 ? "text-red-500" : "text-blue-500"}">
-        //         //         <i data-lucide="${rate.change >= 0 ? 'trending-up' : 'trending-down'}" class="w-4 h-4"></i>
-        //         //         <span class="text-sm font-bold">${Math.abs(rate.change)}%</span>
-        //             </div>
-        //         </div>
-        //     `).join('');
-        // }
-
-        // 뉴스 렌더링 (단순화된 예시 카드)
+        // 뉴스 렌더링 함수
         function renderNews() {
-            lucide.createIcons(); // 아이콘 재생성
-        }
+            const grid = document.getElementById('news-grid'); // 뉴스가 들어갈 컨테이너 ID
+            if (!grid) return;
+            
+            // 1. 리스크 단계별 테일윈드 컬러 설정
+            const riskColors = {
+                "안정": "bg-blue-100 text-blue-700",
+                "주의": "bg-yellow-100 text-yellow-700",
+                "심각": "bg-red-100 text-red-700"
+            };
+            
+            // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
+            const sorted = [...allSignals].sort((a, b) => {
+                // 리스크 점수 기준 정렬
 
+                // 1) 실제 점수(낮은순: 심각 - 주의 - 안정 순서)
+                // if(a.risk_score !== b.risk_score){
+                //     return a.risk_score - b.risk_score
+                // }
 
-        // 뉴스 그리드 설정
-        function renderNewsGrid() {
-        }
-        // 뉴스 렌더링
-        async function renderNews() {
-            const grid = document.getElementById('news-grid');
-            document.getElementById('news-title').innerText = selectedCountry
-                ? `${countryNamesKOR[selectedCountry] || selectedCountry} 리스크 뉴스`
-                : "오늘의 주요 뉴스";
-            const newsTitle = document.getElementById('news-title');
+                // 2) 리스크 점수 절대값 * 100(음수부호 제거 및 소수점 제거)
+                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
+                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
+                if (scoreA !== scoreB) {
+                    return scoreB- scoreA;
+                }
+                // 날짜 기준 정렬
+                return new Date(b.published_date) - new Date(a.published_date);
 
-            // newsTitle.innerText = selectedCountry ? `${countryNames[selectedCountry]} 관련 리스크 뉴스` : "오늘의 뉴스";
-
-            if (selectedCountry) {
-                // 사용자가 지도에서 국가를 선택했을 때
-                const countryName = countryNames[selectedCountry];
-                newsTitle.innerText = countryName + " 관련 리스크 뉴스";
-            } else {
-                // 페이지 접속시 초기 상태
-                newsTitle.innerText = "오늘의 뉴스";
+                renderPagination() 
+            });
+            
+            // 4. HTML 생성 및 출력
+            if (sorted.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-500">해당하는 뉴스가 없습니다.</div>`;
+                return;
             }
+            
+            grid.innerHTML = sorted.map(news => {
+                // 음수 제거, 100 곱하기, 반올림 처리된 점수
+                const displayScore = Math.round(Math.abs(news.risk_score || 0) * 100);
+                const displayDate = news.published_date ? news.published_date.split('T')[0] : "";
 
-            grid.innerHTML = filteredNews.map(n => {
-                // 등급에 따른 색상 클래스 결정 로직 (이제 코드로 작동합니다)
-                let textColor = "text-green-600";
-                if (n.risk_level === "심각") textColor = "text-red-600";
-                else if (n.risk_level === "주의") textColor = "text-yellow-500";
-
-                // 실제 화면에 그려질 HTML 부분만 백틱(``)으로 감쌉니다.
                 return `
-                    <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all group cursor-pointer" onclick="location.href='custom_news.html'">
-                        <div class="p-4">
-                            <div class="flex justify-between items-start mb-3">
-                                <span class="font-bold text-[11px] ${textColor}">
-                                    ${n.risk_level || '안정'} (RISK ${Math.round(Math.abs((n.final_total_score?.total || 0) * 100))})
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
+                        <a href="${news.url}" target="_blank">
+                            <img src="${news.main_image || '/api/placeholder/400/320'}" alt="news" class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300">
+                        </a>
+                        <div class="p-5">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level]}">
+                                    ${news.risk_level}
                                 </span>
-                                <span class="text-[10px] text-gray-400">${n.analyzed_at ? n.analyzed_at.split('T')[0] : ''}</span>
+                                <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level]}"">
+                                    Signal ${displayScore}
+                                </span>  
                             </div>
-                            <h4 class="font-bold text-sm leading-snug group-hover:text-blue-600 transition-colors line-clamp-2">${n.title}</h4>
-                            <p class="text-[11px] text-gray-500 mt-2">${n.press_name}</p>
+                            <a href="${news.url}" target="_blank" class="block font-bold leading-tight group-hover:text-blue-600 transition-colors mb-4 line-clamp-2">
+                                ${news.title}
+                            </a>
+                            <div class="flex justify-between items-center mt-auto border-t pt-3">
+                                <span class="text-xs font-bold text-blue-600 uppercase">${news.press_name}</span>
+                                <span class="text-xs text-gray-400">${displayDate}</span>
+                            </div>
                         </div>
                     </div>
                 `;
             }).join('');
         }
-
-        function updateStation() {
-            const list = document.getElementById('station-list');
-            const top = allSignals
-                .map(s => ({ name: s.country_name, score: Math.round((s.final_total_score.total + 1) * 50) }))
-                .filter((v, i, a) => a.findIndex(t => t.name === v.name) === i)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 3);
-
-            list.innerHTML = top.map(c => `
-                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                    <span class="font-medium text-sm">${countryNamesKOR[c.name] || c.name}</span>
-                    <span class="font-bold text-lg ${c.score > 70 ? 'text-red-300' : 'text-blue-100'}">${c.score}점</span>
-            let {data} = await axios.get("/public_signals");
-            console.log(data.msg);
-
-            //  (RISK ${Math.round((n.final_total_score.total + 1) * 50)})
-            grid.innerHTML = data.msg.map(n => `
-                <div class="bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group cursor-pointer" onclick="logNewsClick('${n.url}')">
-                    <div class="h-40 bg-gray-200 relative overflow-hidden">
-                        <a href=${n.url} target="_blank">
-                            <img src="${n.main_image}" alt="news_image" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                        </a>
-                        <div class="absolute bottom-3 left-3 text-white">
-                            <span class="text-xs font-medium px-2 py-1 bg-red-600 rounded mb-2 inline-block">RISK ${n.risk}</span>
-                        </div>
-                    </div>
-                    <div class="p-4">
-                        <div class="flex justify-between items-start mb-3">
-                            <!-- 숫자 대신 서버에서 보낸 risk_status(안정/주의/위기)와 risk_color를 사용합니다 -->
-                            <span class="text-[10px] font-bold px-2 py-1 rounded"
-                                  style="background-color: ${n.risk_color}20; color: ${n.risk_color};">
-                                ${n.risk_level}
-                            </span>
-                        </div>
-                        <div class="flex justify-between items-start mb-2">
-                            <span class="text-xs font-bold text-blue-600 uppercase">${n.press_name}</span>
-                            <span class="text-xs text-gray-400">${n.published_date.split('T')[0]}</span>
-                        </div>
-                        <a href=${n.url} target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors line-clamp-2">${n.title}</a>
-                    </div>
-                </div>
-            `).join('');
-        }
-
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
         async function logNewsClick(articleUrl) {
 
@@ -1004,29 +854,6 @@
                 });
                 console.log("열람 로그 전송 완료");
             }
-        }
-
-        // 국가 선택 로직
-        function selectCountry(code) {
-            selectedCountry = code;
-            console.log(code);
-            const infoBox = document.getElementById('selected-country-info');
-            const nameEl = document.getElementById('country-name');
-            const scoreEl = document.getElementById('country-score');
-
-            nameEl.innerText = countryNames[code];
-
-            // test
-            if(code === 'India'){
-                scoreEl.innerText = '92점 (심각)';
-                scoreEl.className = 'font-bold text-red-600';
-            }else{
-                scoreEl.innerText = '65점 (주의)';
-                scoreEl.className = 'font-bold text-yellow-600';
-            };
-
-            infoBox.classList.remove('hidden');
-            renderNews();
         }
 
         // 캘린더 로직
@@ -1084,7 +911,48 @@
             document.getElementById('date-display').innerText = dateStr;
             document.getElementById('date-display').classList.remove('text-gray-400');
             toggleCalendar();
+        }
+
+        // 페이지네이션 렌더링
+        function renderPagination() {
+            const paginationContainer = document.getElementById('pagination');
+            const totalPages = Math.ceil(allSignals.length / SIGNALS_PER_PAGE);
+            
+            if (totalPages <= 1) {
+                paginationContainer.innerHTML = '';
+                return;
+            }
+
+            let html = `
+                <button onclick="handlePageChange(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                    <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                </button>
+            `;
+
+            for (let i = 1; i <= totalPages; i++) {
+                html += `
+                    <button onclick="handlePageChange(${i})" class="px-4 py-2 rounded-lg border ${currentPage === i ? 'bg-blue-600 text-white' : 'hover:bg-gray-50'}">
+                        ${i}
+                    </button>
+                `;
+            }
+
+            html += `
+                <button onclick="handlePageChange(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                </button>
+            `;
+
+            paginationContainer.innerHTML = html;
+            lucide.createIcons(); // 아이콘 재생성
+        }
+
+        // 이벤트 핸들러
+        function handlePageChange(page) {
+            currentPage = page;
             renderNews();
+            renderPagination();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -1131,16 +999,6 @@
             }
         });
 
-        // 페이지 오픈시 실행
-        document.addEventListener('DOMContentLoaded', () => {
-            axios.get("/session_out");
-            updateNavbar();
-            renderExchangeRates();
-            renderNews();
-            initCalendar();
-            lucide.createIcons();
-            updateNotifUI();
-        });
     </script>
 </body>
 </html>

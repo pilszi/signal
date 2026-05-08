@@ -240,6 +240,8 @@
         let savedUserId = sessionStorage.getItem("savedUserId");
         let selectedKeyword = null;
         let noti = [];
+        let allSignals = [];
+        const SIGNALS_PER_PAGE = 15;
         
         // Navbar 상태 업데이트
         function updateNavbar() {
@@ -440,9 +442,9 @@
         // 3. 뉴스 카드 컴포넌트 (Template Function)
         function createNewsCard(news) {
             const riskColors = {
-                1: "bg-blue-100 text-blue-700",
-                2: "bg-yellow-100 text-yellow-700",
-                3: "bg-red-100 text-red-700"
+                "안정": "bg-blue-100 text-blue-700",
+                "주의": "bg-yellow-100 text-yellow-700",
+                "심각": "bg-red-100 text-red-700"
             };
             let newBadge = '';
             if (!news.is_read) {
@@ -480,6 +482,7 @@
 
             let {data} = await axios.get("/custom_news?id="+savedUserId);
             console.log(data);
+            allSignals = data.news
             // 필터 버튼 생성
             filterContainer.innerHTML = '<i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>';
             
@@ -540,13 +543,15 @@
                     }
                 }
                 // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
-                if (a.riskScore !== b.riskScore) {
-                    return b.riskScore - a.riskScore;
+                if (a.risk_score !== b.risk_score) {
+                    return b.risk_score - a.risk_score;
                 }
                 // 3. 날짜 기준 정렬 (최신순)
                 const dateA = new Date(a.published_date);
                 const dateB = new Date(b.published_date);
                 return dateB - dateA;
+
+                renderPagination();
             });
 
             // 뉴스 그리드 채우기
@@ -576,6 +581,48 @@
                 }, 100); // 0.1초 뒤 새로고침
             }
         }   
+
+        // 5. 페이지네이션 렌더링
+        function renderPagination() {
+            const paginationContainer = document.getElementById('pagination');
+            const totalPages = Math.ceil(allSignals.length / SIGNALS_PER_PAGE);
+            
+            if (totalPages <= 1) {
+                paginationContainer.innerHTML = '';
+                return;
+            }
+
+            let html = `
+                <button onclick="handlePageChange(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                    <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                </button>
+            `;
+
+            for (let i = 1; i <= totalPages; i++) {
+                html += `
+                    <button onclick="handlePageChange(${i})" class="px-4 py-2 rounded-lg border ${currentPage === i ? 'bg-blue-600 text-white' : 'hover:bg-gray-50'}">
+                        ${i}
+                    </button>
+                `;
+            }
+
+            html += `
+                <button onclick="handlePageChange(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                </button>
+            `;
+
+            paginationContainer.innerHTML = html;
+            lucide.createIcons(); // 아이콘 재생성
+        }
+
+        // 6. 이벤트 핸들러
+        function handlePageChange(page) {
+            currentPage = page;
+            createNewsCard();
+            renderPagination();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             // 현재 브라우저의 파일명만 추출

@@ -8,8 +8,12 @@ import traceback
 import jsonify
 import sqlalchemy
 from datetime import datetime
-from elasticsearch import Elasticsearch
+
 from concurrent.futures import ThreadPoolExecutor
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+from elasticsearch import Elasticsearch
 from fastapi import FastAPI, Body, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -305,7 +309,7 @@ def update_profile(info: Dict[str, Any]):
             res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
             key_insert += res.rowcount
 
-    return {"msg": "ok", "updated_keywords": key_insert}
+    return {"updated_keywords": key_insert}
 
 
 @app.post("/delete_member")
@@ -350,7 +354,7 @@ def public_signals():
         ],
         "size": 100
     }
-    res = es.search(index= es_index, body={"size":100})
+    res = es.search(index= "news_labeling", body={"size":100})
     print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
     # print(res['hits']['hits'])
     public_news = []
@@ -362,7 +366,8 @@ def public_signals():
             'main_image' : news["_source"]["main_image"],
             'published_date' : news["_source"]["published_date"],
             'press_name' : news["_source"]["press_name"],
-            'risk_level' : news["_source"]["risk_level"]
+            'risk_level' : news["_source"]["risk_level"],
+            'risk_score' : news["_source"]["final_total_score"]["total"]
         }
         public_news.append(_news)
     # print(public_news)
@@ -438,18 +443,36 @@ def custom_news(id:str):
         read_url = []
         for key in res:
             # print(keywords['keyword'])
-            keyword.append(key["keyword"])
+            clean_key = key["keyword"].strip()
+            if clean_key:
+                keyword.append(clean_key)
             read_url.append(key["news_url"])
 
         keywords = list(set(keyword))
         print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
 
         # 키워드가 들어간 뉴스기사 조회
-        """ test 쿼리 """
+        """ 추후 es_3 에서 데이터 가져올 때 사용할 쿼리"""
         body = {
             "query": {
-                "terms": {
-                    "extracted_keyword": keywords   # 리스트 전달
+                "bool": {
+                    "must": [
+                        {
+                            "terms": {
+                                "extracted_keywords": keyword  # 특정 키워드 조건
+                            }
+                        }
+                    ],
+                    "filter": [
+                        {
+                            "range": {
+                                "analyzed_at": {
+                                    "gte": "now-24h",  # 현재(now) 기준 24시간 전(24h) 이상(gte)
+                                    "lt": "now"  # 현재 미만(lt)
+                                }
+                            }
+                        }
+                    ]
                 }
             },
             "sort": [
@@ -457,35 +480,7 @@ def custom_news(id:str):
             ],
             "size": 100
         }
-        """ 추후 es_3 에서 데이터 가져올 때 사용할 쿼리"""
-            # body = {
-            #     "query": {
-            #         "bool": {
-            #             "must": [
-            #                 {
-            #                     "terms": {
-            #                         "extracted_keyword": keyword  # 특정 키워드 조건
-            #                     }
-            #                 }
-            #             ],
-            #             "filter": [
-            #                 {
-            #                     "range": {
-            #                         "analyzed_at": {
-            #                             "gte": "now-24h",  # 현재(now) 기준 24시간 전(24h) 이상(gte)
-            #                             "lt": "now"  # 현재 미만(lt)
-            #                         }
-            #                     }
-            #                 }
-            #             ]
-            #         }
-            #     },
-            #     "sort": [
-            #         {"published_date": "desc"}
-            #     ],
-            #     "size": 100
-            # }
-        res = es.search(index=es_index, body=body)
+        res = es.search(index="news_labeling", body=body)
         print(f"검색 된 기사 갯수 = {res['hits']['total']['value']}")
         custom_news = []
         for news in res['hits']['hits']:
@@ -525,7 +520,7 @@ def custom_news(id:str):
 #         return {"status": "error", "message": str(e)}
 
 # 시그널로그 페이지
-@app.get("signal_log")
+@app.get("/signal_log")
 def signal_log(id:str):
     logger.info(f'==={id}===')
 
@@ -541,7 +536,10 @@ def signal_log(id:str):
         key_res = db.execute(sql, {"id": id}).mappings().fetchall()
         keywords = []
         for key in key_res:
-            keywords.append(key["keyword"])
+            clean_key = key["keyword"].strip()
+            if clean_key:
+                keywords.append(clean_key)
+
         logger.info(f'{id} 의 관심키워드 = {keywords}')
         # 2. 키워드에 맞는 기사 조회(es 에서 _id 조회)
         should_key = []
@@ -549,7 +547,7 @@ def signal_log(id:str):
             should_key.append(
                 {
                     "match": {
-                        "extracted_keyword": {
+                        "extracted_keywords": {
                             "query": key,
                             "_name": key
                         }
@@ -561,45 +559,59 @@ def signal_log(id:str):
             "query": {
                 "bool": {
                     "should": should_key,
-                    "minimum_match_query": 1
+                    "minimum_should_match": 1
                 }
             }
         }
+        es_res = es.search(index="news_labeling", body=body)
+        logger.info(f'관심키워드에 맞는 뉴스기사 = {len(es_res["hits"]["hits"])}')
+        unique_ids = set()
+        doc_no = []
 
-        es_res = es.search(es_index, body=body)
-        _id = []
         for i in es_res['hits']['hits']:
-            doc = {
-                "id": i["_id"],
-                "url": i["_source"]["url"],
-                "match_keyword": i.get("matched_queries", [])
-            }
-            _id.append(doc)
-        doc_no = set(_id)
-        logger.info(f'키워드에 해당하는 문서 = {doc_no}')
+            doc_id = i["_id"]
+            if doc_id not in unique_ids:
+                unique_ids.add(doc_id)
+                doc = {
+                    "id": i["_id"],
+                    "url": i["_source"]["url"],
+                    "match_keyword": i.get("matched_queries", []),
+                    "risk_level": i["_source"]["risk_level"],
+                    "signal_time": i["_source"]["analyzed_at"],
+                    "prediction": i["_source"]["prediction"],
+                    "prediction_reason": i["_source"]["prediction_reason"],
+                }
+                doc_no.append(doc)
+
+        logger.info(f'키워드에 해당하는 문서 = {len(doc_no)}')
 
         # 3. _id 에 해당하는 signal_no 조회(DB)
         sql = sqlalchemy.text("""
-                SELECT
-                    risk_level
-                    ,signal_time
-                    ,prediction
-                    ,prediction_reason
-                FROM signal_message
-                    WHERE document_no = :doc_no
-        """)
-        sig_doc = []
-        for doc in doc_no:
-            db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchall()
-            d = {
-                "risk_level": db_res["risk_level"],
-                "signal_time": db_res["signal_time"],
-                "prediction": db_res["prediction"],
-                "prediction_reason": db_res["prediction_reason"],
-                "url": doc["url"]
-            }
-            sig_doc.append(d)
-    return {}
+        #         SELECT
+        #             risk_level
+        #             ,signal_time
+        #             ,prediction
+        #             ,prediction_reason
+        #         FROM signal_message
+        #             WHERE document_no = :doc_no
+        # """)
+        # DB에서 데이터를 가져올 경우 사용
+        # sig_doc = []
+        # for doc in doc_no:
+        #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
+        #     logger.info(f'--------')
+        #     if db_res:
+        #         d = {
+        #             "risk_level": db_res["risk_level"],
+        #             "signal_time": db_res["signal_time"],
+        #             "prediction": db_res["prediction"],
+        #             "prediction_reason": db_res["prediction_reason"],
+        #             "url": doc["url"],
+        #             "match_keyword": doc["match_keyword"]
+        #         }
+        #         sig_doc.append(d)
+        # logger.info(f'맞춤 signal_log = {len(sig_doc)} 개')
+    return {"data": doc_no}
 
 
 # 네이게이션바 signal 알림 토글 요청
