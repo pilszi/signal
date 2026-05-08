@@ -337,22 +337,16 @@ def delete_member(info: Dict[str, str]):
 # main 페이지 오늘의 뉴스 조회
 @app.get("/public_signals")
 def public_signals():
-    # print('뉴스 요청')
-    # body = {"query": {"bool": {"filter": [{"range": {
-    #                         "published_date": {
-    #                             "gte": "now-12h",     # 현재 시각 기준 12시간 전부터
-    #                             "lte": "now",         # 현재 시각까지
-    #                         }}}]
-    #         }
-    #     },
-    #     "sort": [{ "published_date": "desc" }]        # 최신 기사가 먼저 나오도록 정렬
-    #     ,"size": 100
-    # }
-    body = {
-        "sort": [
-            {"published_date": {"order": "desc"}}  # 최신 기사가 먼저 나오도록 정렬
-        ],
-        "size": 100
+    """ 메인 페이지 기사 요청 """
+    body = {"query": {"bool": {"filter": [{"range": {
+                            "published_date": {
+                                "gte": "now-12h",     # 현재 시각 기준 12시간 전부터
+                                "lte": "now",         # 현재 시각까지
+                            }}}]
+            }
+        },
+        "sort": [{ "published_date": "desc" }]        # 최신 기사가 먼저 나오도록 정렬
+        ,"size": 100
     }
     res = es.search(index= "news_labeling", body={"size":100})
     print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
@@ -375,6 +369,7 @@ def public_signals():
 
 @app.get("/main/country")
 def country():
+    """ 히트맵 데이터 요청 """
     with (get_db() as db):
         sql = sqlalchemy.text("""
                 SELECT
@@ -427,6 +422,7 @@ def news_view(info:Dict[str, str]):
 # 맞춤형뉴스 요청
 @app.get("/custom_news")
 def custom_news(id:str):
+    """ 맞춤형 뉴스 데이터 요청 """
     print(f'맞춤형 요청 id = {id}')
     with get_db() as db:
         sql = sqlalchemy.text("""
@@ -522,6 +518,7 @@ def custom_news(id:str):
 # 시그널로그 페이지
 @app.get("/signal_log")
 def signal_log(id:str):
+    """ 시그널로그 페이지 요청 """
     logger.info(f'==={id}===')
 
     with get_db() as db:
@@ -595,7 +592,8 @@ def signal_log(id:str):
         #         FROM signal_message
         #             WHERE document_no = :doc_no
         # """)
-        # DB에서 데이터를 가져올 경우 사용
+
+        """DB에서 데이터를 가져올 경우 사용"""
         # sig_doc = []
         # for doc in doc_no:
         #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
@@ -617,6 +615,7 @@ def signal_log(id:str):
 # 네이게이션바 signal 알림 토글 요청
 @app.get("/noti/signal")
 def noti_signal(id:str):
+    """ 페이지 상단 네비게이션바 요청 """
     # logger.info(f'----{id}----')
     with get_db() as db:
         sql = sqlalchemy.text("""
@@ -660,6 +659,7 @@ def noti_read(info: Dict[str, Any]):
 # 모든 알림트글 읽음 요청
 @app.get("/noti/read_all")
 def noti_raed_all(id:str):
+    """ 네비게이션바 시그널알림 확인 요청 """
     with get_db() as db:
         sql = sqlalchemy.text("""
             UPDATE alarm_log t1 JOIN member_info t2 

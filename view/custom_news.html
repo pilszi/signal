@@ -242,7 +242,8 @@
         let noti = [];
         let allSignals = [];
         const SIGNALS_PER_PAGE = 15;
-        
+        let currentPage = 1;
+
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
@@ -527,10 +528,12 @@
                 filterContainer.appendChild(btn);
             });
 
-            
+            const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
+            const endIndex = startIndex + SIGNALS_PER_PAGE;
+            const currentSignals = allSignals.slice(startIndex, endIndex);
 
             // 필터링 및 정렬 로직
-            const filtered = data.news.filter(n => !selectedKeyword || n.keyword === selectedKeyword);
+            const filtered = currentSignals.filter(n => !selectedKeyword || n.keyword === selectedKeyword);
             const sorted = [...filtered].sort((a, b) => {
                 // 1. 읽음 상태 기준 정렬 (읽지 않은 기사 !is_read 가 위로 오도록)
                 const readA = !!a.is_read; 
@@ -648,6 +651,7 @@
             updateNavbar();
             updateNotifUI();
             render();
+            renderPagination()
             if (window.lucide) lucide.createIcons();
         });
 
