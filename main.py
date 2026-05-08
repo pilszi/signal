@@ -584,32 +584,32 @@ def signal_log(id:str):
 
         logger.info(f'키워드에 해당하는 문서 = {len(doc_no)}')
 
-        # 3. _id 에 해당하는 signal_no 조회(DB)
-        sql = sqlalchemy.text("""
-        #         SELECT
-        #             risk_level
-        #             ,signal_time
-        #             ,prediction
-        #             ,prediction_reason
-        #         FROM signal_message
-        #             WHERE document_no = :doc_no
-        # """)
-        # DB에서 데이터를 가져올 경우 사용
-        # sig_doc = []
-        # for doc in doc_no:
-        #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
-        #     logger.info(f'--------')
-        #     if db_res:
-        #         d = {
-        #             "risk_level": db_res["risk_level"],
-        #             "signal_time": db_res["signal_time"],
-        #             "prediction": db_res["prediction"],
-        #             "prediction_reason": db_res["prediction_reason"],
-        #             "url": doc["url"],
-        #             "match_keyword": doc["match_keyword"]
-        #         }
-        #         sig_doc.append(d)
-        # logger.info(f'맞춤 signal_log = {len(sig_doc)} 개')
+        # # 3. _id 에 해당하는 signal_no 조회(DB)
+        # sql = sqlalchemy.text("""
+        #          SELECT
+        #              risk_level
+        #              ,signal_time
+        #              ,prediction
+        #              ,prediction_reason
+        #          FROM signal_message
+        #              WHERE document_no = :doc_no
+        #  """)
+        # # DB에서 데이터를 가져올 경우 사용
+        # # sig_doc = []
+        # # for doc in doc_no:
+        # #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
+        # #     logger.info(f'--------')
+        # #     if db_res:
+        # #         d = {
+        # #             "risk_level": db_res["risk_level"],
+        # #             "signal_time": db_res["signal_time"],
+        # #             "prediction": db_res["prediction"],
+        # #             "prediction_reason": db_res["prediction_reason"],
+        # #             "url": doc["url"],
+        # #             "match_keyword": doc["match_keyword"]
+        # #         }
+        # #         sig_doc.append(d)
+        # # logger.info(f'맞춤 signal_log = {len(sig_doc)} 개')
     return {"data": doc_no}
 
 
