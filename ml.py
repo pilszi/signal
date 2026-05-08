@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import re
 import json
 import time
+import asyncio
 from utils import extract_keywords
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
@@ -25,7 +26,7 @@ logger = get_logger(__name__)
 # ==========================================
 # 1. bert 모델 설정 및 es 연결
 # ==========================================
-MODEL_PATH = "./fine_tuned_finance_model_3"  # 학습시킨 모델 경로
+MODEL_PATH = "./fine_tuned_finance_model_2"  # 학습시킨 모델 경로
 
 # # 학습 완료된 모델 및 토크나이저 로드
 # 1. 실행 장치 설정 (GPU가 있으면 사용, 없으면 CPU)
@@ -131,7 +132,7 @@ def get_weighted_keyword_score(title, content):
 
 
 # 제미나이 프롬프트
-def get_ai_prediction_report(risk_level, title, keywords, scores):
+async def get_ai_prediction_report(risk_level, title, keywords, scores):
     """Gemini AI 활용 리포트 생성"""
     if risk_level != "심각":
         main_kw = ", ".join(keywords[:2]) if keywords else "주요 경제 지표"
@@ -157,6 +158,9 @@ def get_ai_prediction_report(risk_level, title, keywords, scores):
     """
     for attempt in range(len(Config.GEMINI_API_KEYS)):
         try:
+            # [해결책 1] 요청을 보내기 전에 2~3초간 잠시 쉽니다.
+            # 이렇게 해야 무료 티어의 분당 호출 제한(RPM)을 피할 수 있어요.
+            await asyncio.sleep(4)
             client = Config.get_next_client()
             response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
             res_text = response.text.strip()
@@ -164,8 +168,14 @@ def get_ai_prediction_report(risk_level, title, keywords, scores):
             return json.loads(json_match.group()) if json_match else json.loads(res_text)
         except Exception as e:
             print(f"Gemini 키 교체 시도... ({e})")
+            # [해결책 2] 키를 교체할 때도 잠시 텀을 줍니다.
+            await asyncio.sleep(2)
             continue
-    return {"prediction": "분석 지연", "reason": "API 할당량 초과로 인한 지연"}
+
+    return {
+        "prediction": "🚨 시장 리스크가 감지되었습니다. 실시간 분석이 지연되고 있습니다.",
+        "reason": "1. 현재 분석 요청이 일시적으로 폭주하고 있습니다.\\n2. 로컬 모델 점수상으로는 '심각' 단계이니 주의가 필요합니다.\\n3. 잠시 후 대시보드를 새로고침하여 상세 AI 리포트를 확인해주세요."
+    }
 
 
 # ==========================================
@@ -174,20 +184,38 @@ def get_ai_prediction_report(risk_level, title, keywords, scores):
 # 환율/원자재 라벨링 기준
 def calculate_indicator_score(today_return, return_history_30d):
     if not return_history_30d: return 1.0
-    mean_val, std_val = np.mean(return_history_30d), np.std(return_history_30d)
-    if std_val == 0: return 1.0 # 변동이 전혀 없으면 안정으로 간주
-    z_score = (today_return - mean_val) / std_val
-    # 지표가 급등하거나 급락하면(절대값 2이상) 위험(-1.0) 판정
-    return -1.0 if abs(z_score) >= 2.0 else 1.0
+    try:
+        today_return = float(today_return)
+        history_floats = [float(p) for p in return_history_30d]
+
+        mean_val = np.mean(history_floats)
+        std_val = np.std(history_floats)
+
+        if std_val == 0: return 1.0
+
+        z_score = (today_return - mean_val) / std_val
+
+        # 이제 z_score가 float이므로 0.5(float)와 계산이 가능합니다!
+        if z_score > 0:
+            score = 1.0 - (z_score * 0.5)
+            return round(max(0.0, score), 4)
+        else:
+            score = 1.0
+
+        return round(score, 4)
+
+    except Exception as e:
+        logger.error(f"⚠️ 지표 점수 계산 중 타입 오류 발생: {e}")
+        return 1.0
+
 
 # (환율/원자재)그룹 점수를 각각 낼 때 사용
 def aggregate_indicator(scores):
-    valid = [s for s in scores if s is not None]
+    valid = [max(0.0, float(s)) for s in scores if s is not None]
     if not valid: return 1.0
-    # 7개 중 1개라도 위험(-1.0)이 있다면 위험으로 간주 (민감도 향상)
-    neg_count = sum(1 for s in valid if s == -1.0)
-    # 최소 1~2개 이상 문제 시 즉시 경보
-    return -1.0 if neg_count >= 1 else 1.0
+    # 평균값을 반환하여 전체적인 리스크 강도를 유지 (0.0 ~ 1.0 사이 값)
+    avg_score = sum(valid) / len(valid)
+    return round(max(0.0, avg_score), 4)
 
 
 # ==========================================
@@ -195,7 +223,7 @@ def aggregate_indicator(scores):
 # ==========================================
 # 기사 라벨링 5 [최종 통합 라벨링(벡엔드 저장)]: 30일치 지표(Z-Score) + BERT 감성 점수=>risk_lv
 # 그 다음은 main.py
-def run_analysis():
+async def run_analysis():
     """
     [핵심 분석 엔진]
     1. DB에서 최근 30일 환율/원자재 지표를 로드하여 통계 분석(Z-Score) 수행
@@ -261,23 +289,24 @@ def run_analysis():
         ai_score = get_bert_score(target_text)
         # [3] 최종 기사 점수 산출 (AI 0.7 : 키워드 0.3)
         final_sent_score = round((ai_score * 0.7) + (keyword_score * 0.3), 4)
-
-        # [4] 지표 점수 (Z-Score 활용)
+        # [4] AI 감성 점수를 0~1 범위로 먼저 변환
+        normalized_ai_score = (final_sent_score + 1) / 2
+        # [5] 지표 점수 (Z-Score 활용)
         ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
         ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
 
-        # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15)
-        total = (final_sent_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
+        # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15), 합산 결과도 무조건 0~1 사이가 됨
+        total = (normalized_ai_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
 
-        if total <= -0.2:
+        if total <= 0.35:
             risk_lv = "심각"
-        elif total <= 0.4:
+        elif total <= 0.65:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
 
         # [STEP 4] Gemini 리포트
-        ai_rep = get_ai_prediction_report(
+        ai_rep = await get_ai_prediction_report(
             risk_lv, data['title'], refined_keywords,
             {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
 
@@ -365,7 +394,15 @@ def get_latest_signals(size=10):
 
 
 if __name__ == "__main__":
-    while True:
-        run_analysis()
-        print("💤 10분 대기 후 다음 배치 시작...")
-        time.sleep(600)
+    async def main_loop():
+        while True:
+            # await를 붙여서 비동기 함수를 실행합니다.
+            await run_analysis()
+            logger.info("💤 10분 대기 후 다음 배치 시작...")
+            await asyncio.sleep(600)  # 10분 대기
+
+
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        logger.info("🛑 사용자에 의해 분석 엔진이 중단되었습니다.")
