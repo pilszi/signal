@@ -4,8 +4,11 @@ import subprocess
 import asyncio
 from typing import Dict, Any
 import traceback
+
+import jsonify
 import sqlalchemy
 from fastapi import FastAPI
+from elasticsearch import Elasticsearch
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Body, Request
 from fastapi.staticfiles import StaticFiles
@@ -18,8 +21,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from sse_starlette.sse import EventSourceResponse
-from elasticsearch import Elasticsearch
-
 
 # --- 이 코드를 반드시 추가하세요 ---
 if sys.platform == 'win32':
@@ -29,8 +30,10 @@ if sys.platform == 'win32':
 # [내부 모듈 임포트]
 from logger import get_logger
 from dataReqType.regist import RegistModel
-from db import get_db
+from db import get_db, engine
 from hash import hash_password, verify_password
+from config import Config
+from utils import prepare_heatmap_data
 
 # 파일 연동 (수집 및 분석 모듈)
 import naver
@@ -42,106 +45,111 @@ import ml
 
 # 로거 및 학습 완료 증명서 설정
 logger = get_logger(__name__)
-# TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아닌지를 확인하는 체크포인트
+TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아닌지를 확인하는 체크포인트
 
 # 전역 스케줄러 객체 (함수 외부에서 접근 가능하도록 설정)
-# global_scheduler = AsyncIOScheduler()
+global_scheduler = AsyncIOScheduler()
+
+# es 설정
+es = Elasticsearch(["http://localhost:9200"])
+
 
 # ==========================================
 # 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
 # ==========================================
-# async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
-#     """
-#     BERT 모델 학습 여부를 체크하고, 완료되었다면 ml.run_analysis를 주기적으로 실행함
-#     """
-#     if not os.path.exists(TRAIN_LOCK_FILE):
-#         logger.info("📡 [Pipeline] 첫 실행: 기존 CSV 데이터를 이용한 모델 학습을 시작합니다.")
-#         try:
-#             logger.info("🧠 [Pipeline] BERT 모델 파인튜닝 가동 (subprocess)...")
-#             # 가상환경 파이썬으로 train_model.py 실행
-#             process = await asyncio.create_subprocess_exec(
-#                 sys.executable,
-#                 os.path.join(os.getcwd(), "train_model.py"),  # 절대 경로로 변경
-#                 stdout=subprocess.PIPE,
-#                 stderr=subprocess.PIPE
-#             )
-#             stdout, stderr = await process.communicate()
-#
-#             if process.returncode == 0:
-#                 logger.info("🎊 [Pipeline] 모델 학습 완료! 분석 모드로 전환합니다.")
-#                 with open(TRAIN_LOCK_FILE, "w") as f:
-#                     f.write(f"Finished at {os.path.getmtime('train_model.py')}")
-#
-#                 # BERT 분석 작업 등록 (10분)
-#                 if not scheduler.get_job('ml_analysis'):
-#                     scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
-#             else:
-#                 logger.error(f"❌ [Pipeline] 학습 도중 에러 발생: {stderr.decode()}")
-#         except Exception as e:
-#             logger.error(f"❌ [Pipeline] 파이프라인 실행 중 예외 발생: {str(e)}")
-#             logger.error(traceback.format_exc())
-#     else:
-#         # 이미 학습이 완료된 경우 바로 분석 작업 등록
-#         if not scheduler.get_job('ml_analysis'):
-#             logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
-#             scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
+async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
+    """
+    BERT 모델 학습 여부를 체크하고, 완료되었다면 ml.run_analysis를 주기적으로 실행함
+    """
+    if not os.path.exists(TRAIN_LOCK_FILE):
+        logger.info("📡 [Pipeline] 첫 실행: 기존 CSV 데이터를 이용한 모델 학습을 시작합니다.")
+        try:
+            logger.info("🧠 [Pipeline] BERT 모델 파인튜닝 가동 (subprocess)...")
+            # 가상환경 파이썬으로 train_model.py 실행
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                os.path.join(os.getcwd(), "train_model.py"),  # 절대 경로로 변경
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
 
-host = "100.123.232.79"
-es = Elasticsearch(
-    [f"http://localhost:9200"],
-    request_timeout=30
-)
-es_index = "news_labellin_es_3"
+            if process.returncode == 0:
+                logger.info("🎊 [Pipeline] 모델 학습 완료! 분석 모드로 전환합니다.")
+                with open(TRAIN_LOCK_FILE, "w") as f:
+                    f.write(f"Finished at {os.path.getmtime('train_model.py')}")
+
+                # BERT 분석 작업 등록 (10분)
+                if not scheduler.get_job('ml_analysis'):
+                    scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
+            else:
+                logger.error(f"❌ [Pipeline] 학습 도중 에러 발생: {stderr.decode()}")
+        except Exception as e:
+            logger.error(f"❌ [Pipeline] 파이프라인 실행 중 예외 발생: {str(e)}")
+            logger.error(traceback.format_exc())
+    else:
+        # 이미 학습이 완료된 경우 바로 분석 작업 등록
+        if not scheduler.get_job('ml_analysis'):
+            logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
+            # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
+            from datetime import datetime
+            scheduler.add_job(
+                ml.run_analysis,
+                'interval',
+                minutes=10,
+                id='ml_analysis',
+                next_run_time=datetime.now()  # 등록하자마자 바로 실행!
+            )
 
 
 # ==========================================
 # 1. 서버 생애주기(Lifespan) 설정
 # ==========================================
 # 서버 시작 시 순차적으로 실행될 초기화 함수 정의
-# executor = ThreadPoolExecutor(max_workers=5)
-# async def run_initial_batch(scheduler):
-#     loop = asyncio.get_event_loop()
-#     try:
-#         logger.info("🎬 [초기화 시퀀스] 시작")
-#         # 동기 수집 함수들을 스레드 풀에서 실행
-#         await loop.run_in_executor(executor, naver.run_naver_collect)
-#         await loop.run_in_executor(executor, yna.run_yna_collect)
-#         await loop.run_in_executor(executor, RSS.run_reuters_collect)
-#
-#         # 지표 수집 (동기 함수라면 executor 사용)
-#         await loop.run_in_executor(executor, indicator.collect_market_data_job)
-#
-#         logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행 (news_origin 생성)")
-#         # 수집된 데이터를 번역해서 news_origin으로 넘김
-#         await loop.run_in_executor(executor, translator_worker.process_translation)
-#
-#         logger.info("🎬 [초기화 시퀀스] 3단계: AI 분석 파이프라인 가동")
-#         await manage_ml_pipeline(scheduler)
-#
-#         logger.info("✅ [초기화 시퀀스] 모든 초기 배치 작업 완료")
-#     except Exception as e:
-#         logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
+executor = ThreadPoolExecutor(max_workers=5)
+async def run_initial_batch(scheduler):
+    loop = asyncio.get_event_loop()
+    try:
+        logger.info("🎬 [초기화 시퀀스] 시작")
+        # 동기 수집 함수들을 스레드 풀에서 실행
+        await loop.run_in_executor(executor, naver.run_naver_collect)
+        await loop.run_in_executor(executor, yna.run_yna_collect)
+        await loop.run_in_executor(executor, RSS.run_reuters_collect)
+
+        # 지표 수집 (동기 함수라면 executor 사용)
+        await loop.run_in_executor(executor, indicator.collect_market_data_job)
+
+        logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행 (news_origin 생성)")
+        # 수집된 데이터를 번역해서 news_origin으로 넘김
+        await loop.run_in_executor(executor, translator_worker.process_translation)
+
+        logger.info("🎬 [초기화 시퀀스] 3단계: AI 분석 파이프라인 가동")
+        await manage_ml_pipeline(scheduler)
+
+        logger.info("✅ [초기화 시퀀스] 모든 초기 배치 작업 완료")
+    except Exception as e:
+        logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
 
 
 # 실행시킬 스케줄러 함수
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
-#     global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=10, id='nc')
-#     global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=10, id='yc')
-#     global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=10, id='rc')
-#     global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=2, id='tw')
-#     global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
-#     # 학습/분석 파이프라인 관리 (5분마다 체크)
-#     global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=5, args=[global_scheduler], id='ml_pipeline')
-#
-#     # 서버 시작과 동시에 즉시 실행 (백그라운드 태스크)
-#     asyncio.create_task(run_initial_batch(global_scheduler))
-#
-#     global_scheduler.start()
-#     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
-#     yield
-#     global_scheduler.shutdown()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
+    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=10, id='nc')
+    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=10, id='yc')
+    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=10, id='rc')
+    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=2, id='tw')
+    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
+    # 학습/분석 파이프라인 관리 (5분마다 체크)
+    global_scheduler.add_job(manage_ml_pipeline, 'interval', minutes=5, args=[global_scheduler], id='ml_pipeline')
+
+    # 서버 시작과 동시에 즉시 실행 (백그라운드 태스크)
+    asyncio.create_task(run_initial_batch(global_scheduler))
+
+    global_scheduler.start()
+    logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
+    yield
+    global_scheduler.shutdown()
 
 
 # FastAPI 앱 초기화
@@ -183,7 +191,7 @@ def regist(info: RegistModel):
         child_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES (:member_no, :keyword)")
         for key in info.keyword:
             db.execute(child_sql, {"member_no": member_no, "keyword": key})
-    return {"msg": "regist OK!"}
+    return
 
 
 @app.post('/login')
@@ -217,7 +225,7 @@ def logout(req: Request):
                 sqlalchemy.text("UPDATE member_login_log SET logout_time = NOW(), status = 0 WHERE log_no = :log_no"),
                 {"log_no": log_no})
     req.session.clear()
-    return {"msg": "ok"}
+    return
 
 # session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
 @app.get('/session_out')
@@ -230,7 +238,7 @@ def session_out():
         count = result.rowcount
 
     print(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
-    return {"msg": "session 만료 계정 로그아웃"}
+    return
 
 @app.get("/profile")
 def get_profile(id: str):
@@ -281,7 +289,7 @@ def update_profile(info: Dict[str, Any]):
             res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
             key_insert += res.rowcount
 
-    return {"msg": "ok", "updated_keywords": key_insert}
+    return {"updated_keywords": key_insert}
 
 
 @app.post("/delete_member")
@@ -718,19 +726,55 @@ def get_market_indicators():
         return {"status": "success", "data": formatted_data}
 
 
-# 시그널 로그를 브라우저 알림에 뜨게 해주는 함수
-@app.get("/api/stream-risk")
-async def stream_risk():
-    """브라우저에 알림을 쏴주는 SSE 통로"""
-    async def event_generator():
-        while True:
-            # 1분마다 시스템이 살아있음을 알림 (실제 알림 로직은 고도화 가능)
-            yield {"data": "🔔 실시간 분석 엔진 가동 중"}
-            await asyncio.sleep(60)
+# ==========================================
+# 5. 히트맵
+# ==========================================
+@app.get("/stats/heatmap")
+async def get_heatmap_stats():
+    """
+    프론트엔드 히트맵 지도를 위한 리스크 통계 데이터 반환
+    """
+    try:
+        # 1. ES에서 분석 완료된 최신 데이터 100건 가져오기
+        query = {
+            "query": {"match_all": {}},
+            "sort": [{"analyzed_at": "desc"}],
+            "size": 100
+        }
+        res = es.search(index="news_labeling", body=query)
+        docs = [hit['_source'] for hit in res['hits']['hits']]
 
-    return EventSourceResponse(event_generator())
+        # 2. 모든 국가를 기본 '안정(Stable)'으로 초기화
+        # Config.G20_COUNTRY_MAP.values()에서 유니크한 영어 국가명들을 가져옵니다.
+        unique_countries = set(Config.G20_COUNTRY_MAP.values())
+        stats = {country: {"score": 0, "level": "Stable"} for country in unique_countries}
 
+        # 3. 데이터를 순회하며 국가별 최신 상태 업데이트
+        for doc in docs:
+            c_name = doc.get('country_name')
 
+            # [핵심] 'Middle East' 같은 지역명이 오면 해당 지역 국가 전체에 점수 전파
+            target_countries = [c_name]
+            if c_name in Config.REGION_TO_COUNTRIES:
+                target_countries = Config.REGION_TO_COUNTRIES[c_name]
+
+            for country in target_countries:
+                if country in stats:
+                    # 이미 데이터가 들어있다면(최신순 정렬이므로) 건너뜁니다.
+                    if stats[country]["score"] != 0: continue
+
+                    # ml.py에서 저장한 점수와 등급 가져오기
+                    raw_score = doc.get('final_total_score', {}).get('total', 0)
+                    # RISK 점수로 변환 (0~100 사이)
+                    risk_score = round(abs(raw_score * 100), 1)
+
+                    stats[country]["score"] = risk_score
+                    stats[country]["level"] = doc.get('risk_level', '안정')
+
+        return stats  # FastAPI는 jsonify 없이 그냥 리턴!
+    except Exception as e:
+        print(f"❌ 히트맵 통계 에러: {e}")
+        return {}
 
 if __name__ == "__main__":
     import uvicorn

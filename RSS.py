@@ -228,17 +228,18 @@ def fetch_and_save(data):
         }
 
         es.index(index=INDEX_NAME, id=doc_id, document=doc)
+        logging.info(f"✅ [GLOBAL-RSS] 저장 완료: {article.title[:30]}...")
         return "SUCCESS"
 
     except Exception as e:
-        logging.error(f"Error processing {clean_url}: {e}")
+        logging.error(f"❌ [GLOBAL-RSS] 수집 실패 ({clean_url}): {e}")
         return "ERROR"
 
 
 # --- 4. 실행부 ---
 
 def crawl_job(keywords):
-    logging.info(f"🚀 Signal 글로벌 뉴스 수집 가동: {len(RSS_FEEDS)}개 피드 탐색")
+    logging.info("🌍 [GLOBAL-RSS] === 글로벌 뉴스 수집 프로세스 시작 ===")
     link_data = {}
 
     for feed_url in RSS_FEEDS:
@@ -258,17 +259,26 @@ def crawl_job(keywords):
             logging.error(f"Feed error ({feed_url}): {e}")
 
     tasks = list(link_data.items())
+    if not tasks:
+        logging.info("🌍 [GLOBAL-RSS] 탐색 결과, 키워드와 일치하는 새 기사가 없습니다.")
+    else:
+        logging.info(f"🌍 [GLOBAL-RSS] 총 {len(tasks)}개의 분석 대상 기사를 발견했습니다.")
     stats = {"SUCCESS": 0, "EXIST": 0, "FAILED": 0, "ERROR": 0}
 
     # [최적화 2] 해외 사이트 지연을 고려하여 max_workers를 10으로 확장
     if tasks:
+        logging.info(f"📂 [GLOBAL-RSS] 총 {len(tasks)}개의 후보 기사 처리 중...")
         with ThreadPoolExecutor(max_workers=10) as executor:
             results = list(executor.map(fetch_and_save, tasks))
             for res in results:
                 stats[res] = stats.get(res, 0) + 1
 
-    logging.info(
-        f"📊 수집 리포트 | 신규: {stats['SUCCESS']} | 중복: {stats['EXIST']} | 실패: {stats['FAILED']} | 에러: {stats['ERROR']}")
+
+    # 신규 저장 건수가 있을 때만 강조 표시
+    if stats['SUCCESS'] > 0:
+        logging.info(f"✅ [GLOBAL-RSS] 저장 완료: 신규 {stats['SUCCESS']}건 (중복 제외: {stats['EXIST']}건)")
+    else:
+        logging.info(f"💤 [GLOBAL-RSS] 업데이트 없음 (탐색: {len(tasks)}건, 신규: 0건)")
 
 
 def run_reuters_collect():

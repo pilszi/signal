@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import re
 import json
 import time
+from utils import extract_keywords
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from elasticsearch import Elasticsearch
@@ -16,6 +17,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from config import Config
 from db import get_db
 from logger import get_logger
+import utils
 
 # 로거 객체 생성
 logger = get_logger(__name__)
@@ -23,7 +25,7 @@ logger = get_logger(__name__)
 # ==========================================
 # 1. bert 모델 설정 및 es 연결
 # ==========================================
-MODEL_PATH = "./fine_tuned_finance_model_2"  # 학습시킨 모델 경로
+MODEL_PATH = "./fine_tuned_finance_model_3"  # 학습시킨 모델 경로
 
 # # 학습 완료된 모델 및 토크나이저 로드
 # 1. 실행 장치 설정 (GPU가 있으면 사용, 없으면 CPU)
@@ -243,12 +245,15 @@ def run_analysis():
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
 
     if not docs:
-        print("✅ 처리할 새 뉴스 없음")
+        logger.info("✅ 처리할 새 뉴스 없음")
         return
 
     for doc in docs:
         _id = doc['_id']
         data = doc['_source']
+
+        refined_keywords = utils.extract_keywords(data['title'], data['content'])
+        refined_country = utils.extract_country(data['title'], data['content'])
 
         # [1] 가중 점수 계산 및 분석용 문장 추출
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
@@ -264,16 +269,17 @@ def run_analysis():
         # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15)
         total = (final_sent_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
 
-        if total <= 0.1:
+        if total <= -0.2:
             risk_lv = "심각"
-        elif total <= 0.5:
+        elif total <= 0.4:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
 
         # [STEP 4] Gemini 리포트
-        ai_rep = get_ai_prediction_report(risk_lv, data['title'], data.get('extracted_keyword', []),
-                                          {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
+        ai_rep = get_ai_prediction_report(
+            risk_lv, data['title'], refined_keywords,
+            {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
 
         # 한국 표준시(KST)로 정확하게 설정
         kst = timezone(timedelta(hours=9))  # 한국은 UTC보다 9시간 빠름
@@ -283,7 +289,7 @@ def run_analysis():
         labelled_doc = {
             "analyzed_at": now_kst.isoformat(),
             "title": data['title'],
-            "keywords": data.get('extracted_keyword', []),
+            "keywords": refined_keywords,
             "url": data.get('url', ''),
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
@@ -306,7 +312,7 @@ def run_analysis():
                 }
             },
             "published_date": data.get('published_date'),
-            "country_name": data.get('country_name', 'Global')
+            "country_name": refined_country
         }
 
         # [STEP 6] ES 저장 및 상태 업데이트
@@ -325,9 +331,9 @@ def run_analysis():
             )
         except Exception as e:
             logger.error(f"❌ [저장 에러] ID {_id} 처리 중 오류 발생: {e}")
-        # 모든 루프 종료 후 요약 로그
-        logger.info(f"✅ 이번 배치 분석 완료 (총 {len(docs)}건 처리)")
-        logger.info("--------------------------------------------------")
+    # 모든 루프 종료 후 요약 로그
+    logger.info(f"✅ 이번 배치 분석 완료 (총 {len(docs)}건 처리)")
+    logger.info("--------------------------------------------------")
 
 
 def get_latest_signals(size=10):
@@ -342,13 +348,20 @@ def get_latest_signals(size=10):
             "size": size
         }
         res = es.search(index="news_labeling", body=query)
-        return [hit["_source"] for hit in res['hits']['hits']]
+        hits = res['hits']['hits']
+
+        if not hits:
+            logger.warning(f"⚠️ news_labeling 인덱스에 데이터가 하나도 없습니다.")
+            return []
+        # 데이터 가공 및 반환
+        signals = [hit["_source"] for hit in hits]
+        logger.info(f"✅ {len(signals)}건의 시그널 데이터를 성공적으로 불러왔습니다.")
+        return signals
+
     except Exception as e:
-        logger.error(f"ES 데이터 조회 중 오류: {e}")
+        logger.error(f"❌ ES 데이터 조회 중 오류 발생: {e}")
         return []
-        es.index(index="news_labelling", body=labelled_doc)
-        # es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
-        print(f"📑 처리완료: {data['title'][:15]}... [{risk_lv}]")
+
 
 
 if __name__ == "__main__":
