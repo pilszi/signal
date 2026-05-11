@@ -40,7 +40,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("elastic_transport").setLevel(logging.WARNING)
 
 es = Elasticsearch(
-    ["http://100.123.232.79:9200"],
+    ["http://localhost:9200"],
     request_timeout=30
 )
 INDEX_NAME = "news_en"

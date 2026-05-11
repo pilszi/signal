@@ -27,7 +27,7 @@ es = Elasticsearch(
     retry_on_timeout=True
 )
 
-TARGET_INDICES = ["news_en1"]
+TARGET_INDICES = ["news_en"]
 DEST_INDEX = "news_origin"
 
 
@@ -61,10 +61,16 @@ def process_translation():
     """
     영어 기사를 번역하고, 시간을 KST(+9h)로 변환하여 저장하는 메인 함수
     연속 처리를 위해 while 루프를 추가함.
+    1. 기사를 1개 가져온다.
+    2. 가져오자마자 원본(news_en1)의 is_translated를 True로 바꾼다 (다른 일꾼이 못 잡게 함).
+    3. 그 다음 여유롭게 번역과 분석을 진행한다.
     """
     logging.info(f"[{datetime.now().strftime('%H:%M:%S')}] 번역 및 시간 변환 작업 시작...")
 
     while True: # [수정] 번역 대상이 없을 때까지 무한 반복
+        # [해결책] 일꾼들끼리 0~1초 사이로 엇박자를 줍니다.
+        # 이렇게 하면 '동시 요청' 확률이 극적으로 낮아집니다.
+        time.sleep(random.uniform(0.1, 0.5))
         found_job_in_this_turn = False
 
         for index_name in TARGET_INDICES:
@@ -81,12 +87,19 @@ def process_translation():
                 doc_id = hits[0]['_id']
                 source = hits[0]['_source']
 
-                logging.info(f"[{index_name}] 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
+                # [가장 중요 - 선점 로직]
+                # 번역 시작하기 전에 일단 'True'로 업데이트해서 다른 스레드가 못 가져가게 막습니다.
+                # refresh=True를 주어 즉시 반영되게 합니다.
+                es.update(index=index_name, id=doc_id, body={
+                    "doc": {"is_translated": True}
+                }, refresh=True)
 
-                # 2. 날짜 KST(+9시간) 변환 로직
+                logging.info(f"[{index_name}] 선점 성공 & 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
+
+
+                # 2. 날짜 KST(+9시간) 변환
                 raw_date = source.get('published_date')
                 final_pub_date = raw_date
-
                 if raw_date:
                     try:
                         dt_obj = date_parser.parse(raw_date)
@@ -97,7 +110,6 @@ def process_translation():
 
                 # 3. 번역 진행
                 translator = GoogleTranslator(source='en', target='ko')
-
                 # 제목 번역
                 raw_title = source.get('title_en', '')
                 ko_title = translator.translate(raw_title) if raw_title else ""
