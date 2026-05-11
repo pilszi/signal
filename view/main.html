@@ -278,6 +278,10 @@
                                     <!-- JS에서 생성 -->
                                 </div>
                             </div>
+                            <button id="reset-btn" onclick="resetFilters()" class="hidden flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition-colors">
+                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                                필터 초기화
+                            </button>
                         </div>
                     </div>
 
@@ -333,7 +337,8 @@
         // 초기 상태 데이터
         let savedUserId = sessionStorage.getItem('savedUserId');
         let selectedCountry = null;
-        let selectedDate = null;
+        let startDate = null;
+        let endDate = null;
         let searchQuery = "";
         let calendarMonth = new Date(2026, 4); // 2026년 5월
         let chartDom = document.getElementById('map');
@@ -353,6 +358,28 @@
         };
         let dateFilter = "";
 
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                searchQuery = e.target.value;
+                applyFilters();
+            });
+        }
+
+        // 페이지 오픈시 실행
+        document.addEventListener('DOMContentLoaded', async() => {
+            axios.get("/session_out");
+            updateNavbar();
+            await fetchMainData();
+            renderExchangeRates();
+            initCalendar();
+            lucide.createIcons();
+            updateNotifUI();
+            renderNews();
+            renderPagination();
+            updateStation();
+        });
+
         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
         // --- 2. 데이터 통합 로드 (백엔드 API 호출) ---
         async function fetchMainData(date = null) {
@@ -365,7 +392,36 @@
                     axios.get(newsUrl),
                     axios.get('/api/market-indicators'),
                     axios.get('/stats/heatmap') // 합산 점수 API
+                    axios.get('/main/country')
                 ]);
+                console.log(riskRes, indicatorRes, heatmapRes);
+                allSignals = riskRes.data.msg;
+                const rawHeatmapData = heatmapRes.data;
+
+                heatmapData = rawHeatmapData.country_signal.map(item => {
+                    let visualValue, level;
+                    const score = item.total_score;
+
+                    // 요청하신 점수 기준 로직
+                    if (score >= 300) {
+                        visualValue = 3; // 빨간색 (위기)
+                        level = "위기";
+                    } else if (score >= 200) {
+                        visualValue = 2; // 노란색 (주의)
+                        level = "주의";
+                    } else {
+                        visualValue = 1; // 초록색 (안정)
+                        level = "안정";
+                    }
+
+                    return {
+                        name: item.en_name,    // 국가 영문명
+                        value: visualValue,    // 차트 색상 결정용 (1, 2, 3)
+                        total_score: score,    // 실제 점수
+                        level: level           // 가공된 등급명 (위기, 주의, 안정)
+                    };
+                });
+
                 console.log("데이터 로드 완료:", { news: newsRes.data.msg.length, date: date || "전체" });
 
 
@@ -501,7 +557,6 @@
 
             // 드롭다운 내부 문구 업데이트
             countText.innerText = `${unreads.length}개의 새 알림`;
-
         }
 
         function renderList(container, noti) {
@@ -592,27 +647,6 @@
             .then(worldJson => {
                 echarts.registerMap('world', worldJson);
 
-                const chartData = Object.entries(heatmapData).map(([name, info]) => {
-                    let visualValue = 1; // 기본 Stable(초록)
-
-                    // 한글과 영어 등급을 모두 체크하는 방어적 코드
-                    const level = info.level;
-                    if (level === "심각" || level === "Serious" || level === "Critical") {
-                        visualValue = 3; // 빨강
-                    } else if (level === "주의" || level === "주의" || level === "Caution" || level === "Warning") {
-                        visualValue = 2; // 노랑
-                    } else {
-                        visualValue = 1; // 초록
-                    }
-
-                    return {
-                        name: name,
-                        value: visualValue,
-                        realScore: info.score, // 툴팁용 실제 점수
-                        riskLevel: level  // 툴팁용 레벨
-                    };
-                });
-
                 var option = {
                     tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
                     // 위험단계별 컬러 설정 (기획안 반영)
@@ -634,9 +668,9 @@
                         right: '5%',   // 우측 여백
                         layoutCenter: ['50%', '50%'], // 지도를 정중앙에 배치
                         layoutSize: '120%',
-                        data: chartData, // ES_3에서 가져온 1~3단계 데이터
+                        data: heatmapData, // ES_3에서 가져온 1~3단계 데이터
                         roam: true,
-
+    
                         // [추가] 마우스 오버(Hover) 시 스타일
                         emphasis: {
                             label: { show: true },
@@ -670,57 +704,115 @@
 
         myChart.on('click', function (params) {
             // params.name에 클릭한 국가 이름이 들어있습니다.
-            console.log(params.name + "의 뉴스를 불러옵니다.");
-            selectCountry(params.name);
+            // console.log(params.name + "의 뉴스를 불러옵니다.");
+            // console.log(params);
+            if (params.data && params.data.total_score) {
+                selectCountry(params.name, params.data.total_score);
+            } else {
+                selectCountry(params.name, 0);
+            }
             renderNews(params.name);
             // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
         });
-
-
+            
+            
         // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
-        function updateStation() {
-            const list = document.getElementById('station-list');
+            function updateStation() {
+                const list = document.getElementById('station-list');
 
-            // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
-            const sortedRisks = Object.entries(heatmapData)
-                .map(([name, info]) => ({ name, ...info }))
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 3);
+                // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
+                const sortedRisks = [...heatmapData].sort((a, b) => b.total_score - a.total_score).slice(0, 3);
 
-            if (sortedRisks.length === 0) {
-                list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
-                return;
+                if (sortedRisks.length === 0) {
+                    list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
+                    return;
+                }
+
+                list.innerHTML = sortedRisks.map((item, index) => {
+                    let scoreColor = "text-green-300";
+                    let badgeIcon = "✅";
+
+                    if (item.level === "위기") {
+                        scoreColor = "text-red-400";
+                        badgeIcon = "🔥";
+                    } else if (item.level === "주의") {
+                        scoreColor = "text-yellow-200";
+                        badgeIcon = "⚠️";
+                    }
+
+                    return `
+                        <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-blue-200 font-medium">RANK 0${index + 1}</span>
+                                <span class="font-bold text-[16px]">${countryNamesKOR[item.name] || item.name} ${badgeIcon}</span>
+                            </div>
+                            <div class="text-right">
+                                <span class="block font-bold text-[20px] ${scoreColor}">${item.total_score}</span>
+                                <span class="text-[9px] uppercase opacity-70">${item.level}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
             }
 
-            list.innerHTML = sortedRisks.map((item, index) => {
-                // 등급에 따른 텍스트 색상 결정
-                const scoreColor = item.level === "Serious" ? "text-red-300" : "text-yellow-200";
-                const badgeIcon = item.level === "Serious" ? "🔥" : "⚠️";
-
-                return `
-                    <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                        <div class="flex flex-col">
-                            <span class="text-[10px] text-blue-200 font-medium">RANK 0${index + 1}</span>
-                            <span class="font-bold text-sm">${countryNamesKOR[item.name] || item.name} ${badgeIcon}</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="block font-bold text-lg ${scoreColor}">${item.score}</span>
-                            <span class="text-[9px] uppercase opacity-70">${item.level}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
         // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
         function applyFilters() {
-            console.log(allSignals);
+            // console.log(allSignals);
             filteredNews = allSignals.filter(item => {
+                // console.log(item);
                 const matchCountry = !selectedCountry || item.country_name === selectedCountry;
                 const matchSearch = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase());
-                const matchDate = !selectedDate || item.analyzed_at.startsWith(selectedDate);
+                const matchDate = !startDate || (
+                    item.published_date &&
+                    (item.published_date.substring(0, 10) >= startDate) &&
+                    (!endDate || item.published_date.substring(0, 10) <= endDate)
+                );
+
                 return matchCountry && matchSearch && matchDate;
             });
+            // 2. [추가] 초기화 버튼 노출 여부 결정
+            const resetBtn = document.getElementById('reset-btn');
+            // 하나라도 값이 있으면(비어있지 않으면) 버튼 표시
+            if (searchQuery || startDate || endDate || selectedCountry) {
+                resetBtn.classList.remove('hidden');
+            } else {
+                resetBtn.classList.add('hidden');
+            }
+            currentPage = 1;
+            renderNews();
+            renderPagination();
         }
+
+        function updateDateDisplay() {
+            const display = document.getElementById('date-display');
+
+            if (!startDate) {
+                display.innerText = "날짜를 선택해주세요";
+                display.classList.add('text-gray-400');
+            } else if (!endDate) {
+                // 시작일만 있을 때
+                display.innerText = `${startDate} ~ 시작일 선택됨`;
+                display.classList.remove('text-gray-400');
+            } else {
+                // 기간이 모두 선택되었을 때
+                display.innerText = `${startDate} ~ ${endDate}`;
+                display.classList.remove('text-gray-400');
+            }
+        }
+
+        // 검색어 초기화 함수
+        function resetFilters() {
+            searchQuery = '';
+            startDate = '';
+            endDate = '';
+            selectedCountry = '';
+
+            // UI 요소들도 초기값으로 변경
+            document.getElementById('search-input').value = '';
+
+            applyFilters(); // 다시 전체 렌더링
+        }
+
 
         // 국가 선택 핸들러
         function selectCountry(name, score) {
@@ -772,9 +864,17 @@
         function renderNews() {
             const grid = document.getElementById('news-grid'); // 뉴스가 들어갈 컨테이너 ID
             if (!grid) return;
+            let targetData = [];
+            const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
+            if (isFilterActive) {
+                targetData = filteredNews;
+            } else {
+                targetData = allSignals;
+            }
+
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
             const endIndex = startIndex + SIGNALS_PER_PAGE;
-            const currentSignals = allSignals.slice(startIndex, endIndex);
+            const currentSignals = targetData.slice(startIndex, endIndex);
 
             // 1. 리스크 단계별 테일윈드 컬러 설정
             const riskColors = {
@@ -782,37 +882,31 @@
                 "주의": "bg-yellow-100 text-yellow-700",
                 "심각": "bg-red-100 text-red-700"
             };
-
+            
             // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
             const sorted = [...currentSignals].sort((a, b) => {
                 // 리스크 점수 기준 정렬
 
                 // 1) 실제 점수(낮은순: 심각 - 주의 - 안정 순서)
-                // if(a.risk_score !== b.risk_score){
-                //     return a.risk_score - b.risk_score
-                // }
-
-                // 2) 리스크 점수 절대값 * 100(음수부호 제거 및 소수점 제거)
-                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
-                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
-                if (scoreA !== scoreB) {
-                    return scoreB- scoreA;
+                if(a.risk_score !== b.risk_score){
+                    return a.risk_score - b.risk_score
                 }
+
                 // 날짜 기준 정렬
                 return new Date(b.published_date) - new Date(a.published_date);
 
                 renderPagination()
             });
-
+            
             // 4. HTML 생성 및 출력
             if (sorted.length === 0) {
                 grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-500">해당하는 뉴스가 없습니다.</div>`;
                 return;
             }
-
+            
             grid.innerHTML = sorted.map(news => {
                 // 음수 제거, 100 곱하기, 반올림 처리된 점수
-                const displayScore = Math.round(Math.abs(news.risk_score || 0) * 100);
+                const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
                 const displayDate = news.published_date ? news.published_date.split('T')[0] : "";
 
                 return `
@@ -827,7 +921,7 @@
                                 </span>
                                 <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level]}"">
                                     Signal ${displayScore}
-                                </span>
+                                </span>  
                             </div>
                             <a href="${news.url}" target="_blank" class="block font-bold leading-tight group-hover:text-blue-600 transition-colors mb-4 line-clamp-2">
                                 ${news.title}
@@ -841,6 +935,7 @@
                 `;
             }).join('');
         }
+
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
         async function logNewsClick(articleUrl) {
 
@@ -905,30 +1000,72 @@
             }
         }
         function handleLogout() { if(confirm("로그아웃 하시겠습니까?")) { axios.get("/logout"); sessionStorage.clear(); location.href="login.html"; }}
+
         function selectDate(day) {
+
             const year = calendarMonth.getFullYear();
             const month = String(calendarMonth.getMonth() + 1).padStart(2, '0');
-            const dateDay = String(day).padStart(2, '0');
+            const date = String(day).padStart(2, '0');
+            const dateStr = `${year}-${month}-${date}`;
 
-            // YYYY-MM-DD 형식 생성
-            const dateStr = `${year}-${month}-${dateDay}`;
-            selectedDate = dateStr; // 전역 변수 selectedDate에 저장 (폴링 시 유지됨)
+            // 시작일, 끝일 모두 선택 안됐을 때
+            if (!startDate || (startDate && endDate)) {
+                startDate = dateStr;
+                endDate = null;
+                // 여기서는 toggleCalendar()를 절대 호출하지 않습니다. (계속 열려있어야 함)
+            }
+            // 시작일만 선택된 상태에서 두 번째 날짜를 클릭할 때
+            else {
+                if (dateStr < startDate) {
+                    // 선택한 날짜가 시작일보다 빠르면 시작일을 이 날짜로 교체 (종료일은 여전히 null)
+                    startDate = dateStr;
+                    endDate = null;
+                    // 시작일이 바뀌었을 뿐이므로 닫지 않습니다.
+                } else if (dateStr === startDate) {
+                    // 시작일을 한 번 더 누르면 선택 취소 (개발자 취향에 따라 선택)
+                    startDate = null;
+                    endDate = null;
+                } else {
+                    // 드디어 정상적인 종료일 선택!
+                    endDate = dateStr;
+                    toggleCalendar();
+                }
+            }
+            updateDateDisplay();
+            applyFilters();
+        }
 
-            // UI 업데이트
-            document.getElementById('date-display').innerText = dateStr;
-            document.getElementById('date-display').classList.remove('text-gray-400');
+        function updateDateDisplay(){
+            const display = document.getElementById('date-display');
 
-            toggleCalendar(); // 캘린더 드롭다운 닫기
-
-            // 🔥 중요: 서버에서 해당 날짜 데이터만 새로 가져옴
-            fetchMainData(dateStr);
+            if (!startDate) {
+                display.innerText = "날짜를 선택해주세요";
+                display.classList.add('text-gray-400');
+            } else if (!endDate) {
+                // 시작일만 있을 때
+                display.innerText = `${startDate} ~ 시작일 선택됨`;
+                display.classList.remove('text-gray-400');
+            } else {
+                // 기간이 모두 선택되었을 때
+                display.innerText = `${startDate} ~ ${endDate}`;
+                display.classList.remove('text-gray-400');
+            }
         }
 
         // 페이지네이션 렌더링
         function renderPagination() {
+            let targetData = [];
+            const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
+
+            if (isFilterActive) {
+                targetData = filteredNews;
+            }else{
+                targetData = allSignals
+            }
+            // console.log(targetData.length);
             const paginationContainer = document.getElementById('pagination');
-            const totalPages = Math.ceil(allSignals.length / SIGNALS_PER_PAGE);
-            // console.log(allSignals.length);
+            if (!paginationContainer) return;
+            const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
             if (totalPages <= 1) {
                 paginationContainer.innerHTML = '';
                 return;
@@ -960,55 +1097,44 @@
 
         // 이벤트 핸들러
         function handlePageChange(page) {
+
+            let targetData;
+
+            if (filteredNews && filteredNews.length > 0) {
+                targetData = filteredNews;
+            } else {
+                targetData = allSignals;
+            }
+            const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
+
+            if (page < 1 || page > totalPages) return;
+
             currentPage = page;
             renderNews();
             renderPagination();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        // [통합본] 페이지 로드 시 실행되는 메인 초기화 및 실시간 관리 로직
-        document.addEventListener('DOMContentLoaded', async () => {
-            // 1. 세션 만료 체크 및 네비바 사용자 정보 업데이트
-            axios.get("/session_out");
-            updateNavbar();
-
-            // 2. 초기 데이터 로드 (첫 실행)
-            // fetchMainData 내부에 renderNews, renderPagination, renderExchangeRates가
-            // 이미 포함되어 있으므로 이것 하나만 await로 기다리면 충분합니다.
-            await fetchMainData();
-
-            // 3. 실시간 수집 반영 (30초마다 실행)
-            // selectedDate(전역변수)가 있으면 그 날짜를 유지하며 새로고침합니다.
-            setInterval(() => {
-                console.log("🔄 실시간 뉴스 업데이트 확인 중 (기준일: " + (selectedDate || "전체") + ")");
-                fetchMainData(selectedDate);
-            }, 30000);
-
-            // 4. 기타 UI 구성 요소 초기화
-            initCalendar();
-            updateNotifUI();
-
-            // 5. 경로에 따른 네비바 하이라이트 (리더님의 핵심 로직 통합)
-            const currentPath = window.location.pathname.split("/").pop() || "main.html";
+        document.addEventListener('DOMContentLoaded', () => {
+            // 현재 브라우저의 파일명만 추출
+            const currentPath = window.location.pathname.split("/").pop() || "index.html";
             const navItems = document.querySelectorAll('.nav-item');
 
             navItems.forEach(item => {
+                // href 속성값에서 파일명만 가져와서 비교
                 const itemHref = item.getAttribute('href').split("/").pop();
 
                 if (currentPath === itemHref) {
-                    // 아이콘이 있는 메뉴(사용자 아이콘 등)와 일반 텍스트 메뉴 구분 처리
                     if (item.querySelector('i')) {
                         item.classList.replace('text-gray-600', 'text-blue-600');
                         item.classList.add('bg-blue-50');
                     } else {
-                        // 상단 메뉴(글로벌 현황 등) 하이라이트
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-100');
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
                         item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
                     }
                 }
             });
 
-            // 6. 모든 아이콘 최종 렌더링
             if (window.lucide) lucide.createIcons();
         });
 

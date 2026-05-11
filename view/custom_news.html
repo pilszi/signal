@@ -234,6 +234,10 @@
 
         <div id="news-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         </div>
+        <!-- 페이지네이션 -->
+        <div id="pagination" class="mt-8 flex items-center justify-center gap-2">
+            <!-- JS에서 생성 -->
+        </div>
     </div>
 
     <script>
@@ -447,6 +451,8 @@
                 "주의": "bg-yellow-100 text-yellow-700",
                 "심각": "bg-red-100 text-red-700"
             };
+            const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
+
             let newBadge = '';
             if (!news.is_read) {
                 newBadge = '<div class="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>';
@@ -459,8 +465,8 @@
                     </a>
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-2">
-                            <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.riskLevel] || 'bg-gray-100'}">
-                                Signal ${news.riskScore}
+                            <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level] || 'bg-gray-100'}">
+                                Signal ${news.displayScore}
                             </span>
                             <span class="text-xs text-blue-600 font-medium">${news.keyword}</span>
                         </div>
@@ -547,7 +553,7 @@
                 }
                 // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
                 if (a.risk_score !== b.risk_score) {
-                    return b.risk_score - a.risk_score;
+                    return a.risk_score - b.risk_score;
                 }
                 // 3. 날짜 기준 정렬 (최신순)
                 const dateA = new Date(a.published_date);
