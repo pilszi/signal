@@ -351,17 +351,22 @@ class Config:
         ],
         "Finance": [
             "Exchange rate", "Fed", "Trade deficit",  # 'USD' 생략 (환율 관련 기사는 보통 단어가 포함됨)
-            "Stagflation", "Credit rating", "Yen"
+            "Stagflation", "Credit rating", "Yen" ,"Forex", "Currency volatility"
         ],
         "Geopolitics": [
             "Middle East", "Trade war", "Ukraine war",
             "Taiwan Strait", "South China Sea", "Israel", "Iran"
         ],
         "Policy": [
-            "Trump", "China ban", "US election",
-            "CBAM", "Protectionism", "Antitrust"
+            "Trump", "China ban", "US election", "Export control",
+            "CBAM", "Protectionism", "Antitrust" , "Sanction"
         ]
     }
+
+    BLACKLIST = [
+        'buy now', 'stock to buy', 'should you buy', 'price target',
+        'dividend', 'top picks', 'better buy', 'earnings result'
+    ]
 
     # 5. 감성 사전 및 불용어
     DANGER_DICTIONARY = {
@@ -526,21 +531,30 @@ class Config:
     }
 
     # 리스크 점수 가중치 공식용 설정 (히트맵)
-    # 한국 관련 정책/경제 핵심 단어 (강제 고정용)
+
+    # 1. 한국 영향권 (이게 제목에 있으면 무조건 Korea)
     KOREA_PRIORITY_KEYWORDS = [
         "정부", "관세청", "재경부", "기획재정부", "코스피", "삼성", "삼성전자", "한은", "한국은행",
         "한국", "대한민국", "K-방산", "K-조선", "국내 기업", "부산", "서울",
         "기재부", "국내", "우리나라", "서산", "여수", "대산", "평택", "국정원",
-        "대한상의", "관세청", "SKT", "SK텔레콤", "현대차", "국회",
+        "대한상의", "관세청", "SKT", "SK텔레콤", "현대차", "국회", "국민", "내수", "코스닥",
+        "원화", "환율", "주유소", "오피넷", "장바구니", "물가", "우리 배", "우리 선박"
 
     ]
-    KOREA_FIRM_KEYWORDS = [
-        "HD현대", "대한항공", "현대로템", "삼성전자", "SK하이닉스", "삼성", "개발",
-        "SKT","경영"
-    ]
+    # 2. 주요 엔티티별 국가 매핑 (기업/기관명)
+    ENTITY_TO_COUNTRY_MAP = {
+        "삼성": "Korea", "삼성전자": "Korea", "SK하이닉스": "Korea", "현대차": "Korea",
+        "HMM": "Korea", "에쓰오일": "Korea", "제주항공": "Korea", "대한항공": "Korea",
+        "LG엔솔": "Korea", "한국은행": "Korea", "한은": "Korea", "공정위": "Korea",
+        "엔비디아": "United States", "애플": "United States", "인텔": "United States",
+        "TSMC": "Taiwan", "이란": "Iran", "이스라엘": "Israel", "HD현대": "Korea",
+        "현대로템": "Korea", "개발": "Korea","SKT": "Korea", "경영": "Korea",
+        '뉴욕증시': "United States", '다우': "United States", '나스닥': "United States",
+        "OpenAI": "United States", "연준": "United States"
+    }
 
-    # 리스크 점수 가중치 공식용 설정 (히트맵)
-    # 미국 관련 정책/경제 핵심 단어 (강제 고정용)
-    US_PRIORITY_KEYWORDS = [
-        '뉴욕증시', '다우', '나스닥',"OpenAI", "엔비디아", "TSMC","연준"
-    ]
+    # 3. 지정학적 지역 매핑
+    REGION_TO_COUNTRY_MAP = {
+        "호르무즈": "Middle East", "홍해": "Middle East", "중동": "Middle East",
+        "페르시아만": "Middle East", "남중국해": "China"
+    }

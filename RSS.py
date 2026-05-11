@@ -246,7 +246,20 @@ def crawl_job(keywords):
         try:
             feed = feedparser.parse(feed_url)
             for entry in feed.entries:
-                search_text = (entry.title + " " + entry.get('summary', '')).lower()
+                title = entry.title.lower()
+                summary = entry.get('summary', '').lower()
+                search_text = (title + " " + summary)
+
+                # --- [블랙리스트 필터링 추가] ---
+                # 1. 제목/요약에 매수 유도 키워드가 있으면 즉시 패스
+                if any(bl in search_text for bl in AppConfig.BLACKLIST):
+                    continue
+
+                # 2. 티커(Ticker) 패턴 감지: (MSTR), (AAPL) 등 대문자 괄호 제외
+                import re
+                if re.search(r"\([A-Z]{1,5}\)", entry.title):
+                    continue
+
                 # [중요] 전역 변수 TARGET_KEYWORDS 대신, 인자로 받은 keywords를 사용합니다.
                 if any(kw in search_text for kw in keywords):
                     raw_url = entry.link
@@ -298,7 +311,7 @@ if __name__ == "__main__":
 
     # 혼자 실행할 때도 키워드가 필요하므로 args를 추가해줘야 에러가 x
     # Config에서 키워드를 미리 뽑아서 전달
-    initial_keywords = [kw.lower() for sublist in NewsConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
+    initial_keywords = [kw.lower() for sublist in AppConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
 
     scheduler.add_job(
         crawl_job, "cron", minute="0,10,20,30,40,50", second=random_second,

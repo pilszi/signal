@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 # ==========================================
 # 1. bert 모델 설정 및 es 연결
 # ==========================================
-MODEL_PATH = "./fine_tuned_finance_model_2"  # 학습시킨 모델 경로
+MODEL_PATH = "./final_finance_model_v2"  # 학습시킨 모델 경로
 
 # # 학습 완료된 모델 및 토크나이저 로드
 # 1. 실행 장치 설정 (GPU가 있으면 사용, 없으면 CPU)
@@ -66,7 +66,12 @@ es = Elasticsearch(
 # 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
 # 라벨링 학습한 bert가 긍정/부정 판단 - (위에서 tokenizer 가져온 이후 점수 매김)
 def get_bert_score(analysis_text):
-    """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출"""
+    """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출
+        새로운 라벨 시스템 적용:
+    - LABEL_0: 긍정+중립 (점수: +1.0)
+    - LABEL_1: 부정 1단계 (점수: -0.5)
+    - LABEL_2: 부정 2단계 (점수: -1.0)
+    """
     try:
         # 토크나이저로 get_weighted_keyword_score 함수에서 생성한 analysis_text인
         # bert에게 줄 요약문을 받아서 벡터화함
@@ -82,11 +87,12 @@ def get_bert_score(analysis_text):
             outputs = bert_model(**inputs)
         # 모델의 예측값을 확률(0~1 사이)로 변환
         probs = F.softmax(outputs.logits, dim=-1)
-        # 학습 라벨 순서에 맞춰 언패킹 (0:중립, 1:긍정, 2:부정)
-        neu, pos, neg = probs[0].tolist() # train_model.py에서 이 순서로 매김
-        # 긍정은 더하고(+), 부정은 빼서(-) -1.0 ~ 1.0 사이 점수 생성
-        # 중립(neu)은 점수에 영향을 주지 않으므로 계산에서 제외
-        return (pos * 1.0) + (neg * -1.0)
+        # 학습 라벨 순서에 맞춰 언패킹 (0:긍정/중립, 1:부정1, 2:부정2)
+        pos_neu, neg_l1, neg_l2 = probs[0].tolist() # train_model.py에서 이 순서로 매김
+        # 점수 산출 로직:
+        # 긍정/중립은 가중치 1.0, 부정 1단계는 -0.5, 부정 2단계는 -1.0
+        sentiment_score = (pos_neu * 1.0) + (neg_l1 * -0.5) + (neg_l2 * -1.0)
+        return round(sentiment_score, 4)
     except Exception as e:
         print(f"BERT 오류: {e}")
         return 0.0
@@ -134,11 +140,35 @@ def get_weighted_keyword_score(title, content):
 # 제미나이 프롬프트
 async def get_ai_prediction_report(risk_level, title, keywords, scores):
     """Gemini AI 활용 리포트 생성"""
-    if risk_level != "심각":
-        main_kw = ", ".join(keywords[:2]) if keywords else "주요 경제 지표"
+    # [Step 1] 가장 중요한 상위 2개 키워드 추출
+    # 이미 extract_keywords에서 중요도 순으로 정렬되어 오므로 앞의 2개를 가져옵니다.
+    if keywords and len(keywords) >= 2:
+        target_kw = f"'{keywords[0]}'와(과) '{keywords[1]}'"
+    elif keywords:
+        target_kw = f"'{keywords[0]}'"
+    else:
+        target_kw = "주요 경제 지표"
+
+    # [분기 1] 안정 단계: 확신과 안심 위주
+    if risk_level == "안정":
         return {
-            "prediction": f"✅ {main_kw} 상황이 안정적입니다. 시장이 곧 회복될 것 같아요.",
-            "reason": f"지금 {main_kw} 관련 뉴스나 수치들을 꼼꼼히 분석해 보니, 큰 문제 없이 정상 범위 안에 있어요. 당분간 급격한 위험은 없을 것으로 보이니 안심하셔도 좋습니다."
+            "prediction": f"✅ {target_kw} 중심의 시장 흐름이 매우 견조합니다.",
+            "reason": (
+                f"현재 {target_kw} 데이터를 정밀 분석한 결과, 변동성이 낮고 정상 범위 내에서 건강하게 움직이고 있습니다.\n\n"
+                f"💡 시장의 신뢰도가 높아 돌발 변수에도 충분한 방어력이 확인되네요.\n"
+                f"지금은 큰 걱정 없이 리더님의 기존 계획에 속도를 내셔도 좋은 시기입니다."
+            )
+        }
+
+    # [분기 2] 주의 단계: 경계와 관찰 위주
+    elif risk_level == "주의":
+        return {
+            "prediction": f"⚠️ {target_kw} 관련 지표에서 미묘한 변동성이 감지되었습니다.",
+            "reason": (
+                f"최근 {target_kw} 소식들을 종합하면, 당장 큰 충격이 올 확률은 낮지만 시장의 눈치싸움이 치열해진 상태입니다.\n\n"
+                f"👀 작은 소식에도 민감하게 반응할 수 있는 구간이니 안심하기엔 이른 시점입니다.\n"
+                f"무리한 판단보다는 지표를 꾸준히 모니터링하며 호흡을 길게 가져가는 전략을 추천합니다."
+            )
         }
 
     prompt = f"""
@@ -191,7 +221,7 @@ async def get_ai_prediction_report(risk_level, title, keywords, scores):
 # ==========================================
 # 환율/원자재 라벨링 기준
 def calculate_indicator_score(today_return, return_history_30d):
-    if not return_history_30d: return 1.0
+    if not return_history_30d: return 0.5
     try:
         today_return = float(today_return)
         history_floats = [float(p) for p in return_history_30d]
@@ -199,7 +229,7 @@ def calculate_indicator_score(today_return, return_history_30d):
         mean_val = np.mean(history_floats)
         std_val = np.std(history_floats)
 
-        if std_val == 0: return 1.0
+        if std_val == 0: return 0.5
 
         z_score = (today_return - mean_val) / std_val
 
@@ -214,7 +244,7 @@ def calculate_indicator_score(today_return, return_history_30d):
 
     except Exception as e:
         logger.error(f"⚠️ 지표 점수 계산 중 타입 오류 발생: {e}")
-        return 1.0
+        return 0.5
 
 
 # (환율/원자재)그룹 점수를 각각 낼 때 사용
@@ -272,7 +302,7 @@ async def run_analysis():
         if len(prices) > 1:
             indicator_stats[i] = calculate_indicator_score(prices[-1], prices[:-1])
         else:
-            indicator_stats[i] = 1.0
+            indicator_stats[i] = 0.5
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
     search_query = {"query": {"term": {"is_processed": False}}, "size": 50}
@@ -289,26 +319,32 @@ async def run_analysis():
         data = doc['_source']
 
         refined_keywords = utils.extract_keywords(data['title'], data['content'])
-        refined_country = utils.extract_country(data['title'], data['content'])
+        refined_country = utils.find_target_country(data['title'], data['content'])
 
-        # [1] 가중 점수 계산 및 분석용 문장 추출
+        # [1] 키워드 점수 계산 및 본문 핵심 문장 추출 (이미 내부에서 [SEP] 처리됨)
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
-        # [2] 추출된 문장을 AI(BERT)로 분석
-        ai_score = get_bert_score(target_text)
-        # [3] 최종 기사 점수 산출 (AI 0.7 : 키워드 0.3)
+
+        # [2] [핵심 수정] 제목과 추출된 문장을 [SEP]로 결합하여 모델 학습 환경과 일치시킴
+        # 모델은 "제목 [SEP] 본문" 구조에서 가장 높은 성능을 냅니다.
+        final_bert_input = f"{data['title']} [SEP] {target_text}"
+
+        # [3] 최종 결합된 텍스트로 BERT 분석 수행
+        ai_score = get_bert_score(final_bert_input)
+
+        # [4] 최종 점수 합산 및 리스크 등급 판정
         final_sent_score = round((ai_score * 0.7) + (keyword_score * 0.3), 4)
-        # [4] AI 감성 점수를 0~1 범위로 먼저 변환
+        # [5] AI 감성 점수를 0~1 범위로 먼저 변환
         normalized_ai_score = (final_sent_score + 1) / 2
-        # [5] 지표 점수 (Z-Score 활용)
+        # [6] 지표 점수 (Z-Score 활용)
         ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
         ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
 
         # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15), 합산 결과도 무조건 0~1 사이가 됨
         total = (normalized_ai_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
 
-        if total <= 0.35:
+        if total <= 0.4:
             risk_lv = "심각"
-        elif total <= 0.65:
+        elif total <= 0.7:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
@@ -339,13 +375,13 @@ async def run_analysis():
                 "exchange_score": float(ex_score),
                 "exchange_details": exchange_prices,
                 "raw_material_score": {
-                    "gold": float(indicator_stats.get(5, 1.0)),
-                    "silver": float(indicator_stats.get(6, 1.0)),
-                    "copper": float(indicator_stats.get(7, 1.0)),
-                    "wti_oil": float(indicator_stats.get(8, 1.0)),
-                    "bc_oil": float(indicator_stats.get(9, 1.0)),
-                    "dc_oil": float(indicator_stats.get(10, 1.0)),
-                    "ng": float(indicator_stats.get(11, 1.0))
+                    "gold": float(indicator_stats.get(5, 0.5)),
+                    "silver": float(indicator_stats.get(6, 0.5)),
+                    "copper": float(indicator_stats.get(7, 0.5)),
+                    "wti_oil": float(indicator_stats.get(8, 0.5)),
+                    "bc_oil": float(indicator_stats.get(9, 0.5)),
+                    "dc_oil": float(indicator_stats.get(10, 0.5)),
+                    "ng": float(indicator_stats.get(11, 0.5))
                 }
             },
             "published_date": data.get('published_date'),
@@ -362,7 +398,9 @@ async def run_analysis():
             logger.info(
                 f"🎯 [분석 완료] {data['title'][:20]}...\n"
                 f"   - AI 감성 점수: {final_sent_score}\n"
-                f"   - 지표 합산 점수: {round(total, 4)}\n"
+                f"   - 환율 지표 점수(EX): {ex_score}\n"
+                f"   - 원자재 지표 점수(MA): {ma_score}\n"
+                f"   - 최종 통합 점수: {round(total, 4)}\n"
                 f"   - 최종 위험 등급: [{risk_lv}]\n"
                 f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
             )
