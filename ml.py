@@ -275,7 +275,7 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 50}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 30}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -289,26 +289,33 @@ async def run_analysis():
         data = doc['_source']
 
         refined_keywords = utils.extract_keywords(data['title'], data['content'])
+
         refined_country = utils.extract_country(data['title'], data['content'])
 
-        # [1] 가중 점수 계산 및 분석용 문장 추출
+        # [1] 키워드 점수 계산 및 본문 핵심 문장 추출 (이미 내부에서 [SEP] 처리됨)
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
-        # [2] 추출된 문장을 AI(BERT)로 분석
-        ai_score = get_bert_score(target_text)
-        # [3] 최종 기사 점수 산출 (AI 0.7 : 키워드 0.3)
+
+        # [2] [핵심 수정] 제목과 추출된 문장을 [SEP]로 결합하여 모델 학습 환경과 일치시킴
+        # 모델은 "제목 [SEP] 본문" 구조에서 가장 높은 성능을 냅니다.
+        final_bert_input = f"{data['title']} [SEP] {target_text}"
+
+        # [3] 최종 결합된 텍스트로 BERT 분석 수행
+        ai_score = get_bert_score(final_bert_input)
+
+        # [4] 최종 점수 합산 및 리스크 등급 판정
         final_sent_score = round((ai_score * 0.7) + (keyword_score * 0.3), 4)
-        # [4] AI 감성 점수를 0~1 범위로 먼저 변환
+        # [5] AI 감성 점수를 0~1 범위로 먼저 변환
         normalized_ai_score = (final_sent_score + 1) / 2
-        # [5] 지표 점수 (Z-Score 활용)
+        # [6] 지표 점수 (Z-Score 활용)
         ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
         ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
 
         # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15), 합산 결과도 무조건 0~1 사이가 됨
-        total = (normalized_ai_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
+        total = (normalized_ai_score * 0.6) + (ex_score * 0.25) + (ma_score * 0.15)
 
-        if total <= 0.35:
+        if total <= 0.48:
             risk_lv = "심각"
-        elif total <= 0.65:
+        elif total <= 0.58:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
