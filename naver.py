@@ -23,10 +23,16 @@ INDEX_NAME = "news_origin"
 def get_detailed_news(url):
     """네이버 뉴스 본문 및 상세 수집 (결측치 검증 포함)"""
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
-        }
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
+        ]
+        headers = {"User-Agent": random.choice(user_agents)}
+        time.sleep(random.uniform(0.3, 1.0))
         res = requests.get(url, headers=headers, timeout=5)  # 타임아웃 단축
+        res.raise_for_status()  # 응답 에러 시 바로 except로 이동
         soup = BeautifulSoup(res.text, "html.parser")
 
         image_tag = soup.find("meta", property="og:image")

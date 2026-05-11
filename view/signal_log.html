@@ -154,6 +154,35 @@
             }
 
             .all-read-btn:hover { text-decoration: underline; }
+
+            .report-card {
+                padding: 24px;
+                border-radius: 16px;
+                margin-bottom: 16px;
+                white-space: pre-wrap;
+                line-height: 1.6;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            }
+
+            .risk-severe {
+                background-color: #fff1f0;
+                border: 2px solid #ff4d4f;
+                color: #820014;
+            }
+
+            .risk-warning {
+                background-color: #fffbe6;
+                border: 2px solid #ffc53d;
+                color: #874d00;
+            }
+
+            .risk-stable {
+                background-color: #e6f7ff;
+                border: 2px solid #40a9ff;
+                color: #003a8c;
+            }
+
         </style>
     </head>
     <body class="bg-gray-50">
@@ -277,26 +306,64 @@
             renderPagination();
         }
 
-        // 4. 리스트 렌더링
-        function renderSignalList(signal) {
+        // 4. 리스크 레벨에 맞는 클래스명을 반환하는 함수
+        function getRiskClass(level) {
+            switch(level) {
+                case '심각': return 'risk-severe';
+                case '주의': return 'risk-warning';
+                case '안정': return 'risk-stable';
+                default: return 'bg-white border-gray-100'; // 기본값
+            }
+        }
+
+        // 5. 리스트 렌더링
+        function renderSignalList() {
             const listContainer = document.getElementById('signal-list');
+
+            // 페이지네이션 슬라이스
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
             const currentSignals = filteredSignals.slice(startIndex, startIndex + SIGNALS_PER_PAGE);
 
-            listContainer.innerHTML = currentSignals.map(signal => `
-                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="px-2 py-1 rounded text-xs font-bold ${getLevelStyle(signal.risk_level)}">
-                            Level ${signal.risk_level}
-                        </span>
-                        <span class="text-xs text-gray-400">${signal.signal_time.split('T')[0]}</span>
+            // 데이터가 없을 때 처리
+            if (currentSignals.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="bg-white p-10 rounded-xl border border-dashed border-gray-300 text-center text-gray-500">
+                        <i data-lucide="database-backup" class="w-10 h-10 mx-auto mb-2 opacity-20"></i>
+                        조회된 시그널 로그가 없습니다.
+                    </div>`;
+                if (window.lucide) lucide.createIcons();
+                return;
+            }
+
+            listContainer.innerHTML = currentSignals.map(signal => {
+                // 리스크 레벨에 따른 클래스 결정 (getRiskClass 함수 활용)
+                const riskClass = getRiskClass(signal.risk_level);
+                // 날짜 안전하게 추출
+                const displayDate = signal.signal_time ? signal.signal_time.split('T')[0] : '날짜 미상';
+
+                return `
+                    <div class="report-card ${riskClass}">
+                        <div class="flex justify-between items-start mb-4">
+                            <span class="px-3 py-1 rounded-full text-xs font-bold bg-white/50 border border-current">
+                                ${signal.risk_level} 단계 시그널
+                            </span>
+                            <span class="text-xs opacity-70 font-medium">${displayDate}</span>
+                        </div>
+
+                        <div class="mb-5">
+                            <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-1">상황 요약</p>
+                            <p class="text-xl font-bold leading-snug">${signal.prediction || '세부 정보가 없습니다.'}</p>
+                        </div>
+
+                        <div class="border-t border-current/10 pt-4">
+                            <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-2">데이터 근거 및 전략적 분석</p>
+                            <p class="text-base font-medium leading-relaxed">${signal.prediction_reason || '분석 데이터가 존재하지 않습니다.'}</p>
+                        </div>
                     </div>
-                    <p class="text-gray-600 text-xs">예측</p>
-                    <p class="text-black-600 text-m">${signal.prediction || '세부 정보가 없습니다.'}</p>
-                    <p class="text-gray-600 text-xs">예측근거</p>
-                    <p class="text-black-600 text-m">${signal.prediction_reason || '세부 정보가 없습니다.'}</p>
-                </div>
-            `).join('');
+                `;
+            }).join('');
+
+            if (window.lucide) lucide.createIcons(); // 아이콘 새로고침
         }
 
         // 5. 페이지네이션 렌더링
