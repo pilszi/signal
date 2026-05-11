@@ -278,6 +278,10 @@
                                     <!-- JS에서 생성 -->
                                 </div>
                             </div>
+                            <button id="reset-btn" onclick="resetFilters()" class="hidden flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition-colors">
+                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                                필터 초기화
+                            </button>
                         </div>
                     </div>
 
@@ -314,19 +318,7 @@
                             <p class="text-blue-100 text-sm mb-6 leading-relaxed">
                                 현재 signal 점수가 높은<br>주요 국가 리스크 상황입니다.
                             </p>
-                            <div class="space-y-4">
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">이란 (IRN)</span>
-                                    <span class="font-bold text-xl text-red-300">92점</span>
-                                </div>
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">미국 (USA)</span>
-                                    <span class="font-bold text-xl">65점</span>
-                                </div>
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">한국 (KOR)</span>
-                                    <span class="font-bold text-xl text-green-300">45점</span>
-                                </div>
+                            <div id="station-list" class="space-y-4">
                             </div>
                         </div>
                     </div>
@@ -363,6 +355,15 @@
         };
         let dateFilter = "";
 
+        // 검색창(ID가 search-input이라고 가정) 이벤트 연결
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                searchQuery = e.target.value;
+                applyFilters();
+            });
+        }
+
         // 페이지 오픈시 실행
         document.addEventListener('DOMContentLoaded', async() => {
             axios.get("/session_out");
@@ -374,6 +375,7 @@
             updateNotifUI();
             renderNews();
             renderPagination();
+            updateStation();
         });
 
         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
@@ -384,11 +386,36 @@
                     // axios.get('/api/risk-signals'),
                     axios.get("/public_signals"),
                     axios.get('/api/market-indicators'),
-                    axios.get('/stats/heatmap') // 리더님이 백엔드에 만든 합산 점수 API
+                    axios.get('/main/country') // 리더님이 백엔드에 만든 합산 점수 API
                 ]);
                 console.log(riskRes, indicatorRes, heatmapRes);
                 allSignals = riskRes.data.msg;
-                heatmapData = heatmapRes.data;
+                const rawHeatmapData = heatmapRes.data;
+
+                heatmapData = rawHeatmapData.country_signal.map(item => {
+                    let visualValue, level;
+                    const score = item.total_score;
+
+                    // 요청하신 점수 기준 로직
+                    if (score >= 300) {
+                        visualValue = 3; // 빨간색 (위기)
+                        level = "위기";
+                    } else if (score >= 200) {
+                        visualValue = 2; // 노란색 (주의)
+                        level = "주의";
+                    } else {
+                        visualValue = 1; // 초록색 (안정)
+                        level = "안정";
+                    }
+
+                    return {
+                        name: item.en_name,    // 국가 영문명
+                        value: visualValue,    // 차트 색상 결정용 (1, 2, 3)
+                        total_score: score,    // 실제 점수
+                        level: level           // 가공된 등급명 (위기, 주의, 안정)
+                    };
+                });
+
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
                 }
@@ -598,27 +625,6 @@
             .then(response => response.json())
             .then(worldJson => {
                 echarts.registerMap('world', worldJson);
-                
-                const chartData = Object.entries(heatmapData).map(([name, info]) => {
-                    let visualValue = 1; // 기본 Stable(초록)
-
-                    // 한글과 영어 등급을 모두 체크하는 방어적 코드
-                    const level = info.level;
-                    if (level === "심각" || level === "Serious" || level === "Critical") {
-                        visualValue = 3; // 빨강
-                    } else if (level === "주의" || level === "주의" || level === "Caution" || level === "Warning") {
-                        visualValue = 2; // 노랑
-                    } else {
-                        visualValue = 1; // 초록
-                    }
-                    
-                    return {
-                        name: name,
-                        value: visualValue,
-                        realScore: info.score, // 툴팁용 실제 점수
-                        riskLevel: level  // 툴팁용 레벨
-                    };
-                });
     
                 var option = {
                     tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
@@ -641,7 +647,7 @@
                         right: '5%',   // 우측 여백
                         layoutCenter: ['50%', '50%'], // 지도를 정중앙에 배치
                         layoutSize: '120%',
-                        data: chartData, // ES_3에서 가져온 1~3단계 데이터
+                        data: heatmapData, // ES_3에서 가져온 1~3단계 데이터
                         roam: true,
     
                         // [추가] 마우스 오버(Hover) 시 스타일
@@ -683,52 +689,82 @@
             // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
         });
             
-            
+
         // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
-        function updateStation() {
-            const list = document.getElementById('station-list');
+            function updateStation() {
+                const list = document.getElementById('station-list');
 
-            // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
-            const sortedRisks = Object.entries(heatmapData)
-                .map(([name, info]) => ({ name, ...info }))
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 3);
+                // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
+                const sortedRisks = [...heatmapData].sort((a, b) => b.total_score - a.total_score).slice(0, 3);
 
-            if (sortedRisks.length === 0) {
-                list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
-                return;
+                if (sortedRisks.length === 0) {
+                    list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
+                    return;
+                }
+
+                list.innerHTML = sortedRisks.map((item, index) => { 
+                    let scoreColor = "text-green-300";
+                    let badgeIcon = "✅";
+
+                    if (item.level === "위기") {
+                        scoreColor = "text-red-400";
+                        badgeIcon = "🔥";
+                    } else if (item.level === "주의") {
+                        scoreColor = "text-yellow-200";
+                        badgeIcon = "⚠️";
+                    }
+
+                    return `
+                        <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-blue-200 font-medium">RANK 0${index + 1}</span>
+                                <span class="font-bold text-[16px]">${countryNamesKOR[item.name] || item.name} ${badgeIcon}</span>
+                            </div>
+                            <div class="text-right">
+                                <span class="block font-bold text-[20px] ${scoreColor}">${item.total_score}</span>
+                                <span class="text-[9px] uppercase opacity-70">${item.level}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
             }
 
-            list.innerHTML = sortedRisks.map((item, index) => {
-                // 등급에 따른 텍스트 색상 결정
-                const scoreColor = item.level === "Serious" ? "text-red-300" : "text-yellow-200";
-                const badgeIcon = item.level === "Serious" ? "🔥" : "⚠️";
-
-                return `
-                    <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                        <div class="flex flex-col">
-                            <span class="text-[10px] text-blue-200 font-medium">RANK 0${index + 1}</span>
-                            <span class="font-bold text-sm">${countryNamesKOR[item.name] || item.name} ${badgeIcon}</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="block font-bold text-lg ${scoreColor}">${item.score}</span>
-                            <span class="text-[9px] uppercase opacity-70">${item.level}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
         // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
         function applyFilters() {
             console.log(allSignals);
             filteredNews = allSignals.filter(item => {
                 const matchCountry = !selectedCountry || item.country_name === selectedCountry;
                 const matchSearch = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase());
-                const matchDate = !selectedDate || item.analyzed_at.startsWith(selectedDate);
+                const matchDate = !selectedDate || item.published_date.startsWith(selectedDate);
+
                 return matchCountry && matchSearch && matchDate;
             });
+            // 2. [추가] 초기화 버튼 노출 여부 결정
+            const resetBtn = document.getElementById('reset-btn');
+            // 하나라도 값이 있으면(비어있지 않으면) 버튼 표시
+            if (searchQuery || selectedDate || selectedCountry) {
+                resetBtn.classList.remove('hidden');
+            } else {
+                resetBtn.classList.add('hidden');
+            }
+            currentPage = 1;
+            renderNews();
+            renderPagination();
         }
 
+        // 검색어 초기화 함수
+        function resetFilters() {
+            searchQuery = '';
+            selectedDate = '';
+            selectedCountry = '';
+            
+            // UI 요소들도 초기값으로 변경
+            document.getElementById('search-input').value = '';
+            
+            applyFilters(); // 다시 전체 렌더링
+        }
+
+    
         // 국가 선택 핸들러
         function selectCountry(name, score) {
             selectedCountry = name;
@@ -779,9 +815,15 @@
         function renderNews() {
             const grid = document.getElementById('news-grid'); // 뉴스가 들어갈 컨테이너 ID
             if (!grid) return;
+            let targetData = allSignals;
+            
+            if (filteredNews && filteredNews.length > 0) {
+                    targetData = filteredNews;
+            }
+
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
             const endIndex = startIndex + SIGNALS_PER_PAGE;
-            const currentSignals = allSignals.slice(startIndex, endIndex);
+            const currentSignals = targetData.slice(startIndex, endIndex);
 
             // 1. 리스크 단계별 테일윈드 컬러 설정
             const riskColors = {
@@ -793,21 +835,15 @@
             // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
             const sorted = [...currentSignals].sort((a, b) => {
                 // 리스크 점수 기준 정렬
-
+                
                 // 1) 실제 점수(낮은순: 심각 - 주의 - 안정 순서)
-                // if(a.risk_score !== b.risk_score){
-                //     return a.risk_score - b.risk_score
-                // }
-
-                // 2) 리스크 점수 절대값 * 100(음수부호 제거 및 소수점 제거)
-                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
-                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
-                if (scoreA !== scoreB) {
-                    return scoreB- scoreA;
+                if(a.risk_score !== b.risk_score){
+                    return a.risk_score - b.risk_score
                 }
+                
                 // 날짜 기준 정렬
                 return new Date(b.published_date) - new Date(a.published_date);
-
+                
                 renderPagination() 
             });
             
@@ -819,7 +855,7 @@
             
             grid.innerHTML = sorted.map(news => {
                 // 음수 제거, 100 곱하기, 반올림 처리된 점수
-                const displayScore = Math.round(Math.abs(news.risk_score || 0) * 100);
+                const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
                 const displayDate = news.published_date ? news.published_date.split('T')[0] : "";
 
                 return `
@@ -848,6 +884,7 @@
                 `;
             }).join('');
         }
+        
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
         async function logNewsClick(articleUrl) {
 
@@ -912,18 +949,31 @@
             }
         }
         function handleLogout() { if(confirm("로그아웃 하시겠습니까?")) { axios.get("/logout"); sessionStorage.clear(); location.href="login.html"; }}
+        
         function selectDate(day) {
-            const dateStr = `${calendarMonth.getFullYear()}-${calendarMonth.getMonth() + 1}-${day}`;
+            const year = calendarMonth.getFullYear();
+            const month = String(calendarMonth.getMonth() + 1).padStart(2, '0');
+            const date = String(day).padStart(2, '0');
+            const dateStr = `${year}-${month}-${date}`;
+
+            selectedDate = dateStr;
+
             document.getElementById('date-display').innerText = dateStr;
             document.getElementById('date-display').classList.remove('text-gray-400');
             toggleCalendar();
+            applyFilters();
         }
 
         // 페이지네이션 렌더링
         function renderPagination() {
+            let targetData = allSignals;
+            
+            if (filteredNews && filteredNews.length > 0) {
+                    targetData = filteredNews;
+            }
+            console.log(targetData.length);
             const paginationContainer = document.getElementById('pagination');
-            const totalPages = Math.ceil(allSignals.length / SIGNALS_PER_PAGE);
-            // console.log(allSignals.length);
+            const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
             if (totalPages <= 1) {
                 paginationContainer.innerHTML = '';
                 return;
@@ -955,6 +1005,16 @@
 
         // 이벤트 핸들러
         function handlePageChange(page) {
+            
+            let targetData = allSignals;
+
+            if (filteredNews && filteredNews.length > 0) {
+                targetData = filteredNews;
+            }
+            const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
+
+            if (page < 1 || page > totalPages) return;
+            
             currentPage = page;
             renderNews();
             renderPagination();
