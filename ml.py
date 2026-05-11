@@ -321,15 +321,21 @@ async def run_analysis():
         refined_keywords = utils.extract_keywords(data['title'], data['content'])
         refined_country = utils.find_target_country(data['title'], data['content'])
 
-        # [1] 가중 점수 계산 및 분석용 문장 추출
+        # [1] 키워드 점수 계산 및 본문 핵심 문장 추출 (이미 내부에서 [SEP] 처리됨)
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
-        # [2] 추출된 문장을 AI(BERT)로 분석
-        ai_score = get_bert_score(target_text)
-        # [3] 최종 기사 점수 산출 (AI 0.7 : 키워드 0.3)
+
+        # [2] [핵심 수정] 제목과 추출된 문장을 [SEP]로 결합하여 모델 학습 환경과 일치시킴
+        # 모델은 "제목 [SEP] 본문" 구조에서 가장 높은 성능을 냅니다.
+        final_bert_input = f"{data['title']} [SEP] {target_text}"
+
+        # [3] 최종 결합된 텍스트로 BERT 분석 수행
+        ai_score = get_bert_score(final_bert_input)
+
+        # [4] 최종 점수 합산 및 리스크 등급 판정
         final_sent_score = round((ai_score * 0.7) + (keyword_score * 0.3), 4)
-        # [4] AI 감성 점수를 0~1 범위로 먼저 변환
+        # [5] AI 감성 점수를 0~1 범위로 먼저 변환
         normalized_ai_score = (final_sent_score + 1) / 2
-        # [5] 지표 점수 (Z-Score 활용)
+        # [6] 지표 점수 (Z-Score 활용)
         ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
         ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
 
@@ -392,8 +398,8 @@ async def run_analysis():
             logger.info(
                 f"🎯 [분석 완료] {data['title'][:20]}...\n"
                 f"   - AI 감성 점수: {final_sent_score}\n"
-                f"   - 💹 환율 지표 점수(EX): {ex_score}\n"
-                f"   - 🏗️ 원자재 지표 점수(MA): {ma_score}\n"
+                f"   - 환율 지표 점수(EX): {ex_score}\n"
+                f"   - 원자재 지표 점수(MA): {ma_score}\n"
                 f"   - 최종 통합 점수: {round(total, 4)}\n"
                 f"   - 최종 위험 등급: [{risk_lv}]\n"
                 f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"

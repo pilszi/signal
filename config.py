@@ -351,17 +351,22 @@ class Config:
         ],
         "Finance": [
             "Exchange rate", "Fed", "Trade deficit",  # 'USD' 생략 (환율 관련 기사는 보통 단어가 포함됨)
-            "Stagflation", "Credit rating", "Yen"
+            "Stagflation", "Credit rating", "Yen" ,"Forex", "Currency volatility"
         ],
         "Geopolitics": [
             "Middle East", "Trade war", "Ukraine war",
             "Taiwan Strait", "South China Sea", "Israel", "Iran"
         ],
         "Policy": [
-            "Trump", "China ban", "US election",
-            "CBAM", "Protectionism", "Antitrust"
+            "Trump", "China ban", "US election", "Export control",
+            "CBAM", "Protectionism", "Antitrust" , "Sanction"
         ]
     }
+
+    BLACKLIST = [
+        'buy now', 'stock to buy', 'should you buy', 'price target',
+        'dividend', 'top picks', 'better buy', 'earnings result'
+    ]
 
     # 5. 감성 사전 및 불용어
     DANGER_DICTIONARY = {

@@ -52,7 +52,7 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-es = Elasticsearch(["http://localhost:9200"])
+es = Elasticsearch(["http://100.123.232.79:9200"])
 
 
 # ==========================================
@@ -806,3 +806,12 @@ if __name__ == "__main__":
     import uvicorn
     # reload=True는 개발 중에만 사용하기
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    import sys
+
+    # 정책 설정은 임포트 직후 최상단에 있는 것도 좋지만, 실행 직전에도 한 번 더 확인
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+    # uvicorn 실행 시 루프 설정을 명시하거나,
+    # reload=True 환경에서는 정책 선언이 잘 먹히지 않을 수 있으므로 주의가 필요합니다.
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, loop="asyncio")
