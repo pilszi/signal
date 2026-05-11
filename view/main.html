@@ -314,19 +314,9 @@
                             <p class="text-blue-100 text-sm mb-6 leading-relaxed">
                                 현재 signal 점수가 높은<br>주요 국가 리스크 상황입니다.
                             </p>
-                            <div class="space-y-4">
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">이란 (IRN)</span>
-                                    <span class="font-bold text-xl text-red-300">92점</span>
-                                </div>
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">미국 (USA)</span>
-                                    <span class="font-bold text-xl">65점</span>
-                                </div>
-                                <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
-                                    <span class="font-medium">한국 (KOR)</span>
-                                    <span class="font-bold text-xl text-green-300">45점</span>
-                                </div>
+
+                            <div class="space-y-4" id="station-list">
+                                <p class="text-xs text-blue-200">데이터를 분석 중입니다...</p>
                             </div>
                         </div>
                     </div>
@@ -363,37 +353,40 @@
         };
         let dateFilter = "";
 
-        // 페이지 오픈시 실행
-        document.addEventListener('DOMContentLoaded', async() => {
-            axios.get("/session_out");
-            updateNavbar();
-            await fetchMainData();
-            renderExchangeRates();
-            initCalendar();
-            lucide.createIcons();
-            updateNotifUI();
-            renderNews();
-            renderPagination();
-        });
-
         // 환율/원자재 라벨링 3[서버에서 데이터 로드]
         // --- 2. 데이터 통합 로드 (백엔드 API 호출) ---
-        async function fetchMainData() {
+        async function fetchMainData(date = null) {
             try {
-                const [riskRes, indicatorRes, heatmapRes] = await Promise.all([
-                    // axios.get('/api/risk-signals'),
-                    axios.get("/public_signals"),
+                // 날짜가 파라미터로 들어오면 쿼리 스트링 추가
+                let newsUrl = "/public_signals";
+                if (date) newsUrl += `?date=${date}`;
+
+                const [newsRes, indicatorRes, heatmapRes] = await Promise.all([
+                    axios.get(newsUrl),
                     axios.get('/api/market-indicators'),
-                    axios.get('/stats/heatmap') // 리더님이 백엔드에 만든 합산 점수 API
+                    axios.get('/stats/heatmap') // 합산 점수 API
                 ]);
-                console.log(riskRes, indicatorRes, heatmapRes);
-                allSignals = riskRes.data.msg;
+                console.log("데이터 로드 완료:", { news: newsRes.data.msg.length, date: date || "전체" });
+
+
+                allSignals = newsRes.data.msg;
                 heatmapData = heatmapRes.data;
+
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
                 }
+
+                // 5. UI 업데이트 (날짜가 바뀌었을 수 있으므로 1페이지부터 다시 보여줌)
+                if (date) currentPage = 1;
+
+                // UI 렌더링 호출 (renderNews, renderPagination 등)
+                renderNews();        // 뉴스 그리드
+                renderPagination();  // 페이지네이션
+                updateStation();     // 우측 사이드바 랭킹
+                updateNotifUI();     // 알림 배지 및 리스트
+
             }catch (error) {
-                    console.error(error);
+                    console.error("데이터 통합 로드 실패:", error);
             }
         }
 
@@ -508,7 +501,7 @@
 
             // 드롭다운 내부 문구 업데이트
             countText.innerText = `${unreads.length}개의 새 알림`;
-        
+
         }
 
         function renderList(container, noti) {
@@ -524,8 +517,8 @@
 
                  // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
-                    <div class="notif-item ${n.is_read ? '' : 'unread'}" 
-                        onclick="readItem(${n.signal_no})" 
+                    <div class="notif-item ${n.is_read ? '' : 'unread'}"
+                        onclick="readItem(${n.signal_no})"
                         style="cursor: pointer;">
                         <div class="notif-icon">
                             ${iconTag}
@@ -535,13 +528,13 @@
                             <div class="notif-message">${n.prediction}</div>
                             <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
                         </div>
-                        <div class="notif-delete" 
-                            onclick="deleteItem(event, ${n.signal_no})" 
+                        <div class="notif-delete"
+                            onclick="deleteItem(event, ${n.signal_no})"
                             style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
                             <i data-lucide="x" style="width: 16px; height: 16px;"></i>
                         </div>
                     </div>
-                    `;               
+                    `;
             }).join('')+`<div class="hover:cursor-pointer" style="padding: 5px; text-align: center; color: #9ca3af;" onclick=allRead()>
                             모두읽음
                         </div>`;
@@ -598,7 +591,7 @@
             .then(response => response.json())
             .then(worldJson => {
                 echarts.registerMap('world', worldJson);
-                
+
                 const chartData = Object.entries(heatmapData).map(([name, info]) => {
                     let visualValue = 1; // 기본 Stable(초록)
 
@@ -611,7 +604,7 @@
                     } else {
                         visualValue = 1; // 초록
                     }
-                    
+
                     return {
                         name: name,
                         value: visualValue,
@@ -619,7 +612,7 @@
                         riskLevel: level  // 툴팁용 레벨
                     };
                 });
-    
+
                 var option = {
                     tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
                     // 위험단계별 컬러 설정 (기획안 반영)
@@ -643,7 +636,7 @@
                         layoutSize: '120%',
                         data: chartData, // ES_3에서 가져온 1~3단계 데이터
                         roam: true,
-    
+
                         // [추가] 마우스 오버(Hover) 시 스타일
                         emphasis: {
                             label: { show: true },
@@ -682,8 +675,8 @@
             renderNews(params.name);
             // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
         });
-            
-            
+
+
         // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
         function updateStation() {
             const list = document.getElementById('station-list');
@@ -789,7 +782,7 @@
                 "주의": "bg-yellow-100 text-yellow-700",
                 "심각": "bg-red-100 text-red-700"
             };
-            
+
             // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
             const sorted = [...currentSignals].sort((a, b) => {
                 // 리스크 점수 기준 정렬
@@ -808,15 +801,15 @@
                 // 날짜 기준 정렬
                 return new Date(b.published_date) - new Date(a.published_date);
 
-                renderPagination() 
+                renderPagination()
             });
-            
+
             // 4. HTML 생성 및 출력
             if (sorted.length === 0) {
                 grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-500">해당하는 뉴스가 없습니다.</div>`;
                 return;
             }
-            
+
             grid.innerHTML = sorted.map(news => {
                 // 음수 제거, 100 곱하기, 반올림 처리된 점수
                 const displayScore = Math.round(Math.abs(news.risk_score || 0) * 100);
@@ -834,7 +827,7 @@
                                 </span>
                                 <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level]}"">
                                     Signal ${displayScore}
-                                </span>  
+                                </span>
                             </div>
                             <a href="${news.url}" target="_blank" class="block font-bold leading-tight group-hover:text-blue-600 transition-colors mb-4 line-clamp-2">
                                 ${news.title}
@@ -913,10 +906,22 @@
         }
         function handleLogout() { if(confirm("로그아웃 하시겠습니까?")) { axios.get("/logout"); sessionStorage.clear(); location.href="login.html"; }}
         function selectDate(day) {
-            const dateStr = `${calendarMonth.getFullYear()}-${calendarMonth.getMonth() + 1}-${day}`;
+            const year = calendarMonth.getFullYear();
+            const month = String(calendarMonth.getMonth() + 1).padStart(2, '0');
+            const dateDay = String(day).padStart(2, '0');
+
+            // YYYY-MM-DD 형식 생성
+            const dateStr = `${year}-${month}-${dateDay}`;
+            selectedDate = dateStr; // 전역 변수 selectedDate에 저장 (폴링 시 유지됨)
+
+            // UI 업데이트
             document.getElementById('date-display').innerText = dateStr;
             document.getElementById('date-display').classList.remove('text-gray-400');
-            toggleCalendar();
+
+            toggleCalendar(); // 캘린더 드롭다운 닫기
+
+            // 🔥 중요: 서버에서 해당 날짜 데이터만 새로 가져옴
+            fetchMainData(dateStr);
         }
 
         // 페이지네이션 렌더링
@@ -961,26 +966,49 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
+        // [통합본] 페이지 로드 시 실행되는 메인 초기화 및 실시간 관리 로직
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 1. 세션 만료 체크 및 네비바 사용자 정보 업데이트
+            axios.get("/session_out");
+            updateNavbar();
+
+            // 2. 초기 데이터 로드 (첫 실행)
+            // fetchMainData 내부에 renderNews, renderPagination, renderExchangeRates가
+            // 이미 포함되어 있으므로 이것 하나만 await로 기다리면 충분합니다.
+            await fetchMainData();
+
+            // 3. 실시간 수집 반영 (30초마다 실행)
+            // selectedDate(전역변수)가 있으면 그 날짜를 유지하며 새로고침합니다.
+            setInterval(() => {
+                console.log("🔄 실시간 뉴스 업데이트 확인 중 (기준일: " + (selectedDate || "전체") + ")");
+                fetchMainData(selectedDate);
+            }, 30000);
+
+            // 4. 기타 UI 구성 요소 초기화
+            initCalendar();
+            updateNotifUI();
+
+            // 5. 경로에 따른 네비바 하이라이트 (리더님의 핵심 로직 통합)
+            const currentPath = window.location.pathname.split("/").pop() || "main.html";
             const navItems = document.querySelectorAll('.nav-item');
 
             navItems.forEach(item => {
-                // href 속성값에서 파일명만 가져와서 비교
                 const itemHref = item.getAttribute('href').split("/").pop();
 
                 if (currentPath === itemHref) {
+                    // 아이콘이 있는 메뉴(사용자 아이콘 등)와 일반 텍스트 메뉴 구분 처리
                     if (item.querySelector('i')) {
                         item.classList.replace('text-gray-600', 'text-blue-600');
                         item.classList.add('bg-blue-50');
                     } else {
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                        // 상단 메뉴(글로벌 현황 등) 하이라이트
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-100');
                         item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
                     }
                 }
             });
 
+            // 6. 모든 아이콘 최종 렌더링
             if (window.lucide) lucide.createIcons();
         });
 
