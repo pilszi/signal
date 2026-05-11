@@ -303,7 +303,7 @@
                         <!-- 환율 카드 -->
                         <div class="bg-white border rounded-xl p-6 shadow-sm">
                             <h3 class="mb-6 font-bold text-gray-800 flex items-center gap-2">
-                                <i data-lucide="refresh-cw" class="w-4 h-4 text-blue-500"></i> 실시간 환율
+                                실시간 환율
                             </h3>
                             <div id="exchange-rates" class="space-y-5">
                                 <!-- 데이터 연동 영역 -->
@@ -335,7 +335,8 @@
         // 초기 상태 데이터
         let savedUserId = sessionStorage.getItem('savedUserId');
         let selectedCountry = null;
-        let selectedDate = null;
+        let startDate = null;
+        let endDate = null;
         let searchQuery = "";
         let calendarMonth = new Date(2026, 4); // 2026년 5월
         let chartDom = document.getElementById('map');
@@ -355,7 +356,6 @@
         };
         let dateFilter = "";
 
-        // 검색창(ID가 search-input이라고 가정) 이벤트 연결
         const searchInput = document.getElementById('search-input');
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
@@ -386,7 +386,7 @@
                     // axios.get('/api/risk-signals'),
                     axios.get("/public_signals"),
                     axios.get('/api/market-indicators'),
-                    axios.get('/main/country') // 리더님이 백엔드에 만든 합산 점수 API
+                    axios.get('/main/country') 
                 ]);
                 console.log(riskRes, indicatorRes, heatmapRes);
                 allSignals = riskRes.data.msg;
@@ -683,10 +683,14 @@
 
         myChart.on('click', function (params) {
             // params.name에 클릭한 국가 이름이 들어있습니다.
-            console.log(params.name + "의 뉴스를 불러옵니다.");
-            selectCountry(params.name);
+            // console.log(params.name + "의 뉴스를 불러옵니다.");
+            // console.log(params);
+            if (params.data && params.data.total_score) {
+                selectCountry(params.name, params.data.total_score);
+            } else {
+                selectCountry(params.name, 0);
+            }
             renderNews(params.name);
-            // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
         });
             
 
@@ -731,18 +735,23 @@
 
         // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
         function applyFilters() {
-            console.log(allSignals);
+            // console.log(allSignals);
             filteredNews = allSignals.filter(item => {
+                // console.log(item);
                 const matchCountry = !selectedCountry || item.country_name === selectedCountry;
                 const matchSearch = !searchQuery || item.title.toLowerCase().includes(searchQuery.toLowerCase());
-                const matchDate = !selectedDate || item.published_date.startsWith(selectedDate);
+                const matchDate = !startDate || (
+                    item.published_date && 
+                    (item.published_date.substring(0, 10) >= startDate) && 
+                    (!endDate || item.published_date.substring(0, 10) <= endDate)
+                );
 
                 return matchCountry && matchSearch && matchDate;
             });
             // 2. [추가] 초기화 버튼 노출 여부 결정
             const resetBtn = document.getElementById('reset-btn');
             // 하나라도 값이 있으면(비어있지 않으면) 버튼 표시
-            if (searchQuery || selectedDate || selectedCountry) {
+            if (searchQuery || startDate || endDate || selectedCountry) {
                 resetBtn.classList.remove('hidden');
             } else {
                 resetBtn.classList.add('hidden');
@@ -752,10 +761,28 @@
             renderPagination();
         }
 
+        function updateDateDisplay() {
+            const display = document.getElementById('date-display');
+            
+            if (!startDate) {
+                display.innerText = "날짜를 선택해주세요";
+                display.classList.add('text-gray-400');
+            } else if (!endDate) {
+                // 시작일만 있을 때
+                display.innerText = `${startDate} ~ 시작일 선택됨`;
+                display.classList.remove('text-gray-400');
+            } else {
+                // 기간이 모두 선택되었을 때
+                display.innerText = `${startDate} ~ ${endDate}`;
+                display.classList.remove('text-gray-400');
+            }
+        }
+
         // 검색어 초기화 함수
         function resetFilters() {
             searchQuery = '';
-            selectedDate = '';
+            startDate = '';
+            endDate = '';
             selectedCountry = '';
             
             // UI 요소들도 초기값으로 변경
@@ -815,10 +842,12 @@
         function renderNews() {
             const grid = document.getElementById('news-grid'); // 뉴스가 들어갈 컨테이너 ID
             if (!grid) return;
-            let targetData = allSignals;
-            
-            if (filteredNews && filteredNews.length > 0) {
-                    targetData = filteredNews;
+            let targetData = [];
+            const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
+            if (isFilterActive) {
+                targetData = filteredNews;
+            } else {
+                targetData = allSignals;
             }
 
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
@@ -951,28 +980,69 @@
         function handleLogout() { if(confirm("로그아웃 하시겠습니까?")) { axios.get("/logout"); sessionStorage.clear(); location.href="login.html"; }}
         
         function selectDate(day) {
+
             const year = calendarMonth.getFullYear();
             const month = String(calendarMonth.getMonth() + 1).padStart(2, '0');
             const date = String(day).padStart(2, '0');
             const dateStr = `${year}-${month}-${date}`;
 
-            selectedDate = dateStr;
-
-            document.getElementById('date-display').innerText = dateStr;
-            document.getElementById('date-display').classList.remove('text-gray-400');
-            toggleCalendar();
+            // 시작일, 끝일 모두 선택 안됐을 때
+            if (!startDate || (startDate && endDate)) {
+                startDate = dateStr;
+                endDate = null;
+                // 여기서는 toggleCalendar()를 절대 호출하지 않습니다. (계속 열려있어야 함)
+            } 
+            // 시작일만 선택된 상태에서 두 번째 날짜를 클릭할 때
+            else {
+                if (dateStr < startDate) {
+                    // 선택한 날짜가 시작일보다 빠르면 시작일을 이 날짜로 교체 (종료일은 여전히 null)
+                    startDate = dateStr;
+                    endDate = null;
+                    // 시작일이 바뀌었을 뿐이므로 닫지 않습니다.
+                } else if (dateStr === startDate) {
+                    // 시작일을 한 번 더 누르면 선택 취소 (개발자 취향에 따라 선택)
+                    startDate = null;
+                    endDate = null;
+                } else {
+                    // 드디어 정상적인 종료일 선택!
+                    endDate = dateStr;
+                    toggleCalendar();
+                }
+            }
+            updateDateDisplay();
             applyFilters();
+        }
+
+        function updateDateDisplay(){
+            const display = document.getElementById('date-display');
+    
+            if (!startDate) {
+                display.innerText = "날짜를 선택해주세요";
+                display.classList.add('text-gray-400');
+            } else if (!endDate) {
+                // 시작일만 있을 때
+                display.innerText = `${startDate} ~ 시작일 선택됨`;
+                display.classList.remove('text-gray-400');
+            } else {
+                // 기간이 모두 선택되었을 때
+                display.innerText = `${startDate} ~ ${endDate}`;
+                display.classList.remove('text-gray-400');
+            }
         }
 
         // 페이지네이션 렌더링
         function renderPagination() {
-            let targetData = allSignals;
-            
-            if (filteredNews && filteredNews.length > 0) {
-                    targetData = filteredNews;
+            let targetData = [];
+            const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
+
+            if (isFilterActive) {
+                targetData = filteredNews;
+            }else{
+                targetData = allSignals
             }
-            console.log(targetData.length);
+            // console.log(targetData.length);
             const paginationContainer = document.getElementById('pagination');
+            if (!paginationContainer) return;
             const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
             if (totalPages <= 1) {
                 paginationContainer.innerHTML = '';
@@ -1006,10 +1076,12 @@
         // 이벤트 핸들러
         function handlePageChange(page) {
             
-            let targetData = allSignals;
+            let targetData;
 
             if (filteredNews && filteredNews.length > 0) {
                 targetData = filteredNews;
+            } else {
+                targetData = allSignals;
             }
             const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
 
