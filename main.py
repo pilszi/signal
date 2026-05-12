@@ -4,24 +4,16 @@ import subprocess
 import asyncio
 from typing import Dict, Any
 import traceback
-
-import jsonify
 import sqlalchemy
-from datetime import datetime
-
 from concurrent.futures import ThreadPoolExecutor
-
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
 from elasticsearch import Elasticsearch
-from fastapi import FastAPI, Body, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from sse_starlette.sse import EventSourceResponse
-
 
 # --- 이 코드를 반드시 추가하세요 ---
 if sys.platform == 'win32':
@@ -34,7 +26,8 @@ from dataReqType.regist import RegistModel
 from db import get_db, engine
 from hash import hash_password, verify_password
 from config import Config
-from utils import prepare_heatmap_data
+from utils import prepare_heatmap_data, save_analysis_result
+
 
 # 파일 연동 (수집 및 분석 모듈)
 import naver
@@ -52,12 +45,41 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-es = Elasticsearch(["http://localhost:9200"])
+es = Elasticsearch(["http://100.123.232.79:9200"])
 
 
 # ==========================================
 # 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
 # ==========================================
+# 분석 실행 후 결과를 DB에 저장하는 함수
+async def run_analysis_and_save():
+    logger.info("🧠 [Analysis] AI 분석 및 DB 저장 시퀀스 시작")
+
+    # 1. AI 분석 실행
+    results = await ml.run_analysis()
+
+    if not results:
+        logger.info("ℹ️ [Analysis] 분석할 새로운 데이터가 없습니다.")
+        return
+
+    # 2. DB 연결 및 저장
+    try:
+        with get_db() as session:
+            # 1. 세션 내부에서 커넥션 획득
+            conn = session.connection().connection
+            cursor = conn.cursor()
+
+            for res in results:
+                save_analysis_result(cursor, conn, res)
+
+            # 2. 커넥션 커밋 외에 세션 자체를 커밋/플러시 해줍니다.
+            session.commit()  # 세션을 확정
+            logger.info(f"✅ [Analysis] {len(results)}건의 분석 결과 DB 저장 완료")
+    except Exception as e:
+        logger.error(f"❌ [Analysis] DB 저장 중 에러 발생: {e}")
+
+
+
 async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
     """
     BERT 모델 학습 여부를 체크하고, 완료되었다면 ml.run_analysis를 주기적으로 실행함
@@ -84,7 +106,7 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
                 # BERT 분석 작업 등록 (10분 주기로 실전 투입)
                 if not scheduler.get_job('ml_analysis'):
                     scheduler.add_job(
-                        ml.run_analysis,
+                        run_analysis_and_save,
                         'interval',
                         minutes=10,
                         id='ml_analysis',
@@ -136,8 +158,8 @@ async def run_initial_batch(scheduler):
         # 수집된 데이터를 번역해서 news_origin으로 넘김
         await loop.run_in_executor(executor, translator_worker.process_translation)
 
-        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 파이프라인 즉시 가동")
-        await ml.run_analysis()
+        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 및 저장 가동")
+        await run_analysis_and_save()
         await manage_ml_pipeline(scheduler) # 그 다음 앞으로 10분마다 돌 수 있게 스케줄러에 등록
 
         logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
@@ -335,36 +357,68 @@ def delete_member(info: Dict[str, str]):
 
 # main 페이지 오늘의 뉴스 조회
 @app.get("/public_signals")
-def public_signals():
-    """ 메인 페이지 기사 요청 """
-    body = {"query": {"bool": {"filter": [{"range": {
-                            "published_date": {
-                                "gte": "now-12h",     # 현재 시각 기준 12시간 전부터
-                                "lte": "now",         # 현재 시각까지
-                            }}}]
+def public_signals(date: str = Query(None)):
+    """ 메인 페이지 기사 요청 및 필터링 """
+    # [1] 검색 조건 설정 (날짜가 있으면 해당 날짜, 없으면 최근 12시간)
+    if date:
+        date_filter = {
+            "range": {
+                "published_date": {
+                    "gte": f"{date}T00:00:00",
+                    "lte": f"{date}T23:59:59"
+                }
+            }
+        }
+    else:
+        date_filter = {
+            "range": {
+                "published_date": {
+                    "gte": "now-12h",
+                    "lte": "now"
+                }
+            }
+        }
+
+    # [2] 최종 Elasticsearch 쿼리 바디
+    search_body = {
+        "query": {
+            "bool": {
+                "filter": [date_filter]
             }
         },
-        "sort": [{ "published_date": "desc" }]        # 최신 기사가 먼저 나오도록 정렬
-        ,"size": 100
+        "sort": [{"published_date": "desc"}],
+        "size": 100
     }
-    res = es.search(index= "news_labeling", body={"size":100})
-    print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
-    # print(res['hits']['hits'])
-    public_news = []
-    for news in res['hits']['hits']:
-        # print(news["_source"])
-        _news = {
-            'title' : news["_source"]["title"],
-            'url' : news["_source"]["url"],
-            'main_image' : news["_source"]["main_image"],
-            'published_date' : news["_source"]["published_date"],
-            'press_name' : news["_source"]["press_name"],
-            'risk_level' : news["_source"]["risk_level"],
-            'risk_score' : news["_source"]["final_total_score"]["total"]
-        }
-        public_news.append(_news)
-    # print(public_news)
-    return {"msg": public_news}
+
+    try:
+        # 🔥 중요: 정의한 search_body를 실제로 사용합니다!
+        res = es.search(index="news_labeling", body=search_body)
+
+        print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
+
+        public_news = []
+        for news in res['hits']['hits']:
+            source = news.get("_source", {})
+
+            # [3] 모든 필드에 .get()을 사용하여 방어적으로 데이터 추출
+            _news = {
+                'title': source.get("title", "제목 없음"),
+                'url': source.get("url", "#"),
+                # 이미지가 없으면 기본 플레이스홀더 이미지 사용
+                'main_image': source.get("main_image") or "https://via.placeholder.com/400x300?text=No+Image",
+                'published_date': source.get("published_date"),
+                'press_name': source.get("press_name", "알 수 없음"),
+                'risk_level': source.get("risk_level", "안정"),
+                # 중첩된 score 데이터도 안전하게 가져오기
+                'risk_score': source.get("final_total_score", {}).get("total", 0)
+            }
+            public_news.append(_news)
+
+        return {"msg": public_news}
+
+    except Exception as e:
+        print(f"❌ 검색 중 오류 발생: {e}")
+        return {"msg": [], "error": str(e)}
 
 @app.get("/main/country")
 def country():
@@ -377,13 +431,13 @@ def country():
                     COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
                     COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
                     -- 바로 점수 계산까지!
-                    SUM(CASE 
-                        WHEN t2.risk_level = '안정' THEN 10 
-                        WHEN t2.risk_level = '주의' THEN 30 
-                        WHEN t2.risk_level = '위기' THEN 100 
-                        ELSE 0 
+                    SUM(CASE
+                        WHEN t2.risk_level = '안정' THEN 10
+                        WHEN t2.risk_level = '주의' THEN 30
+                        WHEN t2.risk_level = '위기' THEN 100
+                        ELSE 0
                     END) AS total_score
-                FROM signal_country t1 
+                FROM signal_country t1
                     JOIN signal_message t2 ON t1.signal_no = t2.signal_no
                         JOIN country t3 ON t3.country_no = t1.country_no
                         WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
@@ -396,6 +450,7 @@ def country():
                 "en_name": country["en_name"],
                 "total_score": country["total_score"]
             }
+            signal_country.append(con)
     return {"country_signal": signal_country}
 
 
@@ -444,49 +499,46 @@ def custom_news(id:str):
             read_url.append(key["news_url"])
 
         keywords = list(set(keyword))
-        print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
+        # print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
 
-        # 키워드가 들어간 뉴스기사 조회
-        """ 추후 es_3 에서 데이터 가져올 때 사용할 쿼리"""
         body = {
             "query": {
                 "bool": {
                     "must": [
                         {
-                            "terms": {
-                                "extracted_keywords": keyword  # 특정 키워드 조건
+                            "bool": {
+                                "should": [
+                                    # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
+                                    {"term": {"extracted_keywords": {"value": kw, "_name": kw}}}
+                                    for kw in keyword
+                                ],
+                                "minimum_should_match": 1  # terms 쿼리처럼 최소 하나는 매치되어야 함
                             }
                         }
                     ],
                     "filter": [
                         {
                             "range": {
-                                "analyzed_at": {
-                                    "gte": "now-24h",  # 현재(now) 기준 24시간 전(24h) 이상(gte)
-                                    "lt": "now"  # 현재 미만(lt)
+                                "published_date": {
+                                    "gte": "now-24h",
+                                    "lt": "now"
                                 }
                             }
                         }
                     ]
                 }
             },
-            "sort": [
-                {"published_date": "desc"} # 최신 기사가 먼저 나오도록 정렬
-            ],
+            "sort": [{"published_date": "desc"}],
             "size": 100
         }
+
         res = es.search(index="news_labeling", body=body)
-        print(f"검색 된 기사 갯수 = {res['hits']['total']['value']}")
+        logger.info(f'{id} 의 관심 뉴스 갯수 = {res['hits']['total']['value']}')
         custom_news = []
         for news in res['hits']['hits']:
             # print(news["_source"])
-            source_keywords = news["_source"].get("extracted_keyword", [])
-            matched_list = list(set(source_keywords) & set(keyword))
-            display_keyword = ''
-            if matched_list:
-                display_keyword = matched_list[0]
-            else:
-                display_keyword = '리스크'
+            display_keyword = news.get('matched_queries', [])
+            logger.info(f'매칭 키워드 = {display_keyword}')
             _news = {
                 'title': news["_source"]["title"],
                 'url': news["_source"]["url"],
@@ -494,10 +546,12 @@ def custom_news(id:str):
                 'published_date': news["_source"]["published_date"],
                 'press_name': news["_source"]["press_name"],
                 'keyword': display_keyword,
+                'risk_score': news["_source"]["final_total_score"]["total"],
+                'risk_level': news["_source"]["risk_level"],
                 'is_read': news["_source"]["url"] in read_url
             }
             custom_news.append(_news)
-        print(f'custom_news 갯수 = {len(custom_news)}')
+        logger.info(f'{id} 의 맞춤형 뉴스 {len(custom_news)}개')
     return {"keyword": keywords, "total_val": len(custom_news), "news": custom_news}
 
 
@@ -518,7 +572,7 @@ def custom_news(id:str):
 @app.get("/signal_log")
 def signal_log(id:str):
     """ 시그널로그 페이지 요청 """
-    logger.info(f'==={id}===')
+    # logger.info(f'==={id}===')
 
     with get_db() as db:
         # 1. id에 맞는 관심키워드 조회(db 에서 키워드 조회)
@@ -538,26 +592,24 @@ def signal_log(id:str):
 
         logger.info(f'{id} 의 관심키워드 = {keywords}')
         # 2. 키워드에 맞는 기사 조회(es 에서 _id 조회)
-        should_key = []
-        for key in keywords:
-            should_key.append(
-                {
-                    "match": {
-                        "extracted_keywords": {
-                            "query": key,
-                            "_name": key
-                        }
-                    }
-                }
-            )
-
         body = {
             "query": {
                 "bool": {
-                    "should": should_key,
-                    "minimum_should_match": 1
+                    "must": [
+                        {
+                            "bool": {
+                                "should": [
+                                    {"term": {"extracted_keywords": {"value": key, "_name": key}}}
+                                    for key in keywords  # 리스트 컴프리헨션 적용
+                                ],
+                                "minimum_should_match": 1
+                            }
+                        }
+                    ]
                 }
-            }
+            },
+            "sort": [{"analyzed_at": "desc"}],
+            "size": 30
         }
         es_res = es.search(index="news_labeling", body=body)
         logger.info(f'관심키워드에 맞는 뉴스기사 = {len(es_res["hits"]["hits"])}')
@@ -581,32 +633,6 @@ def signal_log(id:str):
 
         logger.info(f'키워드에 해당하는 문서 = {len(doc_no)}')
 
-        # # 3. _id 에 해당하는 signal_no 조회(DB)
-        # sql = sqlalchemy.text("""
-        #          SELECT
-        #              risk_level
-        #              ,signal_time
-        #              ,prediction
-        #              ,prediction_reason
-        #          FROM signal_message
-        #              WHERE document_no = :doc_no
-        #  """)
-        # # DB에서 데이터를 가져올 경우 사용
-        # # sig_doc = []
-        # # for doc in doc_no:
-        # #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
-        # #     logger.info(f'--------')
-        # #     if db_res:
-        # #         d = {
-        # #             "risk_level": db_res["risk_level"],
-        # #             "signal_time": db_res["signal_time"],
-        # #             "prediction": db_res["prediction"],
-        # #             "prediction_reason": db_res["prediction_reason"],
-        # #             "url": doc["url"],
-        # #             "match_keyword": doc["match_keyword"]
-        # #         }
-        # #         sig_doc.append(d)
-        # # logger.info(f'맞춤 signal_log = {len(sig_doc)} 개')
     return {"data": doc_no}
 
 
@@ -806,3 +832,12 @@ if __name__ == "__main__":
     import uvicorn
     # reload=True는 개발 중에만 사용하기
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    import sys
+
+    # 정책 설정은 임포트 직후 최상단에 있는 것도 좋지만, 실행 직전에도 한 번 더 확인
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+    # uvicorn 실행 시 루프 설정을 명시하거나,
+    # reload=True 환경에서는 정책 선언이 잘 먹히지 않을 수 있으므로 주의가 필요합니다.
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, loop="asyncio")

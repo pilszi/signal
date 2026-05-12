@@ -29,7 +29,7 @@
                 display: inline-block;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
-        .notif-trigger {
+            .notif-trigger {
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -154,191 +154,243 @@
             }
 
             .all-read-btn:hover { text-decoration: underline; }
+
+            .report-card {
+                padding: 24px;
+                border-radius: 16px;
+                margin-bottom: 16px;
+                line-height: 1.5;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            }
+
+            .risk-severe {
+                background-color: #fff1f0;
+                border: 2px solid #ff4d4f;
+                color: #820014;
+            }
+
+            .risk-warning {
+                background-color: #fffbe6;
+                border: 2px solid #ffc53d;
+                color: #874d00;
+            }
+
+            .risk-stable {
+                background-color: #e6f7ff;
+                border: 2px solid #40a9ff;
+                color: #003a8c;
+            }
+
         </style>
     </head>
-    <body class="bg-gray-50">
-        <!-- Navbar -->
+    <body class="bg-gray-50 text-gray-900">
         <nav class="border-b bg-white sticky top-0 z-50">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-between items-center h-20">
                     <div class="flex items-center gap-8">
-                        <!-- href에서 / 제거 -->
                         <a href="main.html" class="flex items-center gap-2">
-                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
-                                Signal
-                            </span>
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Signal</span>
                         </a>
-                        
                         <div class="hidden md:flex gap-1">
-                            <!-- 상대 경로 적용 -->
                             <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
                             <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
                             <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
                         </div>
                     </div>
-
                     <div class="flex items-center gap-3">
-                        <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <span id="user-greeting" class="hidden text-sm text-gray-600">
-                            <span id="user_name"></span>님 반갑습니다
-                        </span>
-                        <!-- 알림 컴포넌트 -->
+                        <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
                         <div class="notif-container" id="notifContainer">
-                            <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
                             <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
                                 <i data-lucide="bell" class="w-5 h-5"></i>
-                                <!-- 알림 숫자 배지 -->
-                                 <!-- 초기 상태는 숨김 처리 -->
                                 <span class="notif-badge" id="notifBadge" style="display: none;"></span>
                             </button>
-
-                            <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
-                                <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>                                  
-                                </div>
-                                 <div id="notifList"></div>
+                                <div class="notif-header p-4 border-b"><span id="notifCountText" class="text-sm text-gray-500"></span></div>
+                                <div id="notifList"></div>
                             </div>
                         </div>
-                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
-                            <i data-lucide="user" class="w-5 h-5"></i>
-                        </a>
-                        <div id="authContainer">
-                            
-                        </div>
+                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="user" class="w-5 h-5"></i></a>
+                        <div id="authContainer"></div>
                     </div>
                 </div>
             </div>
         </nav>
 
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <!-- 헤더 -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div class="mb-8">
                 <h1 class="text-3xl font-bold mb-2">시그널 로그</h1>
-                <p class="text-sm text-gray-500">정렬: 최신순</p>
+                <p class="text-sm text-gray-500">최근 발생한 AI 리스크 분석 리포트입니다.</p>
             </div>
 
-            <!-- 필터 버튼 영역 -->
             <div id="filter-container" class="flex items-center gap-3 mb-6 flex-wrap">
                 <i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>
-                <button onclick="handleLevelFilter(null)" class="filter-btn active px-4 py-2 rounded-lg bg-gray-900 text-white" data-level="all">전체</button>
+                <button onclick="handleLevelFilter(null)" class="filter-btn active px-4 py-2 rounded-lg bg-gray-600 text-white" data-level="all">전체</button>
                 <button onclick="handleLevelFilter(3)" class="filter-btn px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" data-level="3">3단계 (심각)</button>
                 <button onclick="handleLevelFilter(2)" class="filter-btn px-4 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100" data-level="2">2단계 (주의)</button>
                 <button onclick="handleLevelFilter(1)" class="filter-btn px-4 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100" data-level="1">1단계 (안정)</button>
             </div>
 
-            <!-- 로그 리스트 컨테이너 -->
-            <div id="signal-list" class="grid gap-4">
-                <!-- 자바스크립트에서 렌더링됨 -->
-            </div>
+            <div class="grid lg:grid-cols-4 gap-8">
+                <div class="lg:col-span-3">
+                    <div id="signal-list" class="grid gap-4">
+                        </div>
+                    <div id="pagination" class="mt-8 flex items-center justify-center gap-2"></div>
+                </div>
 
-            <!-- 페이지네이션 컨테이너 -->
-            <div id="pagination" class="mt-8 flex items-center justify-center gap-2">
-                <!-- 자바스크립트에서 렌더링됨 -->
+                <div class="lg:col-span-1">
+                    <div class="bg-white border rounded-xl p-5 shadow-sm sticky top-24">
+                        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <i data-lucide="bell-ring" class="w-4 h-4 text-red-500"></i> 실시간 주요 시그널
+                        </h3>
+                        <div id="signal-log-container" class="space-y-4 max-h-[600px] overflow-y-auto">
+                            <p class="text-xs text-gray-400 text-center py-4">동기화 중...</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
-
+        </main>
     </body>
     <script>
         // 1. 상태 관리 변수
-        let allSignals = []; // 서버에서 가져올 전체 데이터
-        let filteredSignals = [];
+        let allSignals = [];      // 상세 로그 리스트용
+        let filteredSignals = [];  // 필터 적용된 데이터
         let currentPage = 1;
         const SIGNALS_PER_PAGE = 10;
         let selectedLevel = null;
         let savedUserId = sessionStorage.getItem("savedUserId");
-        let noti = [];
+        let noti = [];            // 실시간 사이드바 및 알림용
 
-        // 2. 데이터 가져오기 (FastAPI 연결 시)
-        async function fetchSignals() {
+        // 2. 데이터 가져오기 통합 (상세 로그 + 알림 데이터)
+        async function refreshAllData() {
             try {
-                // mockData 대신 서버 API 호출 (예시)
-                const {data} = await axios.get('/signal_log?id='+savedUserId);
-                console.log(data);
-                allSignals = data.data;
-                
-                applyFilterAndRender();
+                const [signalsRes, notiRes] = await Promise.all([
+                    axios.get('/signal_log?id=' + savedUserId),
+                    axios.get("/noti/signal?id=" + savedUserId)
+                ]);
+
+                allSignals = signalsRes.data.data;
+                noti = notiRes.data.noti;
+
+                applyFilterAndRender(); // 메인 리스트 렌더링
+                updateNotifUI_Static(); // 알림 배지 및 사이드바 렌더링
             } catch (error) {
-                console.error("데이터 로드 실패:", error);
+                console.error("데이터 동기화 실패:", error);
             }
         }
 
-        // 3. 필터링 및 정렬 로직
+        // 3. 필터링 및 메인 리스트 렌더링
         function applyFilterAndRender() {
             // 필터링
-            filteredSignals = selectedLevel
-                ? allSignals.filter(s => s.risk_level === selectedLevel)
-                : allSignals;
+            const levelMap = {
+                1: "안정",
+                2: "주의",
+                3: "심각"
+            };
+
+            const targetLevelName = levelMap[selectedLevel];
+            if (!selectedLevel){
+                filteredSignals = [...allSignals];
+            } else {
+                filteredSignals = allSignals.filter(s => s.risk_level === targetLevelName);
+            }
 
             // 최신순 정렬
-            filteredSignals.sort((a, b) => new Date(b.analyzed_at) - new Date(a.analyzed_at));
+            filteredSignals.sort((a, b) => new Date(b.signal_time) - new Date(a.signal_time));
 
-            renderSignalList(filteredSignals);
+            renderSignalList();
             renderPagination();
         }
 
-        // 4. 리스트 렌더링
-        function renderSignalList(signal) {
+        // 4. 리스크 레벨 클래스 결정
+        function getRiskClass(level) {
+            if (level === '심각') return 'risk-severe';
+            if (level === '주의') return 'risk-warning';
+            return 'risk-stable';
+        }
+
+        // 5. 상세 리스트 렌더링
+        function renderSignalList() {
             const listContainer = document.getElementById('signal-list');
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
             const currentSignals = filteredSignals.slice(startIndex, startIndex + SIGNALS_PER_PAGE);
 
-            listContainer.innerHTML = currentSignals.map(signal => `
-                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="px-2 py-1 rounded text-xs font-bold ${getLevelStyle(signal.risk_level)}">
-                            Level ${signal.risk_level}
-                        </span>
-                        <span class="text-xs text-gray-400">${signal.signal_time.split('T')[0]}</span>
+            if (currentSignals.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="bg-white p-10 rounded-xl text-center text-gray-500 border border-dashed">
+                        조회된 시그널 로그가 없습니다.
+                    </div>`;
+                return;
+            }
+
+            listContainer.innerHTML = currentSignals.map(signal => {
+                // 리스크 레벨에 따른 클래스 결정 (getRiskClass 함수 활용)
+                const riskClass = getRiskClass(signal.risk_level);
+                // 날짜 안전하게 추출
+                // const displayDate = signal.signal_time ? signal.signal_time.split('T')[0] : '날짜 미상';
+                // timeAgo(시간) 사용하여 signal 분석이 몇분/ 몇시간/ 몇일 전 으로 표기
+                return `
+                    <div class="report-card ${riskClass} p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-bold bg-white/50 border border-current">
+                                ${signal.risk_level} 단계 시그널
+                            </span>
+                            <span class="text-center text-xs opacity-70 font-medium">${timeAgo(signal.signal_time)}</span>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-1">상황 요약</p>
+                            <p class="text-xl font-bold leading-snug">${signal.prediction || '세부 정보가 없습니다.'}</p>
+                        </div>
+
+                        <div class="border-t border-current/10 pt-3">
+                            <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-1">데이터 근거 및 전략적 분석</p>
+                            <p class="text-base font-medium leading-relaxed">${signal.prediction_reason || '분석 데이터가 존재하지 않습니다.'}</p>
+                        </div>
                     </div>
-                    <p class="text-gray-600 text-xs">예측</p>
-                    <p class="text-black-600 text-m">${signal.prediction || '세부 정보가 없습니다.'}</p>
-                    <p class="text-gray-600 text-xs">예측근거</p>
-                    <p class="text-black-600 text-m">${signal.prediction_reason || '세부 정보가 없습니다.'}</p>
+                `;
+            }).join('');
+
+            if (window.lucide) lucide.createIcons(); // 아이콘 새로고침
+        }
+
+        // 6. 실시간 사이드바 렌더링
+        function renderSignalLogs() {
+            const logs = noti.filter(n => n.risk_level === "심각" || n.risk_level === "주의");
+            const container = document.getElementById('signal-log-container');
+            if (!container) return;
+
+            if (logs.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">안정적인 상태입니다.</p>';
+                return;
+            }
+
+            container.innerHTML = logs.slice(0, 5).map(log => `
+                <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
+                        <span class="text-[9px] text-gray-400">${timeAgo(log.signal_time)}</span>
+                    </div>
+                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.prediction}</p>
                 </div>
             `).join('');
         }
 
-        // 5. 페이지네이션 렌더링
-        function renderPagination() {
-            const paginationContainer = document.getElementById('pagination');
-            const totalPages = Math.ceil(filteredSignals.length / SIGNALS_PER_PAGE);
-            
-            if (totalPages <= 1) {
-                paginationContainer.innerHTML = '';
-                return;
+        // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
+        function updateNotifUI_Static() {
+            const badge = document.getElementById('notifBadge');
+            const unreads = noti.filter(n => !n.is_read);
+
+            if (unreads.length > 0) {
+                badge.innerText = unreads.length;
+                badge.style.display = 'flex';
+            } else {
+                badge.style.display = 'none';
             }
-
-            let html = `
-                <button onclick="handlePageChange(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
-                    <i data-lucide="chevron-left" class="w-5 h-5"></i>
-                </button>
-            `;
-
-            for (let i = 1; i <= totalPages; i++) {
-                html += `
-                    <button onclick="handlePageChange(${i})" class="px-4 py-2 rounded-lg border ${currentPage === i ? 'bg-blue-600 text-white' : 'hover:bg-gray-50'}">
-                        ${i}
-                    </button>
-                `;
-            }
-
-            html += `
-                <button onclick="handlePageChange(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
-                    <i data-lucide="chevron-right" class="w-5 h-5"></i>
-                </button>
-            `;
-
-            paginationContainer.innerHTML = html;
-            lucide.createIcons(); // 아이콘 재생성
-        }
-
-        // 6. 이벤트 핸들러
-        function handlePageChange(page) {
-            currentPage = page;
-            renderSignalList();
-            renderPagination();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            document.getElementById('notifCountText').innerText = `${unreads.length}개의 새 알림`;
+            renderList(document.getElementById('notifList'), noti);
+            renderSignalLogs();
+            if (window.lucide) lucide.createIcons();
         }
 
         function handleLevelFilter(level) {
@@ -347,220 +399,165 @@
             
             // 버튼 스타일 업데이트 (선택 사항)
             document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.classList.replace('bg-gray-900', 'bg-gray-100'); // 단순 예시
+                btn.classList.replace('bg-gray-300', 'bg-gray-900'); // 단순 예시
+            });
+            await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+            updateNotifUI_Static();
+            location.href = 'signal_log.html';
+        }
+
+        async function deleteItem(e, id) {
+            e.stopPropagation();
+            noti = noti.filter(n => n.signal_no !== id);
+            await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+            updateNotifUI_Static();
+        }
+
+        async function allRead() {
+            noti = noti.map(n => ({ ...n, is_read: 1 }));
+            await axios.get("/noti/read_all?id=" + savedUserId);
+            updateNotifUI_Static();
+        }
+
+        // 9. 네비바 및 공통 기능
+        function updateNavbar() {
+            const authContainer = document.getElementById('authContainer');
+            const userNameSpan = document.getElementById('user_name');
+            const userGreeting = document.getElementById('user-greeting');
+
+            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+                if (userNameSpan) userNameSpan.textContent = savedUserId;
+                if (userGreeting) userGreeting.classList.remove('hidden');
+                authContainer.innerHTML = `
+                    <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 uppercase transition-colors">
+                        LOG OUT
+                    </button>
+                `;
+            } else {
+                if (userGreeting) userGreeting.classList.add('hidden');
+                authContainer.innerHTML = `
+                    <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 uppercase transition-colors">
+                        LOG IN
+                    </a>
+                `;
+            }
+        }
+
+        async function handleLogout() {
+            if(confirm("로그아웃 하시겠습니까?")) {
+                await axios.get("/logout");
+                sessionStorage.clear();
+                location.href = "login.html";
+            }
+        }
+
+        // 10. 유틸리티 및 페이지네이션
+        function timeAgo(dateString) {
+            const diff = Math.floor((new Date() - new Date(dateString)) / 1000);
+            if (diff < 60) return '방금 전';
+            if (diff < 3600) return `${Math.floor(diff/60)}분 전`;
+            if (diff < 86400) return `${Math.floor(diff/3600)}시간 전`;
+            return dateString.split('T')[0];
+        }
+
+        function handleLevelFilter(level) {
+            selectedLevel = level;
+            currentPage = 1;
+
+            // 필터 버튼 시각적 피드백 (선택된 버튼 강조)
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                const btnLevel = btn.getAttribute('data-level');
+                if ((level === null && btnLevel === 'all') || (level !== null && btnLevel == (level === '심각' ? 3 : level === '주의' ? 2 : 1))) {
+                    btn.classList.add('bg-gray-900', 'text-white');
+                    btn.classList.remove('bg-gray-100', 'text-gray-600');
+                } else {
+                    btn.classList.remove('bg-gray-900', 'text-white');
+                    // 각 등급별 연한 배경색 유지 로직은 필요에 따라 조정
+                }
             });
 
             applyFilterAndRender();
         }
 
-        function getLevelStyle(level) {
-            if (level === "심각") return "bg-red-100 text-red-600";
-            if (level === "주의") return "bg-yellow-100 text-yellow-600";
-            return "bg-blue-100 text-blue-600";
+        function handlePageChange(page) {
+            currentPage = page;
+            renderSignalList();
+            renderPagination();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        // Navbar 상태 업데이트
-        function updateNavbar() {
-            const authContainer = document.getElementById('authContainer');
-            // 태그가 없을 시 함수 종료(에러방지)
-            // console.log(authContainer);
-            if (!authContainer){return};
-            const userNameSpan = document.getElementById('user_name');
-            const userGreeting = document.getElementById('user-greeting');
-            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
+        function renderPagination() {
+            const container = document.getElementById('pagination');
+            const totalPages = Math.ceil(filteredSignals.length / SIGNALS_PER_PAGE);
+            if (totalPages <= 1) { container.innerHTML = ''; return; }
 
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
-                // 1. 인사말 영역 처리
-                if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
-                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
-                }
-
-                // 2. 로그아웃 버튼 표시
-                authContainer.innerHTML = `
-                    <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
-                        LOG OUT
-                    </button>
-                `;
-            } else {
-                // 로그아웃 상태일 때
-                if (userGreeting) {
-                    userGreeting.classList.add('hidden'); // 인사말 숨김
-                }
-
-                authContainer.innerHTML = `
-                    <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
-                        LOG IN
-                    </a>
-                `;
+            let html = `<button onclick="handlePageChange(${currentPage-1})" ${currentPage===1?'disabled':''} class="p-2 border rounded-lg hover:bg-gray-50"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>`;
+            for (let i = 1; i <= totalPages; i++) {
+                html += `<button onclick="handlePageChange(${i})" class="px-4 py-2 rounded-lg border ${currentPage===i?'bg-blue-600 text-white':'hover:bg-gray-50'}">${i}</button>`;
             }
-            
+            html += `<button onclick="handlePageChange(${currentPage+1})" ${currentPage===totalPages?'disabled':''} class="p-2 border rounded-lg hover:bg-gray-50"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>`;
+            container.innerHTML = html;
             if (window.lucide) lucide.createIcons();
         }
 
-        const trigger = document.getElementById('notifTrigger');
-        const dropdown = document.getElementById('notifDropdown');
-        const list = document.getElementById('notifList');
-
-        // 토글 이벤트
-        trigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            dropdown.classList.toggle('hidden');
-        });
-
-        // 외부 클릭 시 닫기
-        document.addEventListener('click', (e) => {
-            if (!document.getElementById('notifContainer').contains(e.target)) {
-                dropdown.classList.add('hidden');
-            }
-        });
-
-        // signal 분석 시간 변화 함수(예. 방금전, 30분전, 1시간전...)
-        function timeAgo(dateString) {
-            const now = new Date();
-            const past = new Date(dateString);
-            const diffInSeconds = Math.floor((now - past) / 1000);
-
-            if (diffInSeconds < 60) return '방금 전';
-            
-            const diffInMinutes = Math.floor(diffInSeconds / 60);
-            if (diffInMinutes < 60) return `${diffInMinutes}분 전`;
-            
-            const diffInHours = Math.floor(diffInMinutes / 60);
-            if (diffInHours < 24) return `${diffInHours}시간 전`;
-            
-            const diffInDays = Math.floor(diffInHours / 24);
-            if (diffInDays < 7) return `${diffInDays}일 전`;
-            
-            // 일주일이 넘어가면 그냥 원래 날짜(년-월-일)를 보여줍니다.
-            return dateString.split('T')[0]; 
-        }
-
-        // 알림 렌더링 함수
-        async function updateNotifUI() {
-            const badge = document.getElementById('notifBadge');
-            const list = document.getElementById('notifList');
-            const countText = document.getElementById('notifCountText');
-            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
-            
-            const {data} = await axios.get("/noti/signal?id="+savedUserId);
-            console.log(data);
-            noti = data.noti;
-            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
-            if (!savedUserId || savedUserId === "guest") {
-                badge.style.display = 'none'; // 배지 숨김
-                countText.innerText = '0개의 새 알림';
-                list.innerHTML = `
-                    <div style="padding: 40px; text-align: center;">
-                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                    </div>`;
+        // 11. 알림 리스트 드롭다운 렌더링
+        function renderList(container, data) {
+            if (!container) return;
+            if (data.length === 0) {
+                container.innerHTML = '<div class="p-10 text-center text-gray-400">알림이 없습니다.</div>';
                 return;
             }
-            
-            const unreads = noti.filter(n => !n.is_read);
-            
-            // 새 알림이 있을 때만 배지 표시
-            if (unreads.length > 0) {
-                badge.innerText = unreads.length;
-                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시
-            } else {
-                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김
-            }
-
-            // 드롭다운 내부 문구 업데이트
-            countText.innerText = `${unreads.length}개의 새 알림`;
-
-            // 알림 리스트 렌더링 로직 (기존과 동일)
-            renderList(list, noti);
+            container.innerHTML = data.map(n => `
+                <div class="notif-item p-4 border-b relative ${n.is_read ? '' : 'bg-blue-50 hover:bg-blue-100'}" onclick="readItem(${n.signal_no})">
+                    <div class="text-xs font-bold ${n.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} mb-1">${n.risk_level} 단계 알림</div>
+                    <div class="text-sm text-gray-800 mb-1 pr-6">${n.prediction}</div>
+                    <div class="text-[10px] text-gray-400">${timeAgo(n.signal_time)}</div>
+                    <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            `).join('') + `
+                <div class="p-3 text-center bg-gray-50">
+                    <button onclick="allRead()" class="text-xs text-blue-600 hover:underline">모두 읽음으로 처리</button>
+                </div>`;
         }
 
-        function renderList(container, noti) {
-            if (noti.length === 0) {
-                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
-                return;
-            }
-            
-            container.innerHTML = noti.map(n => {
-                // 1. 아이콘을 담을 변수 선언
-                let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
-
-                // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
-                return `
-                    <div class="notif-item ${n.is_read ? '' : 'unread'}" 
-                        onclick="readItem(${n.signal_no})" 
-                        style="cursor: pointer;">
-                        <div class="notif-icon">
-                            ${iconTag}
-                        </div>
-                        <div class="notif-content">
-                            <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
-                            <div class="notif-message">${n.prediction}</div>
-                            <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
-                        </div>
-                        <div class="notif-delete" 
-                            onclick="deleteItem(event, ${n.signal_no})" 
-                            style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
-                            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-                        </div>
-                    </div>
-                    `;               
-            }).join('')+`<div class="hover:cursor-pointer" style="padding: 5px; text-align: center; color: #9ca3af;" onclick=allRead()>
-                            모두읽음
-                        </div>`;
-            lucide.createIcons();
-        }
-
-        // 아이콘 매칭 함수
-        function getIcon(type) {
-            return 'user';
-        }
-
-        // 아이템 클릭 (읽음 처리 및 이동)
-        async function readItem(id) {
-            noti = noti.map(n => {
-                if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, is_read: 1 };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
-                }
-            });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
-            updateNotifUI();
-            location.href = 'signal_log.html';
-        }
-
-        // 아이템 삭제
-        async function deleteItem(e, id) {
-            e.stopPropagation();
-            noti = noti.map(n => {
-                if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, is_read: 1 };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
-                }
-            });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
-            updateNotifUI();
-        }
-
-        // 모두 읽음
-        async function allRead() {
-            noti = noti.map(n => ({...n, is_read: 1}));
-            await axios.get("/noti/read_all?id="+savedUserId);
-            updateNotifUI();
-        }
-
-        // 초기 실행
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchSignals();
-            lucide.createIcons();
-            axios.get("/session_out");
+        // 12. 초기 실행 및 실시간 폴링
+        document.addEventListener('DOMContentLoaded', async () => {
             updateNavbar();
-            updateNotifUI();
+            axios.get("/session_out");
+
+            await refreshAllData();
+
+            setInterval(async () => {
+                console.log("🔄 시그널 로그 실시간 동기화 중...");
+                await refreshAllData();
+            }, 30000);
+
+            // 네비바 하이라이트
+            const currentPath = window.location.pathname.split("/").pop() || "signal_log.html";
+            document.querySelectorAll('.nav-item').forEach(item => {
+                if (item.getAttribute('href').split("/").pop() === currentPath) {
+                    item.classList.add('bg-blue-50', 'text-blue-600');
+                }
+            });
+
+            // 드롭다운 토글 제어
+            const trigger = document.getElementById('notifTrigger');
+            const dropdown = document.getElementById('notifDropdown');
+            if (trigger && dropdown) {
+                trigger.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    dropdown.classList.toggle('hidden');
+                });
+                document.addEventListener('click', (e) => {
+                    if (!document.getElementById('notifContainer').contains(e.target)) {
+                        dropdown.classList.add('hidden');
+                    }
+                });
+            }
+            // 6. 아이콘 최종 렌더링
+            if (window.lucide) lucide.createIcons();
         });
     </script>
 </html>

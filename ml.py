@@ -8,6 +8,8 @@ import re
 import json
 import time
 import asyncio
+
+import config
 from utils import extract_keywords
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
@@ -60,16 +62,73 @@ es = Elasticsearch(
     request_timeout=30 # 타임아웃 방지
 )
 
+async def check_yesterday_existence(keywords):
+    """어제 날짜에 같은 키워드 조합의 기사가 있었는지 ES 조회"""
+    try:
+        from datetime import datetime, timedelta
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # 상위 키워드 2~3개만 사용하여 쿼리 (너무 많으면 안 잡힐 수 있음)
+        search_keywords = keywords[:2]
+
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"title": k}} for k in search_keywords
+                    ],
+                    "filter": [
+                        {"range": {"analyzed_at": {"gte": yesterday + "T00:00:00"}}}
+                    ]
+                }
+            }
+        }
+        res = await es.search(index="news_labeling", body=query, size=1)
+        return res['hits']['total']['value'] > 0
+    except Exception as e:
+        logger.error(f"Error checking yesterday news: {e}")
+        return False
+
+def clean_text(text):
+    """분석에 방해되는 광고 및 안내 문구 제거"""
+    # 1. 만화, 운세, 눈TV 등 불필요한 문구 제거
+
+    for pattern in Config.junk_patterns:
+        text = re.sub(pattern, "", text)
+    return text.strip()
+
+
+def clip_junk_after(text):
+    # 1. 텍스트가 없으면 그대로 반환 (에러 방지)
+    if not text: return ""
+    for d in Config.delimiters:
+        if d in text:
+            # 3. 기준 단어가 나오면 그 앞부분만 취함
+            text = text.split(d)[0]
+    return text.strip()
+
+def get_balanced_text(text, max_len=512):
+    """긴 본문에서 앞, 중간, 뒤를 골고루 추출해 512자 내외로 만듦"""
+    if not text or len(text) <= max_len:
+        return text
+
+    # 각 부분당 가져올 길이 (약 170자씩)
+    part_len = max_len // 3
+
+    first = text[:part_len]  # 기사 도입부
+    middle = text[len(text) // 2: len(text) // 2 + part_len]  # 기사 중간 (본론)
+    last = text[-part_len:]  # 기사 끝 (결론)
+
+    return first + " " + middle + " " + last
+
 # ==========================================
 # 2 분석 핵심 로직 (BERT, Z-Score, 제미나이)
 # ==========================================
 # 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
 # 라벨링 학습한 bert가 긍정/부정 판단 - (위에서 tokenizer 가져온 이후 점수 매김)
 def get_bert_score(analysis_text):
-    """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출"""
+    """모델이 조금이라도 한쪽으로 기울면 점수를 확실히 밀어주는 버전"""
     try:
-        # 토크나이저로 get_weighted_keyword_score 함수에서 생성한 analysis_text인
-        # bert에게 줄 요약문을 받아서 벡터화함
         inputs = tokenizer(
             analysis_text,
             return_tensors="pt",
@@ -77,19 +136,51 @@ def get_bert_score(analysis_text):
             padding=True,
             max_length=512
         ).to(device)
-        # 모델이 문맥(벡터화)을 보고 판단
+
         with torch.no_grad():
             outputs = bert_model(**inputs)
-        # 모델의 예측값을 확률(0~1 사이)로 변환
+
         probs = F.softmax(outputs.logits, dim=-1)
-        # 학습 라벨 순서에 맞춰 언패킹 (0:중립, 1:긍정, 2:부정)
-        neu, pos, neg = probs[0].tolist() # train_model.py에서 이 순서로 매김
-        # 긍정은 더하고(+), 부정은 빼서(-) -1.0 ~ 1.0 사이 점수 생성
-        # 중립(neu)은 점수에 영향을 주지 않으므로 계산에서 제외
-        return (pos * 1.0) + (neg * -1.0)
+        # 학습 라벨 순서: 0:중립, 1:긍정, 2:부정
+        neu, pos, neg = probs[0].tolist()
+
+        has_danger_word = False
+        is_safe_in_bert = False
+
+        # 리스크 단어 존재 여부 확인
+        for word, score in Config.DANGER_DICTIONARY.items():
+            if word in analysis_text:
+                if score < 0:  # 음수 단어가 하나라도 있으면 위험 감지
+                    has_danger_word = True
+                elif score > 0:  # 양수 단어가 하나라도 있으면 안전(방어) 감지
+                    is_safe_in_bert = True
+
+        # [수정 로직] 가장 높은 확률을 가진 라벨로 점수 확정
+        # 1. 긍정(pos)이 가장 높을 때 -> 확실한 플러스(+)
+                # 모델의 1차 판단
+        if pos > neu and pos > neg:
+            val = 0.85 if pos > 0.6 else 0.6
+
+            # [핵심 로직] 위험 단어가 있는데 "완화/지원" 같은 방어 단어가 없다면 긍정 차단
+            if has_danger_word and not is_safe_in_bert:
+                return -0.3
+            return val
+
+            # 2. 부정(neg)이 가장 높을 때
+        elif neg > neu and neg > pos:
+            return -0.85 if neg > 0.6 else -0.6
+
+            # 3. 중립이거나 혼전일 때
+        else:
+            val = (pos * 1.0) + (neg * -1.0)
+            # 중립 구간에서도 위험 단어만 있고 방어 단어가 없으면 점수 하향
+            if has_danger_word and not is_safe_in_bert and val > 0:
+                return -0.3
+            return val
+
     except Exception as e:
-        print(f"BERT 오류: {e}")
-        return 0.0
+        logger(f"BERT 오류: {e}")
+    return 0.0
 
 # 기사 라벨링 3 - [리스크 사전 라벨링]: 가중치 스코어링
 # 사전 기반 위험도 측정 및 문맥 추출 - (utils.py에서 extract_keywords함수를 한 이후 실행)
@@ -108,12 +199,15 @@ def get_weighted_keyword_score(title, content):
     for word, score in Config.DANGER_DICTIONARY.items():
         # [1] 제목 가중치 반영 (중요도 1.5배)
         if word in title:
-            dict_score += (score * 1.5)
+            # 리스크 단어(score < 0)가 제목에 있으면 더 강력하게 감점
+            title_weight = 2.0 if score < 0 else 1.2
+            dict_score += (score * title_weight)
 
         # [2] 본문 등장 횟수 반영 및 주변 문장 추출
         if word in content:
             count = content.count(word)
-            dict_score += (score * count)  # 많이 등장할수록 점수에 큰 영향
+            # 본문에 너무 많이 나와도 최대 감점폭을 제한 (보수적 운영)
+            dict_score += (score * min(count, 3))
 
             # [3] 키워드가 포함된 문장과 그 전후 문장 추출
             for i, sentence in enumerate(sentences):
@@ -126,24 +220,50 @@ def get_weighted_keyword_score(title, content):
     analysis_text = " ".join(list(relevant_sentences)) if relevant_sentences else content[:512]
 
     # 감성 점수 정규화 (-1.0 ~ 1.0)
-    final_dict_score = max(-1.0, min(1.0, dict_score))
+    final_dict_score = max(-1.0, min(0.5, dict_score))
 
-    return final_dict_score, analysis_text
+    return round(final_dict_score, 4), analysis_text
 
 
 # 제미나이 프롬프트
 async def get_ai_prediction_report(risk_level, title, keywords, scores):
     """Gemini AI 활용 리포트 생성"""
-    if risk_level != "심각":
-        main_kw = ", ".join(keywords[:2]) if keywords else "주요 경제 지표"
+    # ---------------------------------------------------------
+    # [임시 우회 모드] 등급별 고정 멘트 반환 (오후 5시 리셋 전까지 사용)
+    # ---------------------------------------------------------
+    if risk_level == "심각":
         return {
-            "prediction": f"✅ {main_kw} 상황이 안정적입니다. 시장이 곧 회복될 것 같아요.",
-            "reason": f"지금 {main_kw} 관련 뉴스나 수치들을 꼼꼼히 분석해 보니, 큰 문제 없이 정상 범위 안에 있어요. 당분간 급격한 위험은 없을 것으로 보이니 안심하셔도 좋습니다."
+            "prediction": f"[심각] {keywords[:2]}... 관련 중대한 리스크 감지",
+            "reason": f"위험 등급(심각) 및 지표 점수({scores['sent']})를 바탕으로 분석된 실시간 경보입니다. 즉각적인 대응 및 자산 보호 검토가 필요합니다."
         }
+    elif risk_level == "주의":
+        return {
+            "prediction": f"[주의] {keywords[:2]}... 시장 모니터링 강화 필요",
+            "reason": "일부 지표에서 불안정성이 포착되었습니다. 단기적인 변동성 확대 가능성이 있으니 관련 국가의 뉴스를 주의 깊게 살펴주시기 바랍니다."
+        }
+    else:  # "안정"인 경우
+        return {
+            "prediction": f"[안정] {keywords[:2]}... 시장 상황 양호",
+            "reason": "현재 수집된 데이터 분석 결과, 특이 리스크가 발견되지 않았습니다. 주요 지표들이 정상 범위 내에서 유지되고 있습니다."
+        }
+    # ---------------------------------------------------------
+    # 키워드 상위 2개를 뽑아 문장에 자연스럽게 삽입
+    kw_str = ", ".join(keywords[:2]) if keywords else "주요 지표"
+    subject = title[:20] + "..." if len(title) > 20 else title
 
+    if risk_lv == "주의":
+        return {
+            "prediction": f"⚠️ {subject} 이슈로 인한 시장 변동성 확대 및 심리 위축 예상",
+            "reason": f"현재 [{kw_str}] 등 리스크 요인이 관찰되고 있습니다. 시장의 변동성이 커질 수 있는 상태이므로, 관련 동향을 예의주시하며 투자 및 의사결정에 주의하시기 바랍니다."
+        }
+    elif risk_lv == "안정":
+        return {
+            "prediction": f"✅ {subject} 상황에도 불구하고 지표 안정세 및 완만한 흐름 전망",
+            "reason": f"분석 결과 [{kw_str}]를(을) 포함한 전반적인 시장 지표가 큰 위협 없이 안정적인 흐름을 보이고 있습니다. 당분간은 현재의 완만한 상태가 유지될 것으로 예상됩니다."
+        }
     prompt = f"""
-        [Role] 
-        데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고, 
+        [Role]
+        데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고,
         사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
 
         [Input Data]
@@ -166,23 +286,37 @@ async def get_ai_prediction_report(risk_level, title, keywords, scores):
         """
     for attempt in range(len(Config.GEMINI_API_KEYS)):
         try:
-            # [해결책 1] 요청을 보내기 전에 2~3초간 잠시 쉽니다.
-            # 이렇게 해야 무료 티어의 분당 호출 제한(RPM)을 피할 수 있어요.
-            await asyncio.sleep(4)
+            # 요청 전 간격을 무료 티어 권장 속도에 맞추기
+            await asyncio.sleep(5)
             client = Config.get_next_client()
             response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
             res_text = response.text.strip()
             json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
             return json.loads(json_match.group()) if json_match else json.loads(res_text)
+
         except Exception as e:
-            print(f"Gemini 키 교체 시도... ({e})")
-            # [해결책 2] 키를 교체할 때도 잠시 텀을 줍니다.
+            err_msg = str(e)
+
+            # [수정 2] 429(할당량 초과) 발생 시 로직 강화
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                # 구글이 요청한 대로 최소 30~40초는 쉬어줘야 IP 차단을 피합니다.
+                wait_time = 45
+                print(
+                    f"🚦 [Quota] 모든 키 소진 가능성. {wait_time}초 대기 후 키 교체... (현재 시도: {attempt + 1}/{len(Config.GEMINI_API_KEYS)})")
+                await asyncio.sleep(wait_time)
+                continue  # 다음 키로 시도
+
+            # 다른 일반적인 에러라면 짧게 쉬고 다음 키로
+            print(f"⚠️ Gemini 일반 에러: {err_msg}")
             await asyncio.sleep(2)
             continue
 
+    # 모든 키를 다 돌았는데도 실패했다면?
+    # 에러를 던져서 멈추게 하지 말고, '기본값'을 리턴해서 시스템을 살립니다.
+    print("🚨 [Critical] 모든 Gemini 키의 할당량이 소진되었습니다. 기본값으로 대체합니다.")
     return {
-        "prediction": "🚨 시장 리스크가 감지되었습니다. 실시간 분석이 지연되고 있습니다.",
-        "reason": "1. 현재 분석 요청이 일시적으로 폭주하고 있습니다.\\n2. 로컬 모델 점수상으로는 '심각' 단계이니 주의가 필요합니다.\\n3. 잠시 후 대시보드를 새로고침하여 상세 AI 리포트를 확인해주세요."
+        "prediction": f"분석 일시 지연 ({title[:20]}...)",
+        "reason": "AI 서비스 할당량 초과로 인해 상세 분석 리포트를 생성할 수 없습니다. 위험 등급 점수를 참고해 주세요."
     }
 
 
@@ -246,7 +380,7 @@ async def run_analysis():
     # [STEP 1] DB에서 최근 30일 지표 가져오기
     with get_db() as session:
         query = text(
-            "SELECT indicator_no, price FROM indicator_data WHERE gathering_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+            "SELECT indicator_no, price FROM indicator_data WHERE gathering_time >= DATE_SUB(NOW(), INTERVAL 14 DAY)")
         rows = session.execute(query).fetchall()
 
     if not rows:
@@ -275,27 +409,131 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 50}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 30}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
-
     if not docs:
         logger.info("✅ 처리할 새 뉴스 없음")
         return
 
+    # 분석 결과를 담을 리스트 생성
+    processed_results = []
     for doc in docs:
         _id = doc['_id']
         data = doc['_source']
 
+        # ----------------------------------------------------------
+        # 노이즈 기사 스킵 로직
+        # ----------------------------------------------------------
+        content = data.get('content', '')
+        title = data.get('title', '')
+
+        # 1. 본문이 너무 짧은 경우 (예: 100자 미만)
+        # 2. 제목에 '아침 신문 보기', '뉴스 요약' 등 분석 가치 없는 단어가 포함된 경우
+
+        if len(content) < 100 or any(kw in title for kw in Config.skip_keywords):
+            logger.info(f"⏩ [노이즈 스킵] 분석 가치 부족으로 건너뜀: {title[:20]}...")
+
+            # (중요) 스킵하더라도 처리는 완료된 것으로 표시해야 다음에 또 안 가져옵니다.
+            try:
+                es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            except Exception as e:
+                logger.error(f"❌ [스킵 처리 중 오류] ID {_id}: {e}")
+
+            continue  # 다음 기사로 바로 넘어감
+
         refined_keywords = utils.extract_keywords(data['title'], data['content'])
         refined_country = utils.extract_country(data['title'], data['content'])
 
-        # [1] 가중 점수 계산 및 분석용 문장 추출
+        # [1] 사전 가중 점수 계산
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
-        # [2] 추출된 문장을 AI(BERT)로 분석
-        ai_score = get_bert_score(target_text)
-        # [3] 최종 기사 점수 산출 (AI 0.7 : 키워드 0.3)
+
+        # [2] 텍스트 정제
+        cleaned_text = clean_text(target_text)
+        cleaned_text = clip_junk_after(cleaned_text)
+
+        # [강화된 스킵 로직] 내용이 너무 짧거나 노이즈인 경우 즉시 중단
+        # ----------------------------------------------------------
+        # 의미 있는 한글/영어 글자 수가 40자 미만이면 분석 가치 없음
+        stripped_text = cleaned_text.strip()
+        text_len = len(stripped_text)
+
+        if len(cleaned_text.strip()) < 50:
+            print(f"DEBUG: [길이 미달 스킵] {text_len}자 - 제목: {data.get('title')[:20]}...")
+            es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            continue
+
+        # 2. 특정 언론사 노이즈 문구 포함 시 스킵
+        noise_keywords = ["빅데이터 MSI", "헤럴드 리얼라이프", "주가시세표"]
+        noise_found = next((noise for noise in noise_keywords if noise in cleaned_text), None)
+        if noise_found:
+            print(f"DEBUG: [노이즈 단어 발견 스킵] '{noise_found}' 포함 - 제목: {data.get('title')[:20]}...")
+            # 여기도 처리 완료 표시 후 continue
+            es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            continue
+
+        # ----------------------------------------------------------
+        # 감점 폭주 방지 및 중복 제거 로직
+        # ----------------------------------------------------------
+        # 1. BERT 분석 먼저 실행 (기준점 확보)
+        balanced_text = get_balanced_text(cleaned_text)
+        ai_score = get_bert_score(balanced_text)
+
+        # 변수 초기화
+        penalty_score = 0
+        body_penalty_sum = 0
+        found_danger_title = False
+
+        # 2. 사전(DANGER_DICTIONARY) 순회 - 단 한 번만 실행하여 중복 감점 방지
+        for word, weight in Config.DANGER_DICTIONARY.items():
+            if weight < 0:  # 리스크(음수) 단어만 감점 후보
+                abs_w = abs(weight)
+
+                if word in data['title']:
+                    # 제목 감점: 가중치를 0.8배로 하향 (단어 중복 시 폭주 방지)
+                    penalty_score += (abs_w * 0.25)
+                    found_danger_title = True
+                elif word in cleaned_text:
+                    # 본문 감점: 가중치를 0.06배로 희석 (본문 노이즈 방지)
+                    body_penalty_sum += (abs_w * 0.01)
+
+        # 본문 페널티는 아무리 단어가 많아도 0.3점 이상 못 깎게 제한 (CAP 설정)
+        body_penalty_sum = min(0.1, body_penalty_sum)
+
+        # 4. 최종 합산 시 한 번 더 희석 (페널티의 영향력을 전체의 절반으로)
+        total_penalty = (penalty_score + body_penalty_sum) * 0.3
+        ai_score = ai_score - total_penalty
+
+        # 부정 방어
+        is_safe_news = any(
+            word in data.get('title', '') for word, weight in Config.DANGER_DICTIONARY.items() if weight > 0)
+        if is_safe_news:
+            # 1. 지원책 기사라면 기존 페널티의 20%만 적용 (80% 삭감)
+            ai_score = ai_score - (total_penalty * 0.2)
+
+            # 2. 보정 후에도 점수가 너무 낮으면(부정적이면) '중립' 근처로 강제 견인
+            # '고용위기' 단어 때문에 억울하게 깎인 점수를 복구해주는 단계입니다.
+            if ai_score < -0.1:
+                ai_score = -0.1
+        else:
+            # 일반 기사는 기존 방식 그대로 페널티 전체 적용
+            ai_score = ai_score - total_penalty
+
+        # -0.7 이하 하락 제동
+        if ai_score < -0.6:
+            excess_loss = ai_score - (-0.6)
+            ai_score = -0.6 + (excess_loss * 0.25)
+
+        # 5. 점수 가두기 (물리적 한계선)
+        ai_score = max(-1.0, min(1.0, ai_score))
+
+        # 제목이 정말 위험한데 AI가 너무 낙관적일 때만 '주의'급으로 조정
+        if found_danger_title and ai_score > 0.5:
+            ai_score = 0.3
+        # ----------------------------------------------------------
+
+        # [3] 최종 기사 점수 산출 (보정된 ai_score 사용)
         final_sent_score = round((ai_score * 0.7) + (keyword_score * 0.3), 4)
         # [4] AI 감성 점수를 0~1 범위로 먼저 변환
         normalized_ai_score = (final_sent_score + 1) / 2
@@ -303,20 +541,61 @@ async def run_analysis():
         ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
         ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
 
-        # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15), 합산 결과도 무조건 0~1 사이가 됨
-        total = (normalized_ai_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
+        # 1. 지표 순수 점수 계산
+        raw_indicator_score = (ex_score * 0.5) + (ma_score * 0.5)
 
-        if total <= 0.35:
-            risk_lv = "심각"
-        elif total <= 0.65:
-            risk_lv = "주의"
+
+        # [A] 기본 통합 점수 계산 (뉴스 비중 90%)
+        title = data.get('title', '')
+        url = data.get('url', '')
+
+        is_sports = any(kw in title for kw in Config.SPORTS_KEYWORDS)
+        is_economy_news = any(kw in title for kw in Config.economy_keywords) and not is_sports
+        is_politics = "sid=100" in url or any(kw in title for kw in Config.politics_kws)
+
+        # [B] 점수 통합 (질문하신 0.9 / 0.7 로직이 여기 합쳐졌습니다)
+        if is_sports:
+            # 스포츠는 지표 무시하고 AI 점수 기반 하한선 보정
+            total = max(0.65, (normalized_ai_score + 1) / 2)
         else:
-            risk_lv = "안정"
+            # 감성 점수가 극단적(0.25이하, 0.65이상)이면 뉴스 비중을 90%로 상향
+            if normalized_ai_score <= 0.25 or normalized_ai_score >= 0.65:
+                total = (normalized_ai_score * 0.9) + (raw_indicator_score * 0.1)
+            else:
+                total = (normalized_ai_score * 0.7) + (raw_indicator_score * 0.3)
 
-        # [STEP 4] Gemini 리포트
-        ai_rep = await get_ai_prediction_report(
-            risk_lv, data['title'], refined_keywords,
-            {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
+        # [C] 경제 기사 페널티
+        if is_economy_news and raw_indicator_score < 0.35:
+            total -= 0.2
+
+        # [D] 정치 및 반복 뉴스 보정
+        if is_politics:
+            total = min(1.0, total + 0.12)
+            if total <= 0.63 and await check_yesterday_existence(refined_keywords):
+                total += (0.65 - total) * 0.2
+
+        # [E] 최종 가두기 및 등급 판정
+        total = max(0.0, min(1.0, total))
+        risk_lv = "심각" if total <= 0.25 else "주의" if total <= 0.63 else "안정"
+        # ----------------------------------------------------------
+        # 제미나이 리포트
+        try:
+            ai_rep = await get_ai_prediction_report(
+                risk_lv, data['title'], refined_keywords,
+                {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
+
+        except Exception as e:
+            # 429 에러(할당량 초과)가 발생한 경우
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                logger.warning("🚦 [Gemini] 할당량 초과! 60초 대기 후 다음 기사로 넘어갑니다.")
+                await asyncio.sleep(60)  # 비동기 대기 (서버 안 멈춤)
+
+                # 대기 후 이번 기사는 기본값으로 채우고 넘어가기
+                ai_rep = {'prediction': '분석 대기 중 (할당량 초과)', 'reason': 'API 할당량 초과로 인한 리포트 생성 지연'}
+            else:
+                # 다른 에러일 경우 처리
+                logger.error(f"❌ [Gemini 에러] {e}")
+                ai_rep = {'prediction': '분석 실패', 'reason': 'AI 서비스 일시적 오류'}
 
         # 한국 표준시(KST)로 정확하게 설정
         kst = timezone(timedelta(hours=9))  # 한국은 UTC보다 9시간 빠름
@@ -333,6 +612,7 @@ async def run_analysis():
             "prediction": ai_rep['prediction'],
             "prediction_reason": ai_rep['reason'],
             "risk_level": risk_lv,
+            "debug_text": balanced_text, # 모델이 분석하는 본문
             "final_total_score": {
                 "total": round(total, 4),
                 "sentiment_score": round(final_sent_score, 4),
@@ -355,7 +635,7 @@ async def run_analysis():
         # [STEP 6] ES 저장 및 상태 업데이트
         try:
             # 1. 분석 완료 데이터 저장 (ES_3)
-            es.index(index="news_labeling", body=labelled_doc)
+            es.index(index="news_labeling1", id=_id, body=labelled_doc)
             # 2. 원본 데이터 처리 상태 업데이트 (ES_2)
             es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
             # 점수 산출 로그 추가
@@ -366,11 +646,24 @@ async def run_analysis():
                 f"   - 최종 위험 등급: [{risk_lv}]\n"
                 f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
             )
+
+            #  DB 저장을 위해 main.py로 보낼 배달 바구니에 담기
+            processed_results.append({
+                'level': risk_lv,
+                'pred': labelled_doc.get('prediction', '분석 완료'),  # Gemini 연동 전이면 기본값
+                'reason': labelled_doc.get('prediction_reason', '분석 근거 수집됨'),
+                'doc_id': _id,  # <--- 바로 이 녀석이 MariaDB의 document_no
+                'countries': [refined_country]
+            })
         except Exception as e:
             logger.error(f"❌ [저장 에러] ID {_id} 처리 중 오류 발생: {e}")
+
     # 모든 루프 종료 후 요약 로그
     logger.info(f"✅ 이번 배치 분석 완료 (총 {len(docs)}건 처리)")
     logger.info("--------------------------------------------------")
+
+    return processed_results # 루프가 다 끝나면 결과 리스트 반환
+
 
 
 def get_latest_signals(size=10):

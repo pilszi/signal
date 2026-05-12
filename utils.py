@@ -2,6 +2,8 @@ import re
 import html
 from collections import Counter
 import hashlib
+
+import logger
 from config import Config
 
 from konlpy.tag import Okt
@@ -40,57 +42,59 @@ def is_hanja(char):
 def find_target_country(title, content):
     """
     국가 추출 로직 최종 고도화 버전
-    1. 한국 우선 키워드 (강제 고정)
-    2. 제목(Title) 매칭 (즉시 반환)
-    3. 본문 가중치 매칭 (인트로 500자 중심)
-    4. 도시명 매칭 (Fallback)
+    순위: 한국 영향권 > 주요 엔티티 > 지정학 요충지 > 제목 국가명 > 본문 스코어링
     """
-    # [Step 1] 전처리: 노이즈 제거 (언론사, 기관명 등)
-    # 분석 시작 전에 노이즈를 밀어버려야 정확한 매칭이 가능합니다.
+    # [Step 1] 전처리: 노이즈 제거 및 텍스트 결합
     noise_pattern = "|".join(Config.COUNTRY_NOISE_INSTITUTIONS)
     clean_title = re.sub(noise_pattern, "", title)
     clean_content = re.sub(noise_pattern, "", content)
     clean_full_text = f"{clean_title} {clean_content}"
 
-    # [Step 2] 최우선 키워드 체크 (강제 고정 로직)
-    # 한국 키워드는 제목 위주, 미국 키워드는 전체 텍스트에서 찾습니다.
-    for k_word in Config.KOREA_PRIORITY_KEYWORDS:
-        if k_word in clean_title:
+    # [Step 2] 한국 실질 영향력 체크 (Impact First - 제목 위주)
+    # 중동 전쟁 기사라도 '국내 주유소', '원화 환율' 등이 제목에 있으면 Korea로 분류
+    for impact_word in Config.KOREA_PRIORITY_KEYWORDS:
+        if impact_word in clean_title:
             return "Korea"
 
-    for us_word in Config.US_PRIORITY_KEYWORDS:
-        if us_word.lower() in clean_full_text.lower():
-            return "United States"
+    # [Step 3] 주요 엔티티(기업/기관) 체크 (Subject First)
+    # 리스크의 주체(삼성전자, 현대차, 엔비디아 등)가 명확하면 해당 국가로 즉시 반환
+    for entity, country in Config.ENTITY_TO_COUNTRY_MAP.items():
+        if entity in clean_title:
+            return country
 
-    # [Step 3] 제목(Title) 기반 국가 매칭
-    # 본문을 읽기 전, 제목에 명시된 국가가 있다면 즉시 반환합니다.
+    # [Step 4] 지정학적 요충지 체크 (Region)
+    # "호르무즈", "홍해" 등 특정 국가로 묶기 힘든 분쟁 지역 처리
+    for region, country in Config.REGION_TO_COUNTRY_MAP.items():
+        if region in clean_title:
+            return country
+
+    # [Step 5] 제목(Title) 기반 국가명 직접 매칭
+    # 1. 한자(美, 中 등) 매칭
+    # 2. 한글 한 글자(한, 미 등) - '한-미' 등 특수기호/공백 포함 시만 인정
+    # 3. 일반 국가명 매칭
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-        # 한자(美, 中 등) 매칭
         if is_hanja(kr_name) and kr_name in clean_title:
             return en_name
 
-        # 한글 한 글자(한, 미 등) - '한-미', '한·미' 등 특수 기호나 공백이 붙은 경우만 인정
         if len(kr_name) == 1:
             if re.search(rf'{kr_name}[\s\-·\.]', clean_title):
                 return en_name
-
-        # 일반적인 두 글자 이상 단어
         elif kr_name in clean_title:
             return en_name
 
-    # [Step 4] 도시명 매칭 (제목 기반 Fallback)
-    # 제목에 "파리", "도쿄" 등이 있으면 본문 점수보다 우선합니다.
+    # [Step 6] 도시명 매칭 (제목 기반 Fallback)
     for city_name, en_name in Config.CITY_TO_COUNTRY_MAP.items():
         if city_name in clean_title:
             return en_name
 
-    # [Step 5] 본문 가중치 기반 언급 국가 산출
-    # 인트로(상단 500자) 가중치 3.0 적용
+    # [Step 7] 본문 가중치 기반 언급 국가 산출
+    # 제목에서 결정 안 된 경우, 인트로(상단 500자) 가중치 3.0을 주어 본문 분석
     intro = clean_content[:500]
     body = clean_content[500:]
     country_scores = {}
 
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
+        # 한자이거나 두 글자 이상인 국가명만 본문 스코어링에 포함 (노이즈 방지)
         if is_hanja(kr_name) or len(kr_name) >= 2:
             score = (intro.count(kr_name) * 3.0) + (body.count(kr_name) * 1.0)
             if score > 0:
@@ -100,7 +104,7 @@ def find_target_country(title, content):
     if country_scores:
         return max(country_scores, key=country_scores.get)
 
-    # [Step 6] 끝까지 매칭되지 않으면 Global
+    # [Step 8] 최종 매칭 실패 시 Global
     return "Global"
 
 
@@ -282,19 +286,21 @@ def extract_keywords(title, content, top_n=10):
         clean_content = re.sub(r'홈페이지\s?=\s?\S+', '', clean_content)
 
         # [2] 제목 가중치 부여: 제목에 나온 단어는 본문에 나온 것보다 중요하므로 제목을 2번 합칩니다.
-        combined_text = (title + " ") * 2 + clean_content
+        combined_text = (title + " ") * 2 + clean_content[:800]
 
-        # [3] 명사 추출: Okt를 사용하여 '제조업에', '충격에'에서 조사('에')를 자동으로 떼어냅니다.
-        raw_nouns = okt.nouns(combined_text)
+        # [3] 명사(nouns) 추출
+        raw_chunks = okt.nouns(combined_text)
 
         # [4] 필터링: 한 글자 단어 제외, Config에 설정한 불용어/구어체/노이즈 제거
-        refined_nouns = [
-            word for word in raw_nouns
-            if len(word) > 1 and word not in Config.TOTAL_FILTERS and not any(char.isdigit() for char in word)
+        refined_keywords = [
+            word for word in raw_chunks
+            if len(word) > 1
+               and word not in Config.TOTAL_FILTERS
+               and not any(char.isdigit() for char in word)
         ]
 
         # [5] 빈도수 계산
-        counts = Counter(refined_nouns)
+        counts = Counter(refined_keywords)
 
         # [6] 상위 키워드 추출 및 단어 교정 (러시 -> 러시아 등)
         final_keywords = []
@@ -312,10 +318,51 @@ def extract_keywords(title, content, top_n=10):
 
         # [7] Fallback: 만약 명사가 너무 적게 추출되었다면 제목에서 직접 단어 추출
         if len(final_keywords) < 3:
-            final_keywords = [w for w in title.split() if len(w) >= 2 and w not in Config.TOTAL_FILTERS][:5]
+            fallback_phrases = okt.phrases(title)
+            final_keywords = [w for w in fallback_phrases if len(w) >= 2 and w not in Config.TOTAL_FILTERS][:5]
 
         return final_keywords
 
     except Exception as e:
         print(f"⚠️ 키워드 추출 오류 발생: {e}")
         return []
+
+
+# 스케줄러 내부에 들어갈 저장 로직
+def save_analysis_result(cursor, connection, analysis_data):
+    """
+        분석 결과를 DB에 저장하는 함수
+        :param cursor: DB 커서 객체
+        :param connection: DB 연결 객체 (commit용)
+        :param analysis_data: 분석 결과 딕셔너리
+    """
+    # 1. 시그널 본체 저장 (signal_message)
+    cursor.execute("""
+        INSERT INTO signal_message (risk_level, prediction, prediction_reason, document_no)
+        VALUES (%s, %s, %s, %s)
+    """, (analysis_data['level'], analysis_data['pred'], analysis_data['reason'], analysis_data['doc_id']))
+
+    signal_no = cursor.lastrowid  # 방금 저장된 시그널 번호 추출
+
+    # 2. 국가 매핑 (signal_country)
+    extracted_countries = analysis_data['countries']  # 예: ['United States', 'Middle East']
+
+    for eng_name in extracted_countries:
+        # REGION_TO_COUNTRIES에 해당 키가 있는지 확인 (지역 연합인 경우)
+        target_list = Config.REGION_TO_COUNTRIES.get(eng_name, [eng_name])
+
+        for country_name in target_list:
+            # DB에서 해당 영문명의 country_no 조회
+            cursor.execute("SELECT country_no FROM country WHERE country_en_name = %s", (country_name,))
+            row = cursor.fetchone()
+            if row:
+                # 튜플의 첫 번째 값인 [0]을 가져옵니다.
+                country_no = row[0]
+                cursor.execute("INSERT INTO signal_country (signal_no, country_no) VALUES (%s, %s)",
+                               (signal_no, country_no))
+
+    # 3. 알림 생성 (alarm_log)
+    # 모든 멤버에게 알림을 보낼지, 특정 멤버에게 보낼지 결정하여 INSERT
+    cursor.execute("INSERT INTO alarm_log (signal_no, member_no) SELECT %s, member_no FROM member_info", (signal_no,))
+
+    connection.commit()
