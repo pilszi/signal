@@ -8,6 +8,8 @@ import re
 import json
 import time
 import asyncio
+
+import config
 from utils import extract_keywords
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
@@ -60,21 +62,47 @@ es = Elasticsearch(
     request_timeout=30 # 타임아웃 방지
 )
 
+
+def clean_text(text):
+    """분석에 방해되는 광고 및 안내 문구 제거"""
+    # 1. 만화, 운세, 눈TV 등 불필요한 문구 제거
+
+    for pattern in Config.junk_patterns:
+        text = re.sub(pattern, "", text)
+    return text.strip()
+
+
+def clip_junk_after(text):
+    # 1. 텍스트가 없으면 그대로 반환 (에러 방지)
+    if not text: return ""
+    for d in Config.delimiters:
+        if d in text:
+            # 3. 기준 단어가 나오면 그 앞부분만 취함
+            text = text.split(d)[0]
+    return text.strip()
+
+def get_balanced_text(text, max_len=512):
+    """긴 본문에서 앞, 중간, 뒤를 골고루 추출해 512자 내외로 만듦"""
+    if not text or len(text) <= max_len:
+        return text
+
+    # 각 부분당 가져올 길이 (약 170자씩)
+    part_len = max_len // 3
+
+    first = text[:part_len]  # 기사 도입부
+    middle = text[len(text) // 2: len(text) // 2 + part_len]  # 기사 중간 (본론)
+    last = text[-part_len:]  # 기사 끝 (결론)
+
+    return first + " " + middle + " " + last
+
 # ==========================================
 # 2 분석 핵심 로직 (BERT, Z-Score, 제미나이)
 # ==========================================
 # 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
 # 라벨링 학습한 bert가 긍정/부정 판단 - (위에서 tokenizer 가져온 이후 점수 매김)
 def get_bert_score(analysis_text):
-    """문맥 파악 후 -1.0 ~ 1.0 사이 점수 산출
-        새로운 라벨 시스템 적용:
-    - LABEL_0: 긍정+중립 (점수: +1.0)
-    - LABEL_1: 부정 1단계 (점수: -0.5)
-    - LABEL_2: 부정 2단계 (점수: -1.0)
-    """
+    """모델이 조금이라도 한쪽으로 기울면 점수를 확실히 밀어주는 버전"""
     try:
-        # 토크나이저로 get_weighted_keyword_score 함수에서 생성한 analysis_text인
-        # bert에게 줄 요약문을 받아서 벡터화함
         inputs = tokenizer(
             analysis_text,
             return_tensors="pt",
@@ -82,17 +110,40 @@ def get_bert_score(analysis_text):
             padding=True,
             max_length=512
         ).to(device)
-        # 모델이 문맥(벡터화)을 보고 판단
+
         with torch.no_grad():
             outputs = bert_model(**inputs)
-        # 모델의 예측값을 확률(0~1 사이)로 변환
+
         probs = F.softmax(outputs.logits, dim=-1)
-        # 학습 라벨 순서에 맞춰 언패킹 (0:긍정/중립, 1:부정1, 2:부정2)
-        pos_neu, neg_l1, neg_l2 = probs[0].tolist() # train_model.py에서 이 순서로 매김
-        # 점수 산출 로직:
-        # 긍정/중립은 가중치 1.0, 부정 1단계는 -0.5, 부정 2단계는 -1.0
-        sentiment_score = (pos_neu * 1.0) + (neg_l1 * -0.5) + (neg_l2 * -1.0)
-        return round(sentiment_score, 4)
+        # 학습 라벨 순서: 0:중립, 1:긍정, 2:부정
+        neu, pos, neg = probs[0].tolist()
+
+        # 리스크 단어 존재 여부 확인
+
+        has_risk = any(kw in analysis_text for kw in Config.critical_kws)
+
+        # [수정 로직] 가장 높은 확률을 가진 라벨로 점수 확정
+        # 1. 긍정(pos)이 가장 높을 때 -> 확실한 플러스(+)
+        if pos > neu and pos > neg:
+            # 긍정 확률이 60%를 넘으면 아주 높은 점수, 아니면 적당한 긍정 점수
+            val = 0.85 if pos > 0.6 else 0.6
+        # 하지만 리스크 단어가 문장에 있다면 긍정 점수 대신 -0.3점(주의) 리턴
+            if has_risk:
+                return -0.3
+            return val
+        # 2. 부정(neg)이 가장 높을 때 -> 확실한 마이너스(-)
+        elif neg > neu and neg > pos:
+            # 부정 확률이 60%를 넘으면 아주 낮은 점수, 아니면 적당한 부정 점수
+            return -0.85 if neg > 0.6 else -0.6
+
+        # 3. 중립(neu)이 가장 높거나 판단이 애매할 때만 기존 방식 사용
+        else:
+            val = (pos * 1.0) + (neg * -1.0)
+            # 중립 상황에서도 리스크 단어가 있고 점수가 양수라면 -0.3으로 보정
+            if has_risk and val > 0:
+                return -0.3
+            return val
+
     except Exception as e:
         print(f"BERT 오류: {e}")
         return 0.0
@@ -114,12 +165,15 @@ def get_weighted_keyword_score(title, content):
     for word, score in Config.DANGER_DICTIONARY.items():
         # [1] 제목 가중치 반영 (중요도 1.5배)
         if word in title:
-            dict_score += (score * 1.5)
+            # 리스크 단어(score < 0)가 제목에 있으면 더 강력하게 감점
+            title_weight = 2.0 if score < 0 else 1.2
+            dict_score += (score * title_weight)
 
         # [2] 본문 등장 횟수 반영 및 주변 문장 추출
         if word in content:
             count = content.count(word)
-            dict_score += (score * count)  # 많이 등장할수록 점수에 큰 영향
+            # 본문에 너무 많이 나와도 최대 감점폭을 제한 (보수적 운영)
+            dict_score += (score * min(count, 3))
 
             # [3] 키워드가 포함된 문장과 그 전후 문장 추출
             for i, sentence in enumerate(sentences):
@@ -132,96 +186,72 @@ def get_weighted_keyword_score(title, content):
     analysis_text = " ".join(list(relevant_sentences)) if relevant_sentences else content[:512]
 
     # 감성 점수 정규화 (-1.0 ~ 1.0)
-    final_dict_score = max(-1.0, min(1.0, dict_score))
+    final_dict_score = max(-1.0, min(0.5, dict_score))
 
-    return final_dict_score, analysis_text
+    return round(final_dict_score, 4), analysis_text
 
 
 # 제미나이 프롬프트
-async def get_ai_prediction_report(risk_level, title, keywords, scores):
-    """Gemini AI 활용 리포트 생성"""
-    # [Step 1] 가장 중요한 상위 2개 키워드 추출
-    # 이미 extract_keywords에서 중요도 순으로 정렬되어 오므로 앞의 2개를 가져옵니다.
-    if keywords and len(keywords) >= 2:
-        target_kw = f"'{keywords[0]}'와(과) '{keywords[1]}'"
-    elif keywords:
-        target_kw = f"'{keywords[0]}'"
-    else:
-        target_kw = "주요 경제 지표"
-
-    # [분기 1] 안정 단계: 확신과 안심 위주
-    if risk_level == "안정":
-        return {
-            "prediction": f"✅ {target_kw} 중심의 시장 흐름이 매우 견조합니다.",
-            "reason": (
-                f"현재 {target_kw} 데이터를 정밀 분석한 결과, 변동성이 낮고 정상 범위 내에서 건강하게 움직이고 있습니다.\n\n"
-                f"💡 시장의 신뢰도가 높아 돌발 변수에도 충분한 방어력이 확인되네요.\n"
-                f"지금은 큰 걱정 없이 리더님의 기존 계획에 속도를 내셔도 좋은 시기입니다."
-            )
-        }
-
-    # [분기 2] 주의 단계: 경계와 관찰 위주
-    elif risk_level == "주의":
-        return {
-            "prediction": f"⚠️ {target_kw} 관련 지표에서 미묘한 변동성이 감지되었습니다.",
-            "reason": (
-                f"최근 {target_kw} 소식들을 종합하면, 당장 큰 충격이 올 확률은 낮지만 시장의 눈치싸움이 치열해진 상태입니다.\n\n"
-                f"👀 작은 소식에도 민감하게 반응할 수 있는 구간이니 안심하기엔 이른 시점입니다.\n"
-                f"무리한 판단보다는 지표를 꾸준히 모니터링하며 호흡을 길게 가져가는 전략을 추천합니다."
-            )
-        }
-
-    prompt = f"""
-        [Role] 
-        데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고, 
-        사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
-
-        [Input Data]
-        - 기사 제목: {title}
-        - 핵심 키워드: {keywords}
-        - 위험 지수 및 지표: {scores}
-
-        [작성 가이드라인 - 필수 준수]
-        1. '비유(예: 황금알을 낳는 거위, 폭풍우 속의 배 등)'는 절대 사용하지 마십시오.
-        2. 기사 제목과 키워드를 바탕으로 '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함되도록 사실 위주로 요약하십시오.
-        3. 예측 근거는 논리적 인과관계(A로 인해 B가 발생하고, 결과적으로 C가 우려됨)로 작성하십시오.
-        4. 이 사건 이후 발생할 2차 파장이나 예상되는 변화를 예측하여 작성하십시오(Short-term/Mid-term).
-        5. 말투는 정중하고 둥근 대화체를 사용하되, 마지막에는 반드시 사용자가 참고할 만한 실질적인 대응 방안이나 관전 포인트를 추천하십시오.
-
-        [출력 형식 (JSON)]
-        {{
-          "prediction": "🚨 [기사 내 핵심 사건과 그로 인한 직접적인 리스크를 한 줄로 요약]",
-          "reason": "1. [사건의 핵심 내용]: 기사 속 주체와 행동, 구체적 수치를 바탕으로 현재 상황을 요약해 주세요.\\n2. [향후 변화 및 파급 효과]: 이 사건이 앞으로 시장이나 기업 가치에 미치는 구체적 영향을 예측해 주세요.\\n3. [행동 조언 및 대응]: 사용자가 앞으로 주의 깊게 살펴야 할 지표나 권장하는 대응 방안을 구체적으로 제안해 주세요."
-        }}
-        """
-    for attempt in range(len(Config.GEMINI_API_KEYS)):
-        try:
-            # [해결책 1] 요청을 보내기 전에 2~3초간 잠시 쉽니다.
-            # 이렇게 해야 무료 티어의 분당 호출 제한(RPM)을 피할 수 있어요.
-            await asyncio.sleep(4)
-            client = Config.get_next_client()
-            response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
-            res_text = response.text.strip()
-            json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
-            return json.loads(json_match.group()) if json_match else json.loads(res_text)
-        except Exception as e:
-            print(f"Gemini 키 교체 시도... ({e})")
-            # [해결책 2] 키를 교체할 때도 잠시 텀을 줍니다.
-            await asyncio.sleep(2)
-            continue
-
-    return {
-        "prediction": "🚨 시장 리스크가 감지되었습니다. 실시간 분석이 지연되고 있습니다.",
-        "reason": "1. 현재 분석 요청이 일시적으로 폭주하고 있습니다.\\n2. 로컬 모델 점수상으로는 '심각' 단계이니 주의가 필요합니다.\\n3. 잠시 후 대시보드를 새로고침하여 상세 AI 리포트를 확인해주세요."
-    }
-
+# async def get_ai_prediction_report(risk_level, title, keywords, scores):
+#     """Gemini AI 활용 리포트 생성"""
+#     if risk_level != "심각":
+#         main_kw = ", ".join(keywords[:2]) if keywords else "주요 경제 지표"
+#         return {
+#             "prediction": f"✅ {main_kw} 상황이 안정적입니다. 시장이 곧 회복될 것 같아요.",
+#             "reason": f"지금 {main_kw} 관련 뉴스나 수치들을 꼼꼼히 분석해 보니, 큰 문제 없이 정상 범위 안에 있어요. 당분간 급격한 위험은 없을 것으로 보이니 안심하셔도 좋습니다."
+#         }
+#
+#     prompt = f"""
+#         [Role]
+#         데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고,
+#         사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
+#
+#         [Input Data]
+#         - 기사 제목: {title}
+#         - 핵심 키워드: {keywords}
+#         - 위험 지수 및 지표: {scores}
+#
+#         [작성 가이드라인 - 필수 준수]
+#         1. '비유(예: 황금알을 낳는 거위, 폭풍우 속의 배 등)'는 절대 사용하지 마십시오.
+#         2. 기사 제목과 키워드를 바탕으로 '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함되도록 사실 위주로 요약하십시오.
+#         3. 예측 근거는 논리적 인과관계(A로 인해 B가 발생하고, 결과적으로 C가 우려됨)로 작성하십시오.
+#         4. 이 사건 이후 발생할 2차 파장이나 예상되는 변화를 예측하여 작성하십시오(Short-term/Mid-term).
+#         5. 말투는 정중하고 둥근 대화체를 사용하되, 마지막에는 반드시 사용자가 참고할 만한 실질적인 대응 방안이나 관전 포인트를 추천하십시오.
+#
+#         [출력 형식 (JSON)]
+#         {{
+#           "prediction": "🚨 [기사 내 핵심 사건과 그로 인한 직접적인 리스크를 한 줄로 요약]",
+#           "reason": "1. [사건의 핵심 내용]: 기사 속 주체와 행동, 구체적 수치를 바탕으로 현재 상황을 요약해 주세요.\\n2. [향후 변화 및 파급 효과]: 이 사건이 앞으로 시장이나 기업 가치에 미치는 구체적 영향을 예측해 주세요.\\n3. [행동 조언 및 대응]: 사용자가 앞으로 주의 깊게 살펴야 할 지표나 권장하는 대응 방안을 구체적으로 제안해 주세요."
+#         }}
+#         """
+#     for attempt in range(len(Config.GEMINI_API_KEYS)):
+#         try:
+#             # [해결책 1] 요청을 보내기 전에 2~3초간 잠시 쉽니다.
+#             # 이렇게 해야 무료 티어의 분당 호출 제한(RPM)을 피할 수 있어요.
+#             await asyncio.sleep(4)
+#             client = Config.get_next_client()
+#             response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
+#             res_text = response.text.strip()
+#             json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+#             return json.loads(json_match.group()) if json_match else json.loads(res_text)
+#         except Exception as e:
+#             print(f"Gemini 키 교체 시도... ({e})")
+#             # [해결책 2] 키를 교체할 때도 잠시 텀을 줍니다.
+#             await asyncio.sleep(2)
+#             continue
+#
+#     return {
+#         "prediction": "🚨 시장 리스크가 감지되었습니다. 실시간 분석이 지연되고 있습니다.",
+#         "reason": "1. 현재 분석 요청이 일시적으로 폭주하고 있습니다.\\n2. 로컬 모델 점수상으로는 '심각' 단계이니 주의가 필요합니다.\\n3. 잠시 후 대시보드를 새로고침하여 상세 AI 리포트를 확인해주세요."
+#     }
+#
 
 # ==========================================
 # 3. 지표 분석 로직 (Z-Score 산출)
 # ==========================================
 # 환율/원자재 라벨링 기준
 def calculate_indicator_score(today_return, return_history_30d):
-    if not return_history_30d: return 0.5
+    if not return_history_30d: return 1.0
     try:
         today_return = float(today_return)
         history_floats = [float(p) for p in return_history_30d]
@@ -229,7 +259,7 @@ def calculate_indicator_score(today_return, return_history_30d):
         mean_val = np.mean(history_floats)
         std_val = np.std(history_floats)
 
-        if std_val == 0: return 0.5
+        if std_val == 0: return 1.0
 
         z_score = (today_return - mean_val) / std_val
 
@@ -244,7 +274,7 @@ def calculate_indicator_score(today_return, return_history_30d):
 
     except Exception as e:
         logger.error(f"⚠️ 지표 점수 계산 중 타입 오류 발생: {e}")
-        return 0.5
+        return 1.0
 
 
 # (환율/원자재)그룹 점수를 각각 낼 때 사용
@@ -302,10 +332,10 @@ async def run_analysis():
         if len(prices) > 1:
             indicator_stats[i] = calculate_indicator_score(prices[-1], prices[:-1])
         else:
-            indicator_stats[i] = 0.5
+            indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 50}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 30}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -318,41 +348,171 @@ async def run_analysis():
         _id = doc['_id']
         data = doc['_source']
 
-        refined_keywords = utils.extract_keywords(data['title'], data['content'])
-        refined_country = utils.find_target_country(data['title'], data['content'])
+        # ----------------------------------------------------------
+        # [추가] 노이즈 기사 스킵 로직
+        # ----------------------------------------------------------
+        content = data.get('content', '')
+        title = data.get('title', '')
 
-        # [1] 키워드 점수 계산 및 본문 핵심 문장 추출 (이미 내부에서 [SEP] 처리됨)
+        # 1. 본문이 너무 짧은 경우 (예: 100자 미만)
+        # 2. 제목에 '아침 신문 보기', '뉴스 요약' 등 분석 가치 없는 단어가 포함된 경우
+
+        if len(content) < 100 or any(kw in title for kw in Config.skip_keywords):
+            logger.info(f"⏩ [노이즈 스킵] 분석 가치 부족으로 건너뜀: {title[:20]}...")
+
+            # (중요) 스킵하더라도 처리는 완료된 것으로 표시해야 다음에 또 안 가져옵니다.
+            try:
+                es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            except Exception as e:
+                logger.error(f"❌ [스킵 처리 중 오류] ID {_id}: {e}")
+
+            continue  # 다음 기사로 바로 넘어감
+
+        refined_keywords = utils.extract_keywords(data['title'], data['content'])
+        refined_country = utils.extract_country(data['title'], data['content'])
+
+        # [1] 사전 가중 점수 계산 (기존 로직)
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
 
-        # [2] [핵심 수정] 제목과 추출된 문장을 [SEP]로 결합하여 모델 학습 환경과 일치시킴
-        # 모델은 "제목 [SEP] 본문" 구조에서 가장 높은 성능을 냅니다.
-        final_bert_input = f"{data['title']} [SEP] {target_text}"
+        # [2] 텍스트 정제
+        cleaned_text = clean_text(target_text)
+        cleaned_text = clip_junk_after(cleaned_text)
 
-        # [3] 최종 결합된 텍스트로 BERT 분석 수행
-        ai_score = get_bert_score(final_bert_input)
+        # [강화된 스킵 로직] 내용이 너무 짧거나 노이즈인 경우 즉시 중단
+        # ----------------------------------------------------------
+        # 의미 있는 한글/영어 글자 수가 40자 미만이면 분석 가치 없음
+        stripped_text = cleaned_text.strip()
+        text_len = len(stripped_text)
 
-        # [4] 최종 점수 합산 및 리스크 등급 판정
+        if len(cleaned_text.strip()) < 50:
+            print(f"DEBUG: [길이 미달 스킵] {text_len}자 - 제목: {data.get('title')[:20]}...")
+            es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            continue
+
+        # 2. 특정 언론사 노이즈 문구 포함 시 스킵
+        noise_keywords = ["빅데이터 MSI", "헤럴드 리얼라이프", "주가시세표"]
+        noise_found = next((noise for noise in noise_keywords if noise in cleaned_text), None)
+        if noise_found:
+            print(f"DEBUG: [노이즈 단어 발견 스킵] '{noise_found}' 포함 - 제목: {data.get('title')[:20]}...")
+            # 여기도 처리 완료 표시 후 continue
+            es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            continue
+
+        # ----------------------------------------------------------
+        # [수정 섹션] 감점 폭주 방지 및 중복 제거 로직
+        # ----------------------------------------------------------
+        # 1. BERT 분석 먼저 실행 (기준점 확보)
+        balanced_text = get_balanced_text(cleaned_text)
+        ai_score = get_bert_score(balanced_text)
+
+        # 변수 초기화
+        penalty_score = 0
+        body_penalty_sum = 0
+        found_danger_title = False
+
+        # 2. 사전(DANGER_DICTIONARY) 순회 - 단 한 번만 실행하여 중복 감점 방지
+        for word, weight in Config.DANGER_DICTIONARY.items():
+            if weight < 0:  # 리스크(음수) 단어만 감점 후보
+                abs_w = abs(weight)
+
+                if word in data['title']:
+                    # 제목 감점: 가중치를 0.8배로 하향 (단어 중복 시 폭주 방지)
+                    penalty_score += (abs_w * 0.25)
+                    found_danger_title = True
+                elif word in cleaned_text:
+                    # 본문 감점: 가중치를 0.06배로 희석 (본문 노이즈 방지)
+                    body_penalty_sum += (abs_w * 0.01)
+
+        # [핵심] 본문 페널티는 아무리 단어가 많아도 0.3점 이상 못 깎게 제한 (CAP 설정)
+        body_penalty_sum = min(0.1, body_penalty_sum)
+
+        # 4. 최종 합산 시 한 번 더 희석 (페널티의 영향력을 전체의 절반으로)
+        total_penalty = (penalty_score + body_penalty_sum) * 0.3
+        ai_score = ai_score - total_penalty
+
+        # 부정 방어
+        is_safe_news = any(kw in data.get('title', '') for kw in Config.safe_keywords)
+
+        if is_safe_news:
+            # 1. 지원책 기사라면 기존 페널티의 20%만 적용 (80% 삭감)
+            ai_score = ai_score - (total_penalty * 0.2)
+
+            # 2. 보정 후에도 점수가 너무 낮으면(부정적이면) '중립' 근처로 강제 견인
+            # '고용위기' 단어 때문에 억울하게 깎인 점수를 복구해주는 단계입니다.
+            if ai_score < -0.1:
+                ai_score = -0.1
+        else:
+            # 일반 기사는 기존 방식 그대로 페널티 전체 적용
+            ai_score = ai_score - total_penalty
+
+        # -0.7 이하 하락 제동
+        if ai_score < -0.6:
+            excess_loss = ai_score - (-0.6)
+            ai_score = -0.6 + (excess_loss * 0.25)
+
+        # 5. 점수 가두기 (물리적 한계선)
+        ai_score = max(-1.0, min(1.0, ai_score))
+
+        # [보정] 제목이 정말 위험한데 AI가 너무 낙관적일 때만 '주의'급으로 조정
+        if found_danger_title and ai_score > 0.5:
+            ai_score = 0.3
+        # ----------------------------------------------------------
+
+        # [3] 최종 기사 점수 산출 (보정된 ai_score 사용)
         final_sent_score = round((ai_score * 0.7) + (keyword_score * 0.3), 4)
-        # [5] AI 감성 점수를 0~1 범위로 먼저 변환
+        # [4] AI 감성 점수를 0~1 범위로 먼저 변환
         normalized_ai_score = (final_sent_score + 1) / 2
-        # [6] 지표 점수 (Z-Score 활용)
+        # [5] 지표 점수 (Z-Score 활용)
         ex_score = aggregate_indicator([indicator_stats.get(i) for i in range(1, 5)])  # 환율
         ma_score = aggregate_indicator([indicator_stats.get(i) for i in range(5, 12)])  # 원자재
 
-        # [5] 최종 가중치 합산 (0.5 : 0.35 : 0.15), 합산 결과도 무조건 0~1 사이가 됨
-        total = (normalized_ai_score * 0.5) + (ex_score * 0.35) + (ma_score * 0.15)
+        # 1. 지표 순수 점수 계산
+        raw_indicator_score = (ex_score * 0.5) + (ma_score * 0.5)
 
-        if total <= 0.4:
+
+        # [A] 기본 통합 점수 계산 (뉴스 비중 90%)
+        if normalized_ai_score >= 0.45:
+            total = (normalized_ai_score * 0.9) + (raw_indicator_score * 0.1)
+        else:
+            total = (normalized_ai_score * 0.7) + (raw_indicator_score * 0.3)
+
+        # [B] 경제 기사 여부 판단 (패널티 대상 선정)
+        economy_keywords = ['반도체', '수출', '금리', '환율', '무역', '기업', '산업', '증시', '채권', '금융', '통제']
+        is_economy_news = any(kw in data.get('title', '') for kw in economy_keywords) or \
+                          any(kw in refined_keywords for kw in economy_keywords)
+
+        # [C] 지표 위기 시 조건부 패널티
+        if raw_indicator_score < 0.35:
+            if is_economy_news:
+                total -= 0.2  # 경제 기사는 크게 감점
+            else:
+                total -= 0.05  # 일반 기사는 살짝 감점
+
+        # [D] 정치 기사 보정
+        is_politics = False
+        if "sid=100" in data.get('url', '') or any(kw in data['title'] for kw in Config.politics_kws):
+            is_politics = True
+
+        if is_politics:
+            total = min(1.0, total + 0.12)
+
+        # [E] 최종 점수 확정 및 '진짜' 등급 판정 (모든 기사가 여기를 통과해야 함)
+        total = max(0.0, min(1.0, total))
+
+        if total <= 0.45:
             risk_lv = "심각"
-        elif total <= 0.7:
+        elif total <= 0.65:
             risk_lv = "주의"
         else:
             risk_lv = "안정"
+        # ----------------------------------------------------------
 
-        # [STEP 4] Gemini 리포트
-        ai_rep = await get_ai_prediction_report(
-            risk_lv, data['title'], refined_keywords,
-            {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
+        # 이제 아래에 있는 [STEP 5] 결과 데이터 구성으로 이어짐
+
+        # # [STEP 4] Gemini 리포트
+        # ai_rep = await get_ai_prediction_report(
+        #     risk_lv, data['title'], refined_keywords,
+        #     {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
 
         # 한국 표준시(KST)로 정확하게 설정
         kst = timezone(timedelta(hours=9))  # 한국은 UTC보다 9시간 빠름
@@ -366,22 +526,23 @@ async def run_analysis():
             "url": data.get('url', ''),
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
-            "prediction": ai_rep['prediction'],
-            "prediction_reason": ai_rep['reason'],
+            # "prediction": ai_rep['prediction'],
+            # "prediction_reason": ai_rep['reason'],
             "risk_level": risk_lv,
+            "debug_text": balanced_text, # 모델이 분석하는 본문
             "final_total_score": {
                 "total": round(total, 4),
                 "sentiment_score": round(final_sent_score, 4),
                 "exchange_score": float(ex_score),
                 "exchange_details": exchange_prices,
                 "raw_material_score": {
-                    "gold": float(indicator_stats.get(5, 0.5)),
-                    "silver": float(indicator_stats.get(6, 0.5)),
-                    "copper": float(indicator_stats.get(7, 0.5)),
-                    "wti_oil": float(indicator_stats.get(8, 0.5)),
-                    "bc_oil": float(indicator_stats.get(9, 0.5)),
-                    "dc_oil": float(indicator_stats.get(10, 0.5)),
-                    "ng": float(indicator_stats.get(11, 0.5))
+                    "gold": float(indicator_stats.get(5, 1.0)),
+                    "silver": float(indicator_stats.get(6, 1.0)),
+                    "copper": float(indicator_stats.get(7, 1.0)),
+                    "wti_oil": float(indicator_stats.get(8, 1.0)),
+                    "bc_oil": float(indicator_stats.get(9, 1.0)),
+                    "dc_oil": float(indicator_stats.get(10, 1.0)),
+                    "ng": float(indicator_stats.get(11, 1.0))
                 }
             },
             "published_date": data.get('published_date'),
@@ -398,9 +559,7 @@ async def run_analysis():
             logger.info(
                 f"🎯 [분석 완료] {data['title'][:20]}...\n"
                 f"   - AI 감성 점수: {final_sent_score}\n"
-                f"   - 환율 지표 점수(EX): {ex_score}\n"
-                f"   - 원자재 지표 점수(MA): {ma_score}\n"
-                f"   - 최종 통합 점수: {round(total, 4)}\n"
+                f"   - 지표 합산 점수: {round(total, 4)}\n"
                 f"   - 최종 위험 등급: [{risk_lv}]\n"
                 f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
             )
