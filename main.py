@@ -135,6 +135,7 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
                 id='ml_analysis',
                 max_instances=1,  # 추가
                 replace_existing=True,  # 추가
+
             )
 
 
@@ -430,13 +431,13 @@ def country():
                     COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
                     COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
                     -- 바로 점수 계산까지!
-                    SUM(CASE 
-                        WHEN t2.risk_level = '안정' THEN 10 
-                        WHEN t2.risk_level = '주의' THEN 30 
-                        WHEN t2.risk_level = '위기' THEN 100 
-                        ELSE 0 
+                    SUM(CASE
+                        WHEN t2.risk_level = '안정' THEN 10
+                        WHEN t2.risk_level = '주의' THEN 30
+                        WHEN t2.risk_level = '위기' THEN 100
+                        ELSE 0
                     END) AS total_score
-                FROM signal_country t1 
+                FROM signal_country t1
                     JOIN signal_message t2 ON t1.signal_no = t2.signal_no
                         JOIN country t3 ON t3.country_no = t1.country_no
                         WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
@@ -449,6 +450,7 @@ def country():
                 "en_name": country["en_name"],
                 "total_score": country["total_score"]
             }
+            signal_country.append(con)
     return {"country_signal": signal_country}
 
 
@@ -497,49 +499,46 @@ def custom_news(id:str):
             read_url.append(key["news_url"])
 
         keywords = list(set(keyword))
-        print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
+        # print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
 
-        # 키워드가 들어간 뉴스기사 조회
-        """ 추후 es_3 에서 데이터 가져올 때 사용할 쿼리"""
         body = {
             "query": {
                 "bool": {
                     "must": [
                         {
-                            "terms": {
-                                "extracted_keywords": keyword  # 특정 키워드 조건
+                            "bool": {
+                                "should": [
+                                    # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
+                                    {"term": {"extracted_keywords": {"value": kw, "_name": kw}}}
+                                    for kw in keyword
+                                ],
+                                "minimum_should_match": 1  # terms 쿼리처럼 최소 하나는 매치되어야 함
                             }
                         }
                     ],
                     "filter": [
                         {
                             "range": {
-                                "analyzed_at": {
-                                    "gte": "now-24h",  # 현재(now) 기준 24시간 전(24h) 이상(gte)
-                                    "lt": "now"  # 현재 미만(lt)
+                                "published_date": {
+                                    "gte": "now-24h",
+                                    "lt": "now"
                                 }
                             }
                         }
                     ]
                 }
             },
-            "sort": [
-                {"published_date": "desc"} # 최신 기사가 먼저 나오도록 정렬
-            ],
+            "sort": [{"published_date": "desc"}],
             "size": 100
         }
+
         res = es.search(index="news_labeling", body=body)
-        print(f"검색 된 기사 갯수 = {res['hits']['total']['value']}")
+        logger.info(f'{id} 의 관심 뉴스 갯수 = {res['hits']['total']['value']}')
         custom_news = []
         for news in res['hits']['hits']:
             # print(news["_source"])
-            source_keywords = news["_source"].get("extracted_keyword", [])
-            matched_list = list(set(source_keywords) & set(keyword))
-            display_keyword = ''
-            if matched_list:
-                display_keyword = matched_list[0]
-            else:
-                display_keyword = '리스크'
+            display_keyword = news.get('matched_queries', [])
+            logger.info(f'매칭 키워드 = {display_keyword}')
             _news = {
                 'title': news["_source"]["title"],
                 'url': news["_source"]["url"],
@@ -547,10 +546,12 @@ def custom_news(id:str):
                 'published_date': news["_source"]["published_date"],
                 'press_name': news["_source"]["press_name"],
                 'keyword': display_keyword,
+                'risk_score': news["_source"]["final_total_score"]["total"],
+                'risk_level': news["_source"]["risk_level"],
                 'is_read': news["_source"]["url"] in read_url
             }
             custom_news.append(_news)
-        print(f'custom_news 갯수 = {len(custom_news)}')
+        logger.info(f'{id} 의 맞춤형 뉴스 {len(custom_news)}개')
     return {"keyword": keywords, "total_val": len(custom_news), "news": custom_news}
 
 
@@ -571,7 +572,7 @@ def custom_news(id:str):
 @app.get("/signal_log")
 def signal_log(id:str):
     """ 시그널로그 페이지 요청 """
-    logger.info(f'==={id}===')
+    # logger.info(f'==={id}===')
 
     with get_db() as db:
         # 1. id에 맞는 관심키워드 조회(db 에서 키워드 조회)
@@ -591,26 +592,24 @@ def signal_log(id:str):
 
         logger.info(f'{id} 의 관심키워드 = {keywords}')
         # 2. 키워드에 맞는 기사 조회(es 에서 _id 조회)
-        should_key = []
-        for key in keywords:
-            should_key.append(
-                {
-                    "match": {
-                        "extracted_keywords": {
-                            "query": key,
-                            "_name": key
-                        }
-                    }
-                }
-            )
-
         body = {
             "query": {
                 "bool": {
-                    "should": should_key,
-                    "minimum_should_match": 1
+                    "must": [
+                        {
+                            "bool": {
+                                "should": [
+                                    {"term": {"extracted_keywords": {"value": key, "_name": key}}}
+                                    for key in keywords  # 리스트 컴프리헨션 적용
+                                ],
+                                "minimum_should_match": 1
+                            }
+                        }
+                    ]
                 }
-            }
+            },
+            "sort": [{"analyzed_at": "desc"}],
+            "size": 30
         }
         es_res = es.search(index="news_labeling", body=body)
         logger.info(f'관심키워드에 맞는 뉴스기사 = {len(es_res["hits"]["hits"])}')
@@ -634,32 +633,6 @@ def signal_log(id:str):
 
         logger.info(f'키워드에 해당하는 문서 = {len(doc_no)}')
 
-        # # 3. _id 에 해당하는 signal_no 조회(DB)
-        # sql = sqlalchemy.text("""
-        #          SELECT
-        #              risk_level
-        #              ,signal_time
-        #              ,prediction
-        #              ,prediction_reason
-        #          FROM signal_message
-        #              WHERE document_no = :doc_no
-        #  """)
-        # # DB에서 데이터를 가져올 경우 사용
-        # # sig_doc = []
-        # # for doc in doc_no:
-        # #     db_res = db.execute(sql, {"doc_no": doc["id"]}).mappings().fetchone()
-        # #     logger.info(f'--------')
-        # #     if db_res:
-        # #         d = {
-        # #             "risk_level": db_res["risk_level"],
-        # #             "signal_time": db_res["signal_time"],
-        # #             "prediction": db_res["prediction"],
-        # #             "prediction_reason": db_res["prediction_reason"],
-        # #             "url": doc["url"],
-        # #             "match_keyword": doc["match_keyword"]
-        # #         }
-        # #         sig_doc.append(d)
-        # # logger.info(f'맞춤 signal_log = {len(sig_doc)} 개')
     return {"data": doc_no}
 
 

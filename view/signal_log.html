@@ -29,7 +29,7 @@
                 display: inline-block;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             }
-        .notif-trigger {
+            .notif-trigger {
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -159,8 +159,7 @@
                 padding: 24px;
                 border-radius: 16px;
                 margin-bottom: 16px;
-                white-space: pre-wrap;
-                line-height: 1.6;
+                line-height: 1.5;
                 transition: all 0.3s ease;
                 box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
             }
@@ -226,10 +225,10 @@
 
             <div id="filter-container" class="flex items-center gap-3 mb-6 flex-wrap">
                 <i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>
-                <button onclick="handleLevelFilter(null)" class="filter-btn px-4 py-2 rounded-lg bg-gray-900 text-white">전체</button>
-                <button onclick="handleLevelFilter('심각')" class="filter-btn px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">3단계 (심각)</button>
-                <button onclick="handleLevelFilter('주의')" class="filter-btn px-4 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100">2단계 (주의)</button>
-                <button onclick="handleLevelFilter('안정')" class="filter-btn px-4 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100">1단계 (안정)</button>
+                <button onclick="handleLevelFilter(null)" class="filter-btn active px-4 py-2 rounded-lg bg-gray-600 text-white" data-level="all">전체</button>
+                <button onclick="handleLevelFilter(3)" class="filter-btn px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" data-level="3">3단계 (심각)</button>
+                <button onclick="handleLevelFilter(2)" class="filter-btn px-4 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100" data-level="2">2단계 (주의)</button>
+                <button onclick="handleLevelFilter(1)" class="filter-btn px-4 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100" data-level="1">1단계 (안정)</button>
             </div>
 
             <div class="grid lg:grid-cols-4 gap-8">
@@ -282,12 +281,22 @@
 
         // 3. 필터링 및 메인 리스트 렌더링
         function applyFilterAndRender() {
-            filteredSignals = selectedLevel
-                ? allSignals.filter(s => s.risk_level === selectedLevel)
-                : allSignals;
+            // 필터링
+            const levelMap = {
+                1: "안정",
+                2: "주의",
+                3: "심각"
+            };
 
-            // 최신순 정렬 (데이터 필드명 확인: signal_time 또는 analyzed_at)
-            filteredSignals.sort((a, b) => new Date(b.signal_time || b.analyzed_at) - new Date(a.signal_time || a.analyzed_at));
+            const targetLevelName = levelMap[selectedLevel];
+            if (!selectedLevel){
+                filteredSignals = [...allSignals];
+            } else {
+                filteredSignals = allSignals.filter(s => s.risk_level === targetLevelName);
+            }
+
+            // 최신순 정렬
+            filteredSignals.sort((a, b) => new Date(b.signal_time) - new Date(a.signal_time));
 
             renderSignalList();
             renderPagination();
@@ -314,25 +323,35 @@
                 return;
             }
 
-            listContainer.innerHTML = currentSignals.map(signal => `
-                <div class="report-card ${getRiskClass(signal.risk_level)}">
-                    <div class="flex justify-between items-start mb-4">
-                        <span class="px-3 py-1 rounded-full text-xs font-bold bg-white/50 border border-current">
-                            ${signal.risk_level} 단계 시그널
-                        </span>
-                        <span class="text-xs opacity-70 font-medium">${signal.signal_time ? signal.signal_time.split('T')[0] : '날짜 미상'}</span>
+            listContainer.innerHTML = currentSignals.map(signal => {
+                // 리스크 레벨에 따른 클래스 결정 (getRiskClass 함수 활용)
+                const riskClass = getRiskClass(signal.risk_level);
+                // 날짜 안전하게 추출
+                // const displayDate = signal.signal_time ? signal.signal_time.split('T')[0] : '날짜 미상';
+                // timeAgo(시간) 사용하여 signal 분석이 몇분/ 몇시간/ 몇일 전 으로 표기
+                return `
+                    <div class="report-card ${riskClass} p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-bold bg-white/50 border border-current">
+                                ${signal.risk_level} 단계 시그널
+                            </span>
+                            <span class="text-center text-xs opacity-70 font-medium">${timeAgo(signal.signal_time)}</span>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-1">상황 요약</p>
+                            <p class="text-xl font-bold leading-snug">${signal.prediction || '세부 정보가 없습니다.'}</p>
+                        </div>
+
+                        <div class="border-t border-current/10 pt-3">
+                            <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-1">데이터 근거 및 전략적 분석</p>
+                            <p class="text-base font-medium leading-relaxed">${signal.prediction_reason || '분석 데이터가 존재하지 않습니다.'}</p>
+                        </div>
                     </div>
-                    <div class="mb-5">
-                        <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-1">상황 요약</p>
-                        <p class="text-xl font-bold leading-snug">${signal.prediction || '정보 없음'}</p>
-                    </div>
-                    <div class="border-t border-current/10 pt-4">
-                        <p class="text-xs font-bold uppercase tracking-wider opacity-60 mb-2">전략적 분석</p>
-                        <p class="text-base font-medium leading-relaxed">${signal.prediction_reason || '분석 데이터 없음'}</p>
-                    </div>
-                </div>
-            `).join('');
-            if (window.lucide) lucide.createIcons();
+                `;
+            }).join('');
+
+            if (window.lucide) lucide.createIcons(); // 아이콘 새로고침
         }
 
         // 6. 실시간 사이드바 렌더링
@@ -374,11 +393,13 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 8. 알림 상호작용 기능 (추가된 부분)
-        async function readItem(id) {
-            noti = noti.map(n => {
-                if (n.signal_no === id) return { ...n, is_read: 1 };
-                return n;
+        function handleLevelFilter(level) {
+            selectedLevel = level;
+            currentPage = 1;
+            
+            // 버튼 스타일 업데이트 (선택 사항)
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.replace('bg-gray-300', 'bg-gray-900'); // 단순 예시
             });
             await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
             updateNotifUI_Static();

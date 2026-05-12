@@ -495,8 +495,8 @@
 
                     // 요청하신 점수 기준 로직
                     if (score >= 300) {
-                        visualValue = 3; // 빨간색 (위기)
-                        level = "위기";
+                        visualValue = 3; // 빨간색 (심각)
+                        level = "심각";
                     } else if (score >= 200) {
                         visualValue = 2; // 노란색 (주의)
                         level = "주의";
@@ -509,7 +509,7 @@
                         name: item.en_name,    // 국가 영문명
                         value: visualValue,    // 차트 색상 결정용 (1, 2, 3)
                         total_score: score,    // 실제 점수
-                        level: level           // 가공된 등급명 (위기, 주의, 안정)
+                        level: level           // 가공된 등급명 (심각, 주의, 안정)
                     };
                 });
 
@@ -522,6 +522,7 @@
                 // 지도가 등록된 상태일 때만 히트맵 갱신
                 if (isMapRegistered) updateHeatmap();
 
+                // console.log('Heatmap Data:', heatmapData);
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
                 }
@@ -854,7 +855,7 @@
                     let scoreColor = "text-green-300";
                     let badgeIcon = "✅";
 
-                    if (item.level === "위기") {
+                    if (item.level === "심각") {
                         scoreColor = "text-red-400";
                         badgeIcon = "🔥";
                     } else if (item.level === "주의") {
@@ -963,6 +964,7 @@
 
             // UI 요소들도 초기값으로 변경
             document.getElementById('search-input').value = '';
+            document.getElementById('date-display').innerText = "날짜를 선택해주세요";
 
             applyFilters(); // 다시 전체 렌더링
         }
@@ -1067,10 +1069,10 @@
 
                 // 날짜 기준 정렬
                 return new Date(b.published_date) - new Date(a.published_date);
-
-                renderPagination()
+                
             });
-
+            renderPagination()
+            
             // 4. HTML 생성 및 출력
             if (sorted.length === 0) {
                 grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-500">해당하는 뉴스가 없습니다.</div>`;
