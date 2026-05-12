@@ -62,6 +62,32 @@ es = Elasticsearch(
     request_timeout=30 # 타임아웃 방지
 )
 
+async def check_yesterday_existence(keywords):
+    """어제 날짜에 같은 키워드 조합의 기사가 있었는지 ES 조회"""
+    try:
+        from datetime import datetime, timedelta
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # 상위 키워드 2~3개만 사용하여 쿼리 (너무 많으면 안 잡힐 수 있음)
+        search_keywords = keywords[:2]
+
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"title": k}} for k in search_keywords
+                    ],
+                    "filter": [
+                        {"range": {"analyzed_at": {"gte": yesterday + "T00:00:00"}}}
+                    ]
+                }
+            }
+        }
+        res = await es.search(index="news_labeling", body=query, size=1)
+        return res['hits']['total']['value'] > 0
+    except Exception as e:
+        logger.error(f"Error checking yesterday news: {e}")
+        return False
 
 def clean_text(text):
     """분석에 방해되는 광고 및 안내 문구 제거"""
@@ -118,35 +144,43 @@ def get_bert_score(analysis_text):
         # 학습 라벨 순서: 0:중립, 1:긍정, 2:부정
         neu, pos, neg = probs[0].tolist()
 
-        # 리스크 단어 존재 여부 확인
+        has_danger_word = False
+        is_safe_in_bert = False
 
-        has_risk = any(kw in analysis_text for kw in Config.critical_kws)
+        # 리스크 단어 존재 여부 확인
+        for word, score in Config.DANGER_DICTIONARY.items():
+            if word in analysis_text:
+                if score < 0:  # 음수 단어가 하나라도 있으면 위험 감지
+                    has_danger_word = True
+                elif score > 0:  # 양수 단어가 하나라도 있으면 안전(방어) 감지
+                    is_safe_in_bert = True
 
         # [수정 로직] 가장 높은 확률을 가진 라벨로 점수 확정
         # 1. 긍정(pos)이 가장 높을 때 -> 확실한 플러스(+)
+                # 모델의 1차 판단
         if pos > neu and pos > neg:
-            # 긍정 확률이 60%를 넘으면 아주 높은 점수, 아니면 적당한 긍정 점수
             val = 0.85 if pos > 0.6 else 0.6
-        # 하지만 리스크 단어가 문장에 있다면 긍정 점수 대신 -0.3점(주의) 리턴
-            if has_risk:
+
+            # [핵심 로직] 위험 단어가 있는데 "완화/지원" 같은 방어 단어가 없다면 긍정 차단
+            if has_danger_word and not is_safe_in_bert:
                 return -0.3
             return val
-        # 2. 부정(neg)이 가장 높을 때 -> 확실한 마이너스(-)
+
+            # 2. 부정(neg)이 가장 높을 때
         elif neg > neu and neg > pos:
-            # 부정 확률이 60%를 넘으면 아주 낮은 점수, 아니면 적당한 부정 점수
             return -0.85 if neg > 0.6 else -0.6
 
-        # 3. 중립(neu)이 가장 높거나 판단이 애매할 때만 기존 방식 사용
+            # 3. 중립이거나 혼전일 때
         else:
             val = (pos * 1.0) + (neg * -1.0)
-            # 중립 상황에서도 리스크 단어가 있고 점수가 양수라면 -0.3으로 보정
-            if has_risk and val > 0:
+            # 중립 구간에서도 위험 단어만 있고 방어 단어가 없으면 점수 하향
+            if has_danger_word and not is_safe_in_bert and val > 0:
                 return -0.3
             return val
 
     except Exception as e:
-        print(f"BERT 오류: {e}")
-        return 0.0
+        logger(f"BERT 오류: {e}")
+    return 0.0
 
 # 기사 라벨링 3 - [리스크 사전 라벨링]: 가중치 스코어링
 # 사전 기반 위험도 측정 및 문맥 추출 - (utils.py에서 extract_keywords함수를 한 이후 실행)
@@ -346,7 +380,7 @@ async def run_analysis():
     # [STEP 1] DB에서 최근 30일 지표 가져오기
     with get_db() as session:
         query = text(
-            "SELECT indicator_no, price FROM indicator_data WHERE gathering_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+            "SELECT indicator_no, price FROM indicator_data WHERE gathering_time >= DATE_SUB(NOW(), INTERVAL 14 DAY)")
         rows = session.execute(query).fetchall()
 
     if not rows:
@@ -375,7 +409,7 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 20}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 30}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -472,8 +506,8 @@ async def run_analysis():
         ai_score = ai_score - total_penalty
 
         # 부정 방어
-        is_safe_news = any(kw in data.get('title', '') for kw in Config.safe_keywords)
-
+        is_safe_news = any(
+            word in data.get('title', '') for word, weight in Config.DANGER_DICTIONARY.items() if weight > 0)
         if is_safe_news:
             # 1. 지원책 기사라면 기존 페널티의 20%만 적용 (80% 삭감)
             ai_score = ai_score - (total_penalty * 0.2)
@@ -512,40 +546,37 @@ async def run_analysis():
 
 
         # [A] 기본 통합 점수 계산 (뉴스 비중 90%)
-        if normalized_ai_score >= 0.45:
-            total = (normalized_ai_score * 0.9) + (raw_indicator_score * 0.1)
+        title = data.get('title', '')
+        url = data.get('url', '')
+
+        is_sports = any(kw in title for kw in Config.SPORTS_KEYWORDS)
+        is_economy_news = any(kw in title for kw in Config.economy_keywords) and not is_sports
+        is_politics = "sid=100" in url or any(kw in title for kw in Config.politics_kws)
+
+        # [B] 점수 통합 (질문하신 0.9 / 0.7 로직이 여기 합쳐졌습니다)
+        if is_sports:
+            # 스포츠는 지표 무시하고 AI 점수 기반 하한선 보정
+            total = max(0.65, (normalized_ai_score + 1) / 2)
         else:
-            total = (normalized_ai_score * 0.7) + (raw_indicator_score * 0.3)
-
-        # [B] 경제 기사 여부 판단 (패널티 대상 선정)
-        economy_keywords = ['반도체', '수출', '금리', '환율', '무역', '기업', '산업', '증시', '채권', '금융', '통제']
-        is_economy_news = any(kw in data.get('title', '') for kw in economy_keywords) or \
-                          any(kw in refined_keywords for kw in economy_keywords)
-
-        # [C] 지표 위기 시 조건부 패널티
-        if raw_indicator_score < 0.35:
-            if is_economy_news:
-                total -= 0.2  # 경제 기사는 크게 감점
+            # 감성 점수가 극단적(0.25이하, 0.65이상)이면 뉴스 비중을 90%로 상향
+            if normalized_ai_score <= 0.25 or normalized_ai_score >= 0.65:
+                total = (normalized_ai_score * 0.9) + (raw_indicator_score * 0.1)
             else:
-                total -= 0.05  # 일반 기사는 살짝 감점
+                total = (normalized_ai_score * 0.7) + (raw_indicator_score * 0.3)
 
-        # [D] 정치 기사 보정
-        is_politics = False
-        if "sid=100" in data.get('url', '') or any(kw in data['title'] for kw in Config.politics_kws):
-            is_politics = True
+        # [C] 경제 기사 페널티
+        if is_economy_news and raw_indicator_score < 0.35:
+            total -= 0.2
 
+        # [D] 정치 및 반복 뉴스 보정
         if is_politics:
             total = min(1.0, total + 0.12)
+            if total <= 0.63 and await check_yesterday_existence(refined_keywords):
+                total += (0.65 - total) * 0.2
 
-        # [E] 최종 점수 확정 및 '진짜' 등급 판정 (모든 기사가 여기를 통과해야 함)
+        # [E] 최종 가두기 및 등급 판정
         total = max(0.0, min(1.0, total))
-
-        if total <= 0.45:
-            risk_lv = "심각"
-        elif total <= 0.65:
-            risk_lv = "주의"
-        else:
-            risk_lv = "안정"
+        risk_lv = "심각" if total <= 0.25 else "주의" if total <= 0.63 else "안정"
         # ----------------------------------------------------------
         # 제미나이 리포트
         try:
@@ -604,7 +635,7 @@ async def run_analysis():
         # [STEP 6] ES 저장 및 상태 업데이트
         try:
             # 1. 분석 완료 데이터 저장 (ES_3)
-            es.index(index="news_labeling", id=_id, body=labelled_doc)
+            es.index(index="news_labeling1", id=_id, body=labelled_doc)
             # 2. 원본 데이터 처리 상태 업데이트 (ES_2)
             es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
             # 점수 산출 로그 추가

@@ -2,7 +2,10 @@ import re
 import html
 from collections import Counter
 import hashlib
+
+import logger
 from config import Config
+
 from konlpy.tag import Okt
 
 okt = Okt()
