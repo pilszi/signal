@@ -119,7 +119,7 @@ class Config:
     # --- 8. G20기준 국가 및 도시 매핑 데이터 ---
     G20_COUNTRY_MAP = {
         # --- [한자 약어 대응] ---
-        "韓": "South Korea",
+        "韓": "Korea",
         "美": "United States",
         "中": "China",
         "日": "Japan",
@@ -134,7 +134,7 @@ class Config:
 
 
         # --- [동아시아 및 주변국] ---
-        "대한민국": "South Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
+        "대한민국": "Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
         "북한": "North Korea", "북측": "North Korea",
         "미국": "United States", "미": "United States", "미측": "United States",
         "중국": "China", "중": "China", "중측": "China",
@@ -195,7 +195,7 @@ class Config:
     # 지역 연합
     REGION_TO_COUNTRIES = {
         "East Asia": [
-            "South Korea", "North Korea", "China", "Japan", "Taiwan", "Hong Kong", "Mongolia", "Macau"
+            "Korea", "North Korea", "China", "Japan", "Taiwan", "Hong Kong", "Mongolia", "Macau"
         ],
         "Middle East": [
             "Israel", "Iran", "Saudi Arabia", "UAE", "Qatar", "Iraq",
@@ -213,7 +213,7 @@ class Config:
             "Kazakhstan", "Uzbekistan", "Kyrgyzstan", "Tajikistan", "Turkmenistan"
         ],
         "BRICS": [
-            "Brazil", "Russia", "India", "China", "South Korea"
+            "Brazil", "Russia", "India", "China", "Korea"
         ],
         "G7": [
             "United States", "United Kingdom", "France", "Germany", "Japan", "Italy", "Canada"
@@ -545,9 +545,9 @@ class Config:
     # 복합 국가명에 국가들 매핑 사전 (히트맵)
     COMPOSITE_COUNTRY_MAP = {
         # 3개국 이상 (가장 먼저 체크)
-        "한미일": ["South Korea", "United States", "Japan"],
+        "한미일": ["Korea", "United States", "Japan"],
         "북중러": ["North Korea", "China", "Russia"],
-        "한중일": ["South Korea", "China", "Japan"],
+        "한중일": ["Korea", "China", "Japan"],
         "G7": ["United States", "United Kingdom", "France", "Germany", "Japan", "Italy", "Canada"],
         "브릭스": ["Brazil", "Russia", "India", "China", "South Africa"],
         "BRICS": ["Brazil", "Russia", "India", "China", "South Africa"],
@@ -566,17 +566,17 @@ class Config:
         "미국과 이란": ["United States", "Iran"],
         "러우": ["Russia", "Ukraine"], "러·우": ["Russia", "Ukraine"], "러시아와 우크라이나": ["Russia", "Ukraine"],
         "미중": ["United States", "China"], "미·중": ["United States", "China"],
-        "한미": ["South Korea", "United States"], "한·미": ["South Korea", "United States"],
-        "한일": ["South Korea", "Japan"], "한·일": ["South Korea", "Japan"],
-        "한중": ["South Korea", "China"], "한·중": ["South Korea", "China"],
+        "한미": ["Korea", "United States"], "한·미": ["Korea", "United States"],
+        "한일": ["Korea", "Japan"], "한·일": ["Korea", "Japan"],
+        "한중": ["Korea", "China"], "한·중": ["Korea", "China"],
         "북미": ["North Korea", "United States"], "북·미": ["North Korea", "United States"],
-        "남북": ["South Korea ", "North Korea"], "남·북": ["South Korea", "North Korea"],
+        "남북": ["Korea ", "North Korea"], "남·북": ["Korea", "North Korea"],
         "중러": ["China", "Russia"], "중·러": ["China", "Russia"],
         "북러": ["North Korea", "Russia"], "북·러": ["North Korea", "Russia"],
         "미일": ["United States", "Japan"], "미·일": ["United States", "Japan"],
         "영미": ["United Kingdom", "United States"], "미영": ["United States", "United Kingdom"],
         "일중": ["Japan", "China"], "일·중": ["Japan", "China"],
-        "한러": ["South Korea", "Russia"], "한·러": ["South Korea", "Russia"],
+        "한러": ["Korea", "Russia"], "한·러": ["Korea", "Russia"],
 
         # 국가별 약어
         "대중": ["China"],
@@ -584,7 +584,7 @@ class Config:
         "대일": ["Japan"],
         "대러": ["Russia"],
         "대북": ["North Korea"],
-        "대한": ["South Korea"],
+        "대한": ["Korea"],
         "대유럽": ["Germany", "France", "Italy"],
     }
 
@@ -658,12 +658,12 @@ class Config:
     ]
     # 2. 주요 엔티티별 국가 매핑 (기업/기관명)
     ENTITY_TO_COUNTRY_MAP = {
-        "삼성": "South Korea", "삼성전자": "South Korea", "SK하이닉스": "South Korea", "현대차": "South Korea",
-        "HMM": "South Korea", "에쓰오일": "South Korea", "제주항공": "South Korea", "대한항공": "South Korea",
-        "LG엔솔": "South Korea", "한국은행": "South Korea", "한은": "South Korea", "공정위": "South Korea",
+        "삼성": "Korea", "삼성전자": "Korea", "SK하이닉스": "Korea", "현대차": "Korea",
+        "HMM": "Korea", "에쓰오일": "Korea", "제주항공": "Korea", "대한항공": "Korea",
+        "LG엔솔": "Korea", "한국은행": "Korea", "한은": "Korea", "공정위": "Korea",
         "엔비디아": "United States", "애플": "United States", "인텔": "United States",
-        "TSMC": "Taiwan", "이란": "Iran", "이스라엘": "Israel", "HD현대": "South Korea",
-        "현대로템": "South Korea", "개발": "South Korea","SKT": "South Korea", "경영": "South Korea",
+        "TSMC": "Taiwan", "이란": "Iran", "이스라엘": "Israel", "HD현대": "Korea",
+        "현대로템": "Korea", "개발": "Korea","SKT": "Korea", "경영": "Korea",
         '뉴욕증시': "United States", '다우': "United States", '나스닥': "United States",
         "OpenAI": "United States", "연준": "United States"
     }
