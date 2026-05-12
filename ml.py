@@ -192,59 +192,99 @@ def get_weighted_keyword_score(title, content):
 
 
 # 제미나이 프롬프트
-# async def get_ai_prediction_report(risk_level, title, keywords, scores):
-#     """Gemini AI 활용 리포트 생성"""
-#     if risk_level != "심각":
-#         main_kw = ", ".join(keywords[:2]) if keywords else "주요 경제 지표"
-#         return {
-#             "prediction": f"✅ {main_kw} 상황이 안정적입니다. 시장이 곧 회복될 것 같아요.",
-#             "reason": f"지금 {main_kw} 관련 뉴스나 수치들을 꼼꼼히 분석해 보니, 큰 문제 없이 정상 범위 안에 있어요. 당분간 급격한 위험은 없을 것으로 보이니 안심하셔도 좋습니다."
-#         }
-#
-#     prompt = f"""
-#         [Role]
-#         데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고,
-#         사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
-#
-#         [Input Data]
-#         - 기사 제목: {title}
-#         - 핵심 키워드: {keywords}
-#         - 위험 지수 및 지표: {scores}
-#
-#         [작성 가이드라인 - 필수 준수]
-#         1. '비유(예: 황금알을 낳는 거위, 폭풍우 속의 배 등)'는 절대 사용하지 마십시오.
-#         2. 기사 제목과 키워드를 바탕으로 '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함되도록 사실 위주로 요약하십시오.
-#         3. 예측 근거는 논리적 인과관계(A로 인해 B가 발생하고, 결과적으로 C가 우려됨)로 작성하십시오.
-#         4. 이 사건 이후 발생할 2차 파장이나 예상되는 변화를 예측하여 작성하십시오(Short-term/Mid-term).
-#         5. 말투는 정중하고 둥근 대화체를 사용하되, 마지막에는 반드시 사용자가 참고할 만한 실질적인 대응 방안이나 관전 포인트를 추천하십시오.
-#
-#         [출력 형식 (JSON)]
-#         {{
-#           "prediction": "🚨 [기사 내 핵심 사건과 그로 인한 직접적인 리스크를 한 줄로 요약]",
-#           "reason": "1. [사건의 핵심 내용]: 기사 속 주체와 행동, 구체적 수치를 바탕으로 현재 상황을 요약해 주세요.\\n2. [향후 변화 및 파급 효과]: 이 사건이 앞으로 시장이나 기업 가치에 미치는 구체적 영향을 예측해 주세요.\\n3. [행동 조언 및 대응]: 사용자가 앞으로 주의 깊게 살펴야 할 지표나 권장하는 대응 방안을 구체적으로 제안해 주세요."
-#         }}
-#         """
-#     for attempt in range(len(Config.GEMINI_API_KEYS)):
-#         try:
-#             # [해결책 1] 요청을 보내기 전에 2~3초간 잠시 쉽니다.
-#             # 이렇게 해야 무료 티어의 분당 호출 제한(RPM)을 피할 수 있어요.
-#             await asyncio.sleep(4)
-#             client = Config.get_next_client()
-#             response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
-#             res_text = response.text.strip()
-#             json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
-#             return json.loads(json_match.group()) if json_match else json.loads(res_text)
-#         except Exception as e:
-#             print(f"Gemini 키 교체 시도... ({e})")
-#             # [해결책 2] 키를 교체할 때도 잠시 텀을 줍니다.
-#             await asyncio.sleep(2)
-#             continue
-#
-#     return {
-#         "prediction": "🚨 시장 리스크가 감지되었습니다. 실시간 분석이 지연되고 있습니다.",
-#         "reason": "1. 현재 분석 요청이 일시적으로 폭주하고 있습니다.\\n2. 로컬 모델 점수상으로는 '심각' 단계이니 주의가 필요합니다.\\n3. 잠시 후 대시보드를 새로고침하여 상세 AI 리포트를 확인해주세요."
-#     }
-#
+async def get_ai_prediction_report(risk_level, title, keywords, scores):
+    """Gemini AI 활용 리포트 생성"""
+    # ---------------------------------------------------------
+    # [임시 우회 모드] 등급별 고정 멘트 반환 (오후 5시 리셋 전까지 사용)
+    # ---------------------------------------------------------
+    if risk_level == "심각":
+        return {
+            "prediction": f"[심각] {keywords[:2]}... 관련 중대한 리스크 감지",
+            "reason": f"위험 등급(심각) 및 지표 점수({scores['sent']})를 바탕으로 분석된 실시간 경보입니다. 즉각적인 대응 및 자산 보호 검토가 필요합니다."
+        }
+    elif risk_level == "주의":
+        return {
+            "prediction": f"[주의] {keywords[:2]}... 시장 모니터링 강화 필요",
+            "reason": "일부 지표에서 불안정성이 포착되었습니다. 단기적인 변동성 확대 가능성이 있으니 관련 국가의 뉴스를 주의 깊게 살펴주시기 바랍니다."
+        }
+    else:  # "안정"인 경우
+        return {
+            "prediction": f"[안정] {keywords[:2]}... 시장 상황 양호",
+            "reason": "현재 수집된 데이터 분석 결과, 특이 리스크가 발견되지 않았습니다. 주요 지표들이 정상 범위 내에서 유지되고 있습니다."
+        }
+    # ---------------------------------------------------------
+    # 키워드 상위 2개를 뽑아 문장에 자연스럽게 삽입
+    kw_str = ", ".join(keywords[:2]) if keywords else "주요 지표"
+    subject = title[:20] + "..." if len(title) > 20 else title
+
+    if risk_lv == "주의":
+        return {
+            "prediction": f"⚠️ {subject} 이슈로 인한 시장 변동성 확대 및 심리 위축 예상",
+            "reason": f"현재 [{kw_str}] 등 리스크 요인이 관찰되고 있습니다. 시장의 변동성이 커질 수 있는 상태이므로, 관련 동향을 예의주시하며 투자 및 의사결정에 주의하시기 바랍니다."
+        }
+    elif risk_lv == "안정":
+        return {
+            "prediction": f"✅ {subject} 상황에도 불구하고 지표 안정세 및 완만한 흐름 전망",
+            "reason": f"분석 결과 [{kw_str}]를(을) 포함한 전반적인 시장 지표가 큰 위협 없이 안정적인 흐름을 보이고 있습니다. 당분간은 현재의 완만한 상태가 유지될 것으로 예상됩니다."
+        }
+    prompt = f"""
+        [Role]
+        데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고,
+        사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
+
+        [Input Data]
+        - 기사 제목: {title}
+        - 핵심 키워드: {keywords}
+        - 위험 지수 및 지표: {scores}
+
+        [작성 가이드라인 - 필수 준수]
+        1. '비유(예: 황금알을 낳는 거위, 폭풍우 속의 배 등)'는 절대 사용하지 마십시오.
+        2. 기사 제목과 키워드를 바탕으로 '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함되도록 사실 위주로 요약하십시오.
+        3. 예측 근거는 논리적 인과관계(A로 인해 B가 발생하고, 결과적으로 C가 우려됨)로 작성하십시오.
+        4. 이 사건 이후 발생할 2차 파장이나 예상되는 변화를 예측하여 작성하십시오(Short-term/Mid-term).
+        5. 말투는 정중하고 둥근 대화체를 사용하되, 마지막에는 반드시 사용자가 참고할 만한 실질적인 대응 방안이나 관전 포인트를 추천하십시오.
+
+        [출력 형식 (JSON)]
+        {{
+          "prediction": "🚨 [기사 내 핵심 사건과 그로 인한 직접적인 리스크를 한 줄로 요약]",
+          "reason": "1. [사건의 핵심 내용]: 기사 속 주체와 행동, 구체적 수치를 바탕으로 현재 상황을 요약해 주세요.\\n2. [향후 변화 및 파급 효과]: 이 사건이 앞으로 시장이나 기업 가치에 미치는 구체적 영향을 예측해 주세요.\\n3. [행동 조언 및 대응]: 사용자가 앞으로 주의 깊게 살펴야 할 지표나 권장하는 대응 방안을 구체적으로 제안해 주세요."
+        }}
+        """
+    for attempt in range(len(Config.GEMINI_API_KEYS)):
+        try:
+            # 요청 전 간격을 무료 티어 권장 속도에 맞추기
+            await asyncio.sleep(5)
+            client = Config.get_next_client()
+            response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
+            res_text = response.text.strip()
+            json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+            return json.loads(json_match.group()) if json_match else json.loads(res_text)
+
+        except Exception as e:
+            err_msg = str(e)
+
+            # [수정 2] 429(할당량 초과) 발생 시 로직 강화
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                # 구글이 요청한 대로 최소 30~40초는 쉬어줘야 IP 차단을 피합니다.
+                wait_time = 45
+                print(
+                    f"🚦 [Quota] 모든 키 소진 가능성. {wait_time}초 대기 후 키 교체... (현재 시도: {attempt + 1}/{len(Config.GEMINI_API_KEYS)})")
+                await asyncio.sleep(wait_time)
+                continue  # 다음 키로 시도
+
+            # 다른 일반적인 에러라면 짧게 쉬고 다음 키로
+            print(f"⚠️ Gemini 일반 에러: {err_msg}")
+            await asyncio.sleep(2)
+            continue
+
+    # 모든 키를 다 돌았는데도 실패했다면?
+    # 에러를 던져서 멈추게 하지 말고, '기본값'을 리턴해서 시스템을 살립니다.
+    print("🚨 [Critical] 모든 Gemini 키의 할당량이 소진되었습니다. 기본값으로 대체합니다.")
+    return {
+        "prediction": f"분석 일시 지연 ({title[:20]}...)",
+        "reason": "AI 서비스 할당량 초과로 인해 상세 분석 리포트를 생성할 수 없습니다. 위험 등급 점수를 참고해 주세요."
+    }
+
 
 # ==========================================
 # 3. 지표 분석 로직 (Z-Score 산출)
@@ -335,21 +375,22 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 30}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 20}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
-
     if not docs:
         logger.info("✅ 처리할 새 뉴스 없음")
         return
 
+    # 분석 결과를 담을 리스트 생성
+    processed_results = []
     for doc in docs:
         _id = doc['_id']
         data = doc['_source']
 
         # ----------------------------------------------------------
-        # [추가] 노이즈 기사 스킵 로직
+        # 노이즈 기사 스킵 로직
         # ----------------------------------------------------------
         content = data.get('content', '')
         title = data.get('title', '')
@@ -371,7 +412,7 @@ async def run_analysis():
         refined_keywords = utils.extract_keywords(data['title'], data['content'])
         refined_country = utils.extract_country(data['title'], data['content'])
 
-        # [1] 사전 가중 점수 계산 (기존 로직)
+        # [1] 사전 가중 점수 계산
         keyword_score, target_text = get_weighted_keyword_score(data['title'], data['content'])
 
         # [2] 텍스트 정제
@@ -399,7 +440,7 @@ async def run_analysis():
             continue
 
         # ----------------------------------------------------------
-        # [수정 섹션] 감점 폭주 방지 및 중복 제거 로직
+        # 감점 폭주 방지 및 중복 제거 로직
         # ----------------------------------------------------------
         # 1. BERT 분석 먼저 실행 (기준점 확보)
         balanced_text = get_balanced_text(cleaned_text)
@@ -423,7 +464,7 @@ async def run_analysis():
                     # 본문 감점: 가중치를 0.06배로 희석 (본문 노이즈 방지)
                     body_penalty_sum += (abs_w * 0.01)
 
-        # [핵심] 본문 페널티는 아무리 단어가 많아도 0.3점 이상 못 깎게 제한 (CAP 설정)
+        # 본문 페널티는 아무리 단어가 많아도 0.3점 이상 못 깎게 제한 (CAP 설정)
         body_penalty_sum = min(0.1, body_penalty_sum)
 
         # 4. 최종 합산 시 한 번 더 희석 (페널티의 영향력을 전체의 절반으로)
@@ -453,7 +494,7 @@ async def run_analysis():
         # 5. 점수 가두기 (물리적 한계선)
         ai_score = max(-1.0, min(1.0, ai_score))
 
-        # [보정] 제목이 정말 위험한데 AI가 너무 낙관적일 때만 '주의'급으로 조정
+        # 제목이 정말 위험한데 AI가 너무 낙관적일 때만 '주의'급으로 조정
         if found_danger_title and ai_score > 0.5:
             ai_score = 0.3
         # ----------------------------------------------------------
@@ -506,13 +547,24 @@ async def run_analysis():
         else:
             risk_lv = "안정"
         # ----------------------------------------------------------
+        # 제미나이 리포트
+        try:
+            ai_rep = await get_ai_prediction_report(
+                risk_lv, data['title'], refined_keywords,
+                {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
 
-        # 이제 아래에 있는 [STEP 5] 결과 데이터 구성으로 이어짐
+        except Exception as e:
+            # 429 에러(할당량 초과)가 발생한 경우
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                logger.warning("🚦 [Gemini] 할당량 초과! 60초 대기 후 다음 기사로 넘어갑니다.")
+                await asyncio.sleep(60)  # 비동기 대기 (서버 안 멈춤)
 
-        # # [STEP 4] Gemini 리포트
-        # ai_rep = await get_ai_prediction_report(
-        #     risk_lv, data['title'], refined_keywords,
-        #     {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
+                # 대기 후 이번 기사는 기본값으로 채우고 넘어가기
+                ai_rep = {'prediction': '분석 대기 중 (할당량 초과)', 'reason': 'API 할당량 초과로 인한 리포트 생성 지연'}
+            else:
+                # 다른 에러일 경우 처리
+                logger.error(f"❌ [Gemini 에러] {e}")
+                ai_rep = {'prediction': '분석 실패', 'reason': 'AI 서비스 일시적 오류'}
 
         # 한국 표준시(KST)로 정확하게 설정
         kst = timezone(timedelta(hours=9))  # 한국은 UTC보다 9시간 빠름
@@ -526,8 +578,8 @@ async def run_analysis():
             "url": data.get('url', ''),
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
-            # "prediction": ai_rep['prediction'],
-            # "prediction_reason": ai_rep['reason'],
+            "prediction": ai_rep['prediction'],
+            "prediction_reason": ai_rep['reason'],
             "risk_level": risk_lv,
             "debug_text": balanced_text, # 모델이 분석하는 본문
             "final_total_score": {
@@ -552,7 +604,7 @@ async def run_analysis():
         # [STEP 6] ES 저장 및 상태 업데이트
         try:
             # 1. 분석 완료 데이터 저장 (ES_3)
-            es.index(index="news_labeling", body=labelled_doc)
+            es.index(index="news_labeling", id=_id, body=labelled_doc)
             # 2. 원본 데이터 처리 상태 업데이트 (ES_2)
             es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
             # 점수 산출 로그 추가
@@ -563,11 +615,24 @@ async def run_analysis():
                 f"   - 최종 위험 등급: [{risk_lv}]\n"
                 f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
             )
+
+            #  DB 저장을 위해 main.py로 보낼 배달 바구니에 담기
+            processed_results.append({
+                'level': risk_lv,
+                'pred': labelled_doc.get('prediction', '분석 완료'),  # Gemini 연동 전이면 기본값
+                'reason': labelled_doc.get('prediction_reason', '분석 근거 수집됨'),
+                'doc_id': _id,  # <--- 바로 이 녀석이 MariaDB의 document_no
+                'countries': [refined_country]
+            })
         except Exception as e:
             logger.error(f"❌ [저장 에러] ID {_id} 처리 중 오류 발생: {e}")
+
     # 모든 루프 종료 후 요약 로그
     logger.info(f"✅ 이번 배치 분석 완료 (총 {len(docs)}건 처리)")
     logger.info("--------------------------------------------------")
+
+    return processed_results # 루프가 다 끝나면 결과 리스트 반환
+
 
 
 def get_latest_signals(size=10):

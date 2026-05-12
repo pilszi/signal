@@ -320,7 +320,7 @@
                             </p>
 
                             <div class="space-y-4" id="station-list">
-                                <p class="text-xs text-blue-200">데이터를 분석 중입니다...</p>
+                                <p class="text-xs text-blue-200">실시간 시그널 분석 중...</p>
                             </div>
                         </div>
                     </div>
@@ -330,6 +330,62 @@
 
     </body>
     <script>
+        // --- 0. 국가명 변환 사전  ---
+        const KOR_TO_ENG = {
+            // --- 동아시아 및 주변국 ---
+            "대한민국": "Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
+            "북한": "North Korea", "북측": "North Korea",
+            "미국": "United States", "미": "United States", "미측": "United States",
+            "중국": "China", "중": "China", "중측": "China", "홍콩": "China",
+            "일본": "Japan", "일": "Japan",
+            "대만": "Taiwan", "타이완": "Taiwan",
+
+            // --- 중동 (리스크 핵심) ---
+            "이스라엘": "Israel", "이란": "Iran",
+            "사우디아라비아": "Saudi Arabia", "사우디": "Saudi Arabia",
+            "아랍에미리트": "UAE", "아랍에미레이트": "UAE", "두바이": "UAE",
+            "카타르": "Qatar", "이라크": "Iraq", "쿠웨이트": "Kuwait",
+            "이집트": "Egypt", "튀르키예": "Turkey", "터키": "Turkey",
+            "시리아": "Syria", "요르단": "Jordan", "레바논": "Lebanon", "오만": "Oman", "예멘": "Yemen",
+            "중동": "Middle East",
+
+            // --- 유럽 ---
+            "러시아": "Russia", "러": "Russia",
+            "우크라이나": "Ukraine", "우크라": "Ukraine",
+            "영국": "United Kingdom", "영": "United Kingdom",
+            "프랑스": "France", "불": "France",
+            "독일": "Germany", "독": "Germany",
+            "이탈리아": "Italy", "이탈리": "Italy",
+            "벨기에": "Belgium", "헝가리": "Hungary", "네덜란드": "Netherlands",
+            "스페인": "Spain", "폴란드": "Poland", "스웨덴": "Sweden", "오스트리아": "Austria", "그리스": "Greece",
+            "유럽연합": "EU", "EU": "EU",
+
+            // --- 동남아/오세아니아/기타 ---
+            "베트남": "Vietnam", "인도네시아": "Indonesia", "인니": "Indonesia",
+            "인도": "India", "싱가포르": "Singapore", "싱가폴": "Singapore",
+            "태국": "Thailand", "필리핀": "Philippines", "말레이시아": "Malaysia",
+            "미얀마": "Myanmar", "캄보디아": "Cambodia", "라오스": "Laos", "브루나이": "Brunei",
+            "호주": "Australia", "오스트레일리아": "Australia",
+            "동남아": "ASEAN", "동남아시아": "ASEAN", "아세안": "ASEAN",
+
+            // --- 아메리카/아프리카 ---
+            "캐나다": "Canada", "멕시코": "Mexico", "브라질": "Brazil", "아르헨티나": "Argentina",
+            "남아프리카공화국": "South Africa", "남아공": "South Africa", "남공": "South Africa",
+            "파나마": "Panama", "베네수엘라": "Venezuela",
+
+            // --- 기타 빈번 국가 ---
+            "파키스탄": "Pakistan", "우즈베키스탄": "Uzbekistan", "우즈벡": "Uzbekistan",
+            "아프가니스탄": "Afghanistan", "방글라데시": "Bangladesh", "스리랑카": "Sri Lanka"
+        };
+
+        // 지역 키워드 발생 시 불이 들어올 국가 리스트
+        const REGION_TO_COUNTRIES = {
+            "Middle East": ["Israel", "Iran", "Saudi Arabia", "UAE", "Qatar", "Iraq", "Kuwait", "Egypt", "Turkey", "Syria", "Jordan", "Lebanon", "Oman", "Yemen", "Pakistan"],
+            "EU": ["France", "Germany", "Italy", "Spain", "Netherlands", "Belgium", "Poland", "Sweden", "Austria", "Greece"],
+            "ASEAN": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia", "Myanmar", "Cambodia", "Laos", "Brunei"],
+
+        };
+
         // --- 1. 전역 상태 관리 ---
         let allSignals = [];      // 하단 뉴스 그리드용 (전체 뉴스)
         let filteredNews = [];    // 필터링된 뉴스
@@ -341,22 +397,59 @@
         let endDate = null;
         let searchQuery = "";
         let calendarMonth = new Date(2026, 4); // 2026년 5월
-        let chartDom = document.getElementById('map');
-        let myChart = echarts.init(chartDom);
+        let myChart = echarts.init(document.getElementById('map'));
         let noti = [];
         const SIGNALS_PER_PAGE = 10;
         let currentPage = 1;
 
-        const countryNamesKOR = {
-            "United States": "미국", "China": "중국", "Japan": "일본", "Korea": "대한민국",
-            "Russia": "러시아", "India": "인도", "Iran": "이란", "Israel": "이스라엘",
-            "Saudi Arabia": "사우디아라비아", "UAE": "아랍에미리트", "Qatar": "카타르",
-            "Iraq": "이라크", "Egypt": "이집트", "Turkey": "튀르키예", "Syria": "시리아",
-            "Ukraine": "우크라이나", "United Kingdom": "영국", "France": "프랑스",
-            "Germany": "독일", "Italy": "이탈리아", "Vietnam": "베트남",
-            "Indonesia": "인도네시아", "ASEAN": "동남아시아", "EU": "유럽연합"
-        };
+
         let dateFilter = "";
+
+        // 히트맵 데이터를 분석하여 지도에 색상을 입히는 함수
+        function updateHeatmap() {
+            if (!heatmapData || Object.keys(heatmapData).length === 0) return;
+
+            let chartDataMap = {}; // 최종적으로 지도에 그릴 데이터를 담는 객체
+
+            Object.entries(heatmapData).forEach(([korName, info]) => {
+                // 1. 한글명을 영문명으로 변환
+                const engName = KOR_TO_ENG[korName] || korName;
+
+                // 2. 시각화 등급 계산 (1:안정, 2:주의, 3:심각)
+                let visualValue = 1;
+                const level = info.level;
+                if (level === "심각" || level === "Serious" || level === "Critical") {
+                    visualValue = 3;
+                } else if (level === "주의" || level === "Caution" || level === "Warning") {
+                    visualValue = 2;
+                }
+
+                const dataPoint = {
+                    value: visualValue,
+                    realScore: info.score,
+                    riskLevel: level
+                };
+
+                // 3. 지역 키워드 체크 (예: Middle East인 경우 사전 정의된 15개국에 모두 데이터 할당)
+                if (REGION_TO_COUNTRIES[engName]) {
+                    REGION_TO_COUNTRIES[engName].forEach(country => {
+                        chartDataMap[country] = { ...dataPoint, name: country };
+                    });
+                } else {
+                    // 개별 국가인 경우 그대로 할당
+                    chartDataMap[engName] = { ...dataPoint, name: engName };
+                }
+            });
+
+            // 4. 객체를 배열로 변환하여 ECharts에 적용
+            const finalChartData = Object.values(chartDataMap);
+
+            myChart.setOption({
+                series: [{
+                    data: finalChartData
+                }]
+            });
+        }
 
         const searchInput = document.getElementById('search-input');
         if (searchInput) {
@@ -385,9 +478,7 @@
         async function fetchMainData(date = null) {
             try {
                 // 날짜가 파라미터로 들어오면 쿼리 스트링 추가
-                let newsUrl = "/public_signals";
-                if (date) newsUrl += `?date=${date}`;
-
+                let newsUrl = "/public_signals" + (date ? `?date=${date}` : "");
                 const [newsRes, indicatorRes, heatmapRes] = await Promise.all([
                     axios.get(newsUrl),
                     axios.get('/api/market-indicators'),
@@ -425,8 +516,11 @@
                 console.log("데이터 로드 완료:", { news: newsRes.data.msg.length, date: date || "전체" });
 
 
-                allSignals = newsRes.data.msg;
-                heatmapData = heatmapRes.data;
+                allSignals = newsRes.data.msg || [];
+                heatmapData = heatmapRes.data || {}; // 서버에서 온 실제 데이터 저장
+
+                // 지도가 등록된 상태일 때만 히트맵 갱신
+                if (isMapRegistered) updateHeatmap();
 
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
@@ -557,6 +651,7 @@
 
             // 드롭다운 내부 문구 업데이트
             countText.innerText = `${unreads.length}개의 새 알림`;
+
         }
 
         function renderList(container, noti) {
@@ -670,7 +765,7 @@
                         layoutSize: '120%',
                         data: heatmapData, // ES_3에서 가져온 1~3단계 데이터
                         roam: true,
-    
+
                         // [추가] 마우스 오버(Hover) 시 스타일
                         emphasis: {
                             label: { show: true },
@@ -714,19 +809,46 @@
             renderNews(params.name);
             // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
         });
-            
-            
+
+
+        // Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
+        function updateStation() {
+            const list = document.getElementById('station-list');
+            // heatmapData가 없으면 실행 중단
+            if (!list || !heatmapData) return;
+
+
         // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
             function updateStation() {
                 const list = document.getElementById('station-list');
 
                 // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
                 const sortedRisks = [...heatmapData].sort((a, b) => b.total_score - a.total_score).slice(0, 3);
+            // 1. 데이터 처리: 객체를 배열로 변환하고 점수순 정렬
+            const sorted = Object.entries(heatmapData)
+                .map(([name, info]) => {
+                    // 소수점 데이터(예: 0.54)가 오면 100을 곱해줍니다.
+                    let rawScore = info.score;
+                    if (Math.abs(rawScore) < 1.1) { rawScore = rawScore * 100; }
 
                 if (sortedRisks.length === 0) {
                     list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
                     return;
                 }
+                    return {
+                        name: countryNamesKOR[name] || name, // 한글 이름 변환
+                        score: rawScore,
+                        level: info.level
+                    };
+                })
+                .sort((a, b) => b.score - a.score) // 높은 점수 순서로 정렬
+                .slice(0, 3); // 상위 3개만 추출
+
+            // [예외 처리] 데이터가 없을 경우
+            if (sorted.length === 0) {
+                list.innerHTML = '<p class="text-xs text-blue-200 text-center py-4">현재 분석된 리스크 데이터가 없습니다.</p>';
+                return;
+            }
 
                 list.innerHTML = sortedRisks.map((item, index) => {
                     let scoreColor = "text-green-300";
@@ -739,6 +861,15 @@
                         scoreColor = "text-yellow-200";
                         badgeIcon = "⚠️";
                     }
+            // 상위 3개국 리스트 생성
+            list.innerHTML = sorted.map((item, index) => {
+                // 1. 점수 반올림 (깔끔하게 정수로 표시)
+                const displayScore = Math.round(item.score);
+                // 2. 등급 및 색상 로직 통합
+                // 등급 문자열이 있으면 등급으로, 없으면 점수(70점 기준)로 색상 결정
+                const isSerious = item.level === "심각" || item.level === "Serious" || displayScore >= 70;
+                const scoreColor = isSerious ? "text-red-300" : "text-yellow-200";
+                const badgeIcon = isSerious ? "🔥" : "⚠️";
 
                     return `
                         <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
@@ -756,6 +887,29 @@
             }
 
         // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
+                return `
+                    <div class="flex items-center justify-between border-b border-blue-500/30 pb-3 last:border-0">
+                        <div class="flex flex-col">
+                            <span class="text-[9px] text-blue-200 font-bold uppercase tracking-wider">RANK 0${index + 1}</span>
+                            <span class="font-bold text-sm text-white flex items-center gap-1">
+                                ${item.name} <span class="text-[10px]">${badgeIcon}</span>
+                            </span>
+                        </div>
+                        <div class="text-right">
+                            <span class="block font-bold text-lg ${scoreColor}">
+                                ${displayScore}점
+                            </span>
+                            <span class="text-[8px] uppercase opacity-70 text-white font-medium">
+                                ${item.level || (isSerious ? 'SERIOUS' : 'CAUTION')}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+
+        // 필터 및 검색 핸들러
         function applyFilters() {
             // console.log(allSignals);
             filteredNews = allSignals.filter(item => {
@@ -862,8 +1016,27 @@
 
         // 뉴스 렌더링 함수
         function renderNews() {
-            const grid = document.getElementById('news-grid'); // 뉴스가 들어갈 컨테이너 ID
+            const grid = document.getElementById('news-grid');
             if (!grid) return;
+
+            // 1️⃣ [중복 제거] URL 기준으로 중복 기사를 하나만 남깁니다.
+            const uniqueSignals = Array.from(
+                new Map(allSignals.map(item => [item['url'], item])).values()
+            );
+
+            // 2️⃣ [정렬 로직] 리스크 점수 절대값(높은순) -> 날짜(최신순) 순서로 정렬합니다.
+            const sorted = uniqueSignals.sort((a, b) => {
+                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
+                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
+
+                if (scoreA !== scoreB) {
+                    return scoreB - scoreA; // 점수 높은 게 위로
+                }
+                // 점수가 같다면 최신 날짜가 위로
+                return new Date(b.published_date) - new Date(a.published_date);
+            });
+
+            // 3️⃣ [페이지네이션] 현재 페이지에 해당하는 데이터만 자릅니다.
             let targetData = [];
             const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
             if (isFilterActive) {
@@ -875,14 +1048,14 @@
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
             const endIndex = startIndex + SIGNALS_PER_PAGE;
             const currentSignals = targetData.slice(startIndex, endIndex);
+            const currentSignals = sorted.slice(startIndex, startIndex + SIGNALS_PER_PAGE);
 
-            // 1. 리스크 단계별 테일윈드 컬러 설정
             const riskColors = {
                 "안정": "bg-blue-100 text-blue-700",
                 "주의": "bg-yellow-100 text-yellow-700",
                 "심각": "bg-red-100 text-red-700"
             };
-            
+
             // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
             const sorted = [...currentSignals].sort((a, b) => {
                 // 리스크 점수 기준 정렬
@@ -897,43 +1070,63 @@
 
                 renderPagination()
             });
-            
+
             // 4. HTML 생성 및 출력
             if (sorted.length === 0) {
                 grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-500">해당하는 뉴스가 없습니다.</div>`;
+
+            // 4️⃣ [예외 처리] 데이터가 없을 경우
+            if (currentSignals.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center py-20 text-gray-500">조회된 뉴스가 없습니다.</div>`;
                 return;
             }
-            
+
+            // 5️⃣ [HTML 생성] Version 2의 고도화된 디자인을 적용합니다.
+            grid.innerHTML = currentSignals.map(news => {
+                const displayScore = Math.round(Math.abs(news.risk_score || 0) * 100);
+
             grid.innerHTML = sorted.map(news => {
                 // 음수 제거, 100 곱하기, 반올림 처리된 점수
                 const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
                 const displayDate = news.published_date ? news.published_date.split('T')[0] : "";
 
+                // 이미지 유효성 체크 및 플레이스홀더 처리
+                const imageUrl = (news.main_image && news.main_image !== "")
+                                 ? news.main_image
+                                 : 'https://via.placeholder.com/400x320?text=Signal+News';
+
                 return `
                     <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
-                        <a href="${news.url}" target="_blank">
-                            <img src="${news.main_image || '/api/placeholder/400/320'}" alt="news" class="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300">
-                        </a>
-                        <div class="p-5">
-                            <div class="flex justify-between items-start mb-2">
-                                <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level]}">
+                        <div class="relative h-48 overflow-hidden">
+                            <img src="${imageUrl}" alt="news" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                            <div class="absolute top-2 left-2 flex gap-1">
+                                <span class="px-2 py-1 text-[10px] font-bold rounded shadow-sm ${riskColors[news.risk_level] || 'bg-gray-100'}">
                                     ${news.risk_level}
                                 </span>
-                                <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level]}"">
+                                <span class="px-2 py-1 text-[10px] font-bold rounded shadow-sm ${riskColors[news.risk_level] || 'bg-gray-100'}">
                                     Signal ${displayScore}
-                                </span>  
+                                </span>
                             </div>
-                            <a href="${news.url}" target="_blank" class="block font-bold leading-tight group-hover:text-blue-600 transition-colors mb-4 line-clamp-2">
+                        </div>
+                        <div class="p-5">
+                            <div class="flex justify-between items-center mb-2 text-[11px] text-blue-600 font-bold uppercase">
+                                <span>#${countryNamesKOR[news.country_name] || 'Global'}</span>
+                                <span class="text-gray-400 font-normal">${displayDate}</span>
+                            </div>
+                            <h3 class="font-bold leading-tight text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-2 mb-4">
                                 ${news.title}
-                            </a>
-                            <div class="flex justify-between items-center mt-auto border-t pt-3">
-                                <span class="text-xs font-bold text-blue-600 uppercase">${news.press_name}</span>
-                                <span class="text-xs text-gray-400">${displayDate}</span>
+                            </h3>
+                            <div class="flex items-center justify-between mt-auto border-t pt-3">
+                                <span class="text-xs font-medium text-gray-500">${news.press_name}</span>
+                                <i data-lucide="external-link" class="w-3 h-3 text-gray-300"></i>
                             </div>
                         </div>
                     </div>
                 `;
             }).join('');
+
+            // Lucide 아이콘 다시 그리기
+            if (window.lucide) lucide.createIcons();
         }
 
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
@@ -1064,6 +1257,10 @@
             }
             // console.log(targetData.length);
             const paginationContainer = document.getElementById('pagination');
+            // 🔥 중요: 중복을 제거한 실제 기사 수로 페이지 계산
+            const uniqueCount = new Set(allSignals.map(s => s.url)).size;
+            const totalPages = Math.ceil(uniqueCount / SIGNALS_PER_PAGE);
+            // console.log(allSignals.length);
             if (!paginationContainer) return;
             const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
             if (totalPages <= 1) {

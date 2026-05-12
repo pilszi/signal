@@ -3,7 +3,6 @@ import html
 from collections import Counter
 import hashlib
 from config import Config
-
 from konlpy.tag import Okt
 
 okt = Okt()
@@ -286,8 +285,8 @@ def extract_keywords(title, content, top_n=10):
         # [2] 제목 가중치 부여: 제목에 나온 단어는 본문에 나온 것보다 중요하므로 제목을 2번 합칩니다.
         combined_text = (title + " ") * 2 + clean_content[:800]
 
-        # [3] 구(Phrases) 추출
-        raw_chunks = okt.phrases(combined_text)
+        # [3] 명사(nouns) 추출
+        raw_chunks = okt.nouns(combined_text)
 
         # [4] 필터링: 한 글자 단어 제외, Config에 설정한 불용어/구어체/노이즈 제거
         refined_keywords = [
@@ -324,3 +323,43 @@ def extract_keywords(title, content, top_n=10):
     except Exception as e:
         print(f"⚠️ 키워드 추출 오류 발생: {e}")
         return []
+
+
+# 스케줄러 내부에 들어갈 저장 로직
+def save_analysis_result(cursor, connection, analysis_data):
+    """
+        분석 결과를 DB에 저장하는 함수
+        :param cursor: DB 커서 객체
+        :param connection: DB 연결 객체 (commit용)
+        :param analysis_data: 분석 결과 딕셔너리
+    """
+    # 1. 시그널 본체 저장 (signal_message)
+    cursor.execute("""
+        INSERT INTO signal_message (risk_level, prediction, prediction_reason, document_no)
+        VALUES (%s, %s, %s, %s)
+    """, (analysis_data['level'], analysis_data['pred'], analysis_data['reason'], analysis_data['doc_id']))
+
+    signal_no = cursor.lastrowid  # 방금 저장된 시그널 번호 추출
+
+    # 2. 국가 매핑 (signal_country)
+    extracted_countries = analysis_data['countries']  # 예: ['United States', 'Middle East']
+
+    for eng_name in extracted_countries:
+        # REGION_TO_COUNTRIES에 해당 키가 있는지 확인 (지역 연합인 경우)
+        target_list = Config.REGION_TO_COUNTRIES.get(eng_name, [eng_name])
+
+        for country_name in target_list:
+            # DB에서 해당 영문명의 country_no 조회
+            cursor.execute("SELECT country_no FROM country WHERE country_en_name = %s", (country_name,))
+            row = cursor.fetchone()
+            if row:
+                # 튜플의 첫 번째 값인 [0]을 가져옵니다.
+                country_no = row[0]
+                cursor.execute("INSERT INTO signal_country (signal_no, country_no) VALUES (%s, %s)",
+                               (signal_no, country_no))
+
+    # 3. 알림 생성 (alarm_log)
+    # 모든 멤버에게 알림을 보낼지, 특정 멤버에게 보낼지 결정하여 INSERT
+    cursor.execute("INSERT INTO alarm_log (signal_no, member_no) SELECT %s, member_no FROM member_info", (signal_no,))
+
+    connection.commit()

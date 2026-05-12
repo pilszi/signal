@@ -5,23 +5,20 @@ import urllib.request
 import json
 import logging
 import html
-from utils import find_target_country
-from utils import extract_keywords
+from utils import find_target_country, extract_keywords, generate_article_id
 import time
-from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 from elasticsearch import Elasticsearch
 import random
-from utils import generate_article_id
 from dateutil import parser as date_parser
-from concurrent.futures import ThreadPoolExecutor  # 멀티스레딩용
+from concurrent.futures import ThreadPoolExecutor
 
 es = Elasticsearch(["http://localhost:9200"])
 INDEX_NAME = "news_origin"
 
 
 def get_detailed_news(url):
-    """네이버 뉴스 본문 및 상세 수집 (결측치 검증 포함)"""
+    """네이버 뉴스 본문 및 상세 수집 """
     try:
         user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
@@ -35,6 +32,7 @@ def get_detailed_news(url):
         res.raise_for_status()  # 응답 에러 시 바로 except로 이동
         soup = BeautifulSoup(res.text, "html.parser")
 
+        # 이미지, 언론사, 본문 추출
         image_tag = soup.find("meta", property="og:image")
         main_image = image_tag["content"] if image_tag else None
 
@@ -92,7 +90,7 @@ def bulk_search_naver_news():
 
                     doc_id = generate_article_id(clean_title)
 
-                    # [최적화 1] 상세 페이지 접속 전 ES 중복 체크
+                    # 상세 페이지 접속 전 ES 중복 체크
                     if es.exists(index=INDEX_NAME, id=doc_id):
                         already_exists += 1
                         continue
@@ -159,20 +157,6 @@ def process_single_article(item):
         logging.error(f"Error in process_single_article: {e}")
         return False
 
-# --- 이후 스케줄러 설정 및 시스템 가동 코드는 이전과 동일하게 유지 ---
-scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-random_second = random.randint(0, 59)
-
-
-@scheduler.scheduled_job("cron", minute="0,15,30,45", second=random_second, id='collect_and_update_task')
-def auto_collect_and_market_update():
-    logging.info(f"\n🚀 [통합 정기 사이클 시작] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    try:
-        collect_result = bulk_search_naver_news()
-        logging.info(f"✅ 수집 완료: 새 뉴스 {collect_result.get('newly_saved', 0)}건 확보")
-    except Exception as e:
-        logging.error(f"❌ 수집 단계 오류 발생: {e}")
-    logging.info(f"🏁 [사이클 종료] {datetime.now()}")
 
 def run_naver_collect():
     """main.py의 스케줄러와 연결되는 네이버 뉴스 수집 메인 함수"""
@@ -181,18 +165,3 @@ def run_naver_collect():
     return bulk_search_naver_news()
 
 
-if __name__ == '__main__':
-    try:
-        if not scheduler.running:
-            scheduler.start()
-            logging.info("⏰ [시스템] 백그라운드 스케줄러 가동 시작 (15분 주기)")
-
-        logging.info("🚀 [시스템] 초기 데이터 확보를 위해 첫 번째 분석을 즉시 실행합니다...")
-        auto_collect_and_market_update()
-
-        while True:
-            time.sleep(2)
-    except (KeyboardInterrupt, SystemExit):
-        if scheduler.running:
-            scheduler.shutdown()
-            logging.info("\n👋 [시스템] 스케줄러를 정지하고 서버를 안전하게 종료합니다.")

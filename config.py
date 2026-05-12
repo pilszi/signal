@@ -119,7 +119,7 @@ class Config:
     # --- 8. G20기준 국가 및 도시 매핑 데이터 ---
     G20_COUNTRY_MAP = {
         # --- [한자 약어 대응] ---
-        "韓": "Korea",
+        "韓": "South Korea",
         "美": "United States",
         "中": "China",
         "日": "Japan",
@@ -129,18 +129,18 @@ class Config:
         "露": "Russia",
         "伊": "Italy",
         "印": "India",
-        "越": "Vietnam",  # 베트남(越) 뉴스 대응
+        "越": "Vietnam",
         "北": "North Korea",
 
 
         # --- [동아시아 및 주변국] ---
-        "대한민국": "Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
+        "대한민국": "South Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
         "북한": "North Korea", "북측": "North Korea",
         "미국": "United States", "미": "United States", "미측": "United States",
         "중국": "China", "중": "China", "중측": "China",
         "일본": "Japan", "일": "Japan",
         "대만": "Taiwan", "타이완": "Taiwan",
-        "홍콩": "China",
+        "홍콩": "China", "동아시아": "East Asia", "몽골": "Mongolia",
 
         # --- [중동 - 리스크 핵심 지역] ---
         "이스라엘": "Israel","이란": "Iran",
@@ -154,7 +154,7 @@ class Config:
         "러시아": "Russia", "러": "Russia",
         "우크라이나": "Ukraine", "우크라": "Ukraine",
         "영국": "United Kingdom", "영": "United Kingdom",
-        "프랑스": "France",
+        "프랑스": "France", "불": "France",
         "독일": "Germany", "독": "Germany",
         "이탈리아": "Italy", "이탈리": "Italy",
         "유럽연합": "EU", "EU": "EU",
@@ -170,26 +170,33 @@ class Config:
         "필리핀": "Philippines",
         "호주": "Australia", "오스트레일리아": "Australia",
 
+
         # --- [아메리카/아프리카 - 자원 및 금융] ---
         "캐나다": "Canada",
         "멕시코": "Mexico",
         "브라질": "Brazil",
         "아르헨티나": "Argentina",
-        "남아프리카공화국": "South Africa", "남아공": "South Africa",
+        "남아프리카공화국": "South Africa", "남아공": "South Africa", "남공": "South Africa",
 
         # 뉴스에 빈번하게 등장하는 국가/지역
-        "필리핀": "Philippines", "파나마": "Panama",
+        "파나마": "Panama",
         "파키스탄": "Pakistan", "베네수엘라": "Venezuela",
         "우즈베키스탄": "Uzbekistan", "우즈벡": "Uzbekistan",
         "아프가니스탄": "Afghanistan", "방글라데시": "Bangladesh", "스리랑카": "Sri Lanka",
+        "브릭스": "BRICS", "BRICS": "BRICS",
+        "G7": "G7", "주요7개국": "G7",
+        "북미": "North America",
+        "남미": "Latin America", "라틴아메리카": "Latin America",
+        "오세아니아": "Oceania",
+        "뉴질랜드": "New Zealand", "노르웨이": "Norway", "포르투갈": "Portugal"
 
-        # 약어 대응 강화
-        "우크라": "Ukraine", "불": "France", "독": "Germany", "영": "United Kingdom",
-        "러": "Russia", "인니": "Indonesia", "남공": "South Africa"
     }
 
-    # '중동' 키워드 발생 시 아래 국가들의 리스크 지수를 동시에 포함
+    # 지역 연합
     REGION_TO_COUNTRIES = {
+        "East Asia": [
+            "South Korea", "North Korea", "China", "Japan", "Taiwan", "Hong Kong", "Mongolia", "Macau"
+        ],
         "Middle East": [
             "Israel", "Iran", "Saudi Arabia", "UAE", "Qatar", "Iraq",
             "Kuwait", "Egypt", "Turkey", "Syria", "Jordan", "Lebanon", "Oman", "Yemen", "Pakistan"
@@ -201,7 +208,26 @@ class Config:
         "ASEAN": [
             "Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore",
             "Malaysia", "Myanmar", "Cambodia", "Laos", "Brunei"
+        ],
+        "Central Asia": [
+            "Kazakhstan", "Uzbekistan", "Kyrgyzstan", "Tajikistan", "Turkmenistan"
+        ],
+        "BRICS": [
+            "Brazil", "Russia", "India", "China", "South Korea"
+        ],
+        "G7": [
+            "United States", "United Kingdom", "France", "Germany", "Japan", "Italy", "Canada"
+        ],
+        "North America": [
+            "United States", "Canada", "Mexico"
+        ],
+        "Latin America": [
+            "Brazil", "Argentina", "Chile", "Colombia", "Mexico", "Venezuela"
+        ],
+        "Oceania": [
+            "Australia", "New Zealand"
         ]
+
     }
 
     # G20 주요 도시 매칭 맵
@@ -229,7 +255,7 @@ class Config:
         "베이징": "China", "상하이": "China", "선전": "China", "광저우": "China", "홍콩": "China",
         "델리": "India", "뭄바이": "India", "뱅갈로르": "India",
         "모스크바": "Russia", "상트페테르부르크": "Russia",
-        "상파울루": "Brazil", "리우데자네이루": "Brazil",
+        "리우데자네이루": "Brazil",
         "자카르타": "Indonesia",
         "싱가포르": "Singapore",
         "하노이": "Vietnam", "호치민": "Vietnam",
@@ -375,7 +401,7 @@ class Config:
         "전쟁": -1.0, "침공": -1.0, "붕괴": -1.0, "셧다운": -1.0, "스태그플레이션": -1.0,
         "공급중단": -1.0, "수출금지": -1.0, "적자전환": -1.0, "충격": -1.0,
         "신용강등": -1.0, "등급강등": -1.0, "적자": -1.0, "추락": -1.0,
-        "쓰나미": -1.0, "하향조정": -0.9,
+        "쓰나미": -1.0,
 
         # --- [2. 경계/악화 - 고위험 리스크 (-0.8 ~ -0.9)] ---
         "폭등": -0.9, "상승세둔화": -0.8, "공급난": -0.9, "물류마비": -0.9,
@@ -418,7 +444,7 @@ class Config:
     skip_keywords = [
         "아침 신문 보기", "뉴스투데이", "오늘의 날씨", "스포츠 뉴스", "뉴스클립", "뉴스 요약",
         "헤드라인", "주요뉴스", "뉴스전망대", "부고", "인사", "게시판", "오늘의 운세", "금통위 의사록(단순공지)",
-        "프로야구", "하이라이트", "시청률", "개봉예정", "단독포착(연예)"
+        "프로야구", "하이라이트", "시청률", "개봉예정", "단독포착", "연예"
     ]
 
     # 정치 뉴스를 가져왔을때 risk 점수 완화
@@ -468,9 +494,11 @@ class Config:
         "다이브", "딥다이브", "면서", "기고", "줌인", "스타트", "뉴스UP", "속보", "칼럼",
         "이정환", "송세영", "최홍섭", "박현", "김혁", "일상", "이유", "의미",
         "역시", "여러", "모자라", "통해", "대신", "다시", "더욱", "다음", "올해",
-        "작년", "올해", "작년", "내년", "내달", "매달", "현안", "시간",
+        "작년", "올해", "작년", "내년", "내달", "매달", "현안", "시간", '재판매',
+        '무단', '배포', '금지', '저작권', '기자', '뉴스', '연합뉴스', '로이터', '전재',
+        "학습", "추측", "난무"
 
-        #
+
     ]
 
     # --- [중복 제거 및 보강된 NOISE_WORDS] ---
@@ -497,7 +525,7 @@ class Config:
         "위키트리", "지디넷코리아", "국제신문", "대전일보", "아시아투데이", "동행미디어", "머니투데이",
 
         # 사람 이름
-        "이주희", "김열", "김혁", "젠슨", "마크"
+        "이주희", "김열", "김혁", "젠슨", "마크", "이영재"
     ]
     # 불용어, 노이즈 통합 관리
     TOTAL_FILTERS = set(STOPWORDS + NOISE_WORDS)
@@ -514,33 +542,77 @@ class Config:
         "파업", "셧다운", "디폴트", "스태그플레이션", "희토류", "이중용도"
     ]
 
-    # 복합 국가 매핑 사전 정의 (히트맵)
+    # 복합 국가명에 국가들 매핑 사전 (히트맵)
     COMPOSITE_COUNTRY_MAP = {
         # 3개국 이상 (가장 먼저 체크)
-        "한미일": ["Korea", "United States", "Japan"],
-        "중동": ["Israel", "Iran", "Saudi Arabia", "UAE", "Qatar"],
-        "유럽연합": ["Germany", "France", "Italy"],
-        "EU": ["Germany", "France", "Italy"],
+        "한미일": ["South Korea", "United States", "Japan"],
+        "북중러": ["North Korea", "China", "Russia"],
+        "한중일": ["South Korea", "China", "Japan"],
+        "G7": ["United States", "United Kingdom", "France", "Germany", "Japan", "Italy", "Canada"],
+        "브릭스": ["Brazil", "Russia", "India", "China", "South Africa"],
+        "BRICS": ["Brazil", "Russia", "India", "China", "South Africa"],
+        "유럽연합": ["Germany", "France", "Italy", "Spain", "Netherlands", "Belgium"],
+        "EU": ["Germany", "France", "Italy", "Spain", "Netherlands", "Belgium"],
+        "중동": ["Israel", "Iran", "Saudi Arabia", "United Arab Emirates", "Qatar", "Iraq", "Egypt"],
+        "아세안": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia"],
+        "ASEAN": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia"],
+        "중앙아시아": ["Kazakhstan", "Uzbekistan", "Kyrgyzstan", "Tajikistan", "Turkmenistan"],
+        "남미": ["Brazil", "Argentina", "Chile", "Colombia"],
+        "라틴아메리카": ["Brazil", "Argentina", "Chile", "Colombia", "Mexico"],
 
-        # 2개국 (그다음 체크)
+        # 2개국 조합 (그 다음 체크)
         "미·이란": ["United States", "Iran"],
         "미이란": ["United States", "Iran"],
         "미국과 이란": ["United States", "Iran"],
-        "러우": ["Russia", "Ukraine"],
-        "러·우": ["Russia", "Ukraine"],
-        "미중": ["United States", "China"],
-        "한미": ["Korea", "United States"],
-        "한일": ["Korea", "Japan"],
-        "한중": ["Korea", "China"],
-        "미일": ["United States", "Japan"],
-        "북미": ["North Korea", "United States"],
-        "남북": ["Korea", "North Korea"],
+        "러우": ["Russia", "Ukraine"], "러·우": ["Russia", "Ukraine"], "러시아와 우크라이나": ["Russia", "Ukraine"],
+        "미중": ["United States", "China"], "미·중": ["United States", "China"],
+        "한미": ["South Korea", "United States"], "한·미": ["South Korea", "United States"],
+        "한일": ["South Korea", "Japan"], "한·일": ["South Korea", "Japan"],
+        "한중": ["South Korea", "China"], "한·중": ["South Korea", "China"],
+        "북미": ["North Korea", "United States"], "북·미": ["North Korea", "United States"],
+        "남북": ["South Korea ", "North Korea"], "남·북": ["South Korea", "North Korea"],
+        "중러": ["China", "Russia"], "중·러": ["China", "Russia"],
+        "북러": ["North Korea", "Russia"], "북·러": ["North Korea", "Russia"],
+        "미일": ["United States", "Japan"], "미·일": ["United States", "Japan"],
+        "영미": ["United Kingdom", "United States"], "미영": ["United States", "United Kingdom"],
+        "일중": ["Japan", "China"], "일·중": ["Japan", "China"],
+        "한러": ["South Korea", "Russia"], "한·러": ["South Korea", "Russia"],
 
-        # 국가별 약어 (추가하면 성능 UP)
-        "대중": ["China"],  # 예: 대중 수출 규제
-        "대미": ["United States"],  # 예: 대미 통상 압박
+        # 국가별 약어
+        "대중": ["China"],
+        "대미": ["United States"],
         "대일": ["Japan"],
-        "대러": ["Russia"]
+        "대러": ["Russia"],
+        "대북": ["North Korea"],
+        "대한": ["South Korea"],
+        "대유럽": ["Germany", "France", "Italy"],
+    }
+
+    # 복합 국가
+    REGION_TO_COUNTRY_MAP = {
+        # 지명 기반
+        "호르무즈": "Middle East",
+        "홍해": "Middle East",
+        "페르시아만": "Middle East",
+        "남중국해": "East Asia",
+
+        # 지역 및 공식 연합체
+        "중동": "Middle East", "Middle East": "Middle East",
+        "유럽연합": "EU", "EU": "EU", "European Union": "EU", "유로존": "EU",
+        "중앙아시아": "Central Asia", "Central Asia": "Central Asia",
+        "동아시아": "East Asia", "East Asia": "East Asia", "동북아": "East Asia",
+        "동남아시아": "ASEAN", "ASEAN": "ASEAN", "동남아": "ASEAN", "아세안": "ASEAN",
+        "브릭스": "BRICS", "BRICS": "BRICS",
+        "G7": "G7", "주요7개국": "G7",
+        "북미": "North America", "North America": "North America", "북아메리카": "North America",
+        "남미": "Latin America", "Latin America": "Latin America", "라틴아메리카": "Latin America",
+        "오세아니아": "Oceania", "Oceania": "Oceania",
+
+        # --- [추가하면 좋은 핵심 키워드] ---
+        "걸프": "Middle East",
+        "인도태평양": "Global",  # 혹은 주요 관련국 리스트로 매핑
+        "서방": "G7"  # 뉴스 맥락에 따라 G7과 유사하게 쓰임
+
     }
 
     # 잘린 단어 이어 붙여줌
@@ -556,7 +628,6 @@ class Config:
         "반도": "반도체", "이차": "이차전지", "전지": "이차전지",
         "포스": "트렌드포스", "데이터": "데이터센터", "센터": "데이터센터",
 
-
         # [추출 오류 교정]
         "대감": "기대감", "불기": "불기둥", "스물": "이스물라",
         "상의": "대한상의", "안전": "안전벨트", "지수": "코스피지수",
@@ -569,18 +640,13 @@ class Config:
         "삼전": "삼성전자", "닉스": "SK하이닉스", "성전": "삼성전자",
         "안두": "안두릴", "기판": "기판가격", "판값": "기판가격",
         "에이": "피에이치에이", "에이치": "피에이치에이", "스택": "풀스택",
-
-        # [기업]
         "엘앤": "엘앤에프", "에프": "엘앤에프로", "미투": "대미투자법",
         "자법": "대미투자법","클리": "위클리", "일리": "데일리",
         "나노": "8나노"
-
-
-
     }
 
-    # 리스크 점수 가중치 공식용 설정 (히트맵)
 
+    # 리스크 점수 가중치 공식용 설정 (히트맵)
     # 1. 한국 영향권 (이게 제목에 있으면 무조건 Korea)
     KOREA_PRIORITY_KEYWORDS = [
         "정부", "관세청", "재경부", "기획재정부", "코스피", "삼성", "삼성전자", "한은", "한국은행",
@@ -592,18 +658,14 @@ class Config:
     ]
     # 2. 주요 엔티티별 국가 매핑 (기업/기관명)
     ENTITY_TO_COUNTRY_MAP = {
-        "삼성": "Korea", "삼성전자": "Korea", "SK하이닉스": "Korea", "현대차": "Korea",
-        "HMM": "Korea", "에쓰오일": "Korea", "제주항공": "Korea", "대한항공": "Korea",
-        "LG엔솔": "Korea", "한국은행": "Korea", "한은": "Korea", "공정위": "Korea",
+        "삼성": "South Korea", "삼성전자": "South Korea", "SK하이닉스": "South Korea", "현대차": "South Korea",
+        "HMM": "South Korea", "에쓰오일": "South Korea", "제주항공": "South Korea", "대한항공": "South Korea",
+        "LG엔솔": "South Korea", "한국은행": "South Korea", "한은": "South Korea", "공정위": "South Korea",
         "엔비디아": "United States", "애플": "United States", "인텔": "United States",
-        "TSMC": "Taiwan", "이란": "Iran", "이스라엘": "Israel", "HD현대": "Korea",
-        "현대로템": "Korea", "개발": "Korea","SKT": "Korea", "경영": "Korea",
+        "TSMC": "Taiwan", "이란": "Iran", "이스라엘": "Israel", "HD현대": "South Korea",
+        "현대로템": "South Korea", "개발": "South Korea","SKT": "South Korea", "경영": "South Korea",
         '뉴욕증시': "United States", '다우': "United States", '나스닥': "United States",
         "OpenAI": "United States", "연준": "United States"
     }
 
-    # 3. 지정학적 지역 매핑
-    REGION_TO_COUNTRY_MAP = {
-        "호르무즈": "Middle East", "홍해": "Middle East", "중동": "Middle East",
-        "페르시아만": "Middle East", "남중국해": "China"
-    }
+

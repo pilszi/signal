@@ -4,24 +4,16 @@ import subprocess
 import asyncio
 from typing import Dict, Any
 import traceback
-
-import jsonify
 import sqlalchemy
-from datetime import datetime
-
 from concurrent.futures import ThreadPoolExecutor
-
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
 from elasticsearch import Elasticsearch
-from fastapi import FastAPI, Body, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from sse_starlette.sse import EventSourceResponse
-
 
 # --- 이 코드를 반드시 추가하세요 ---
 if sys.platform == 'win32':
@@ -34,7 +26,8 @@ from dataReqType.regist import RegistModel
 from db import get_db, engine
 from hash import hash_password, verify_password
 from config import Config
-from utils import prepare_heatmap_data
+from utils import prepare_heatmap_data, save_analysis_result
+
 
 # 파일 연동 (수집 및 분석 모듈)
 import naver
@@ -58,6 +51,35 @@ es = Elasticsearch(["http://100.123.232.79:9200"])
 # ==========================================
 # 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
 # ==========================================
+# 분석 실행 후 결과를 DB에 저장하는 함수
+async def run_analysis_and_save():
+    logger.info("🧠 [Analysis] AI 분석 및 DB 저장 시퀀스 시작")
+
+    # 1. AI 분석 실행
+    results = await ml.run_analysis()
+
+    if not results:
+        logger.info("ℹ️ [Analysis] 분석할 새로운 데이터가 없습니다.")
+        return
+
+    # 2. DB 연결 및 저장
+    try:
+        with get_db() as session:
+            # 1. 세션 내부에서 커넥션 획득
+            conn = session.connection().connection
+            cursor = conn.cursor()
+
+            for res in results:
+                save_analysis_result(cursor, conn, res)
+
+            # 2. 커넥션 커밋 외에 세션 자체를 커밋/플러시 해줍니다.
+            session.commit()  # 세션을 확정
+            logger.info(f"✅ [Analysis] {len(results)}건의 분석 결과 DB 저장 완료")
+    except Exception as e:
+        logger.error(f"❌ [Analysis] DB 저장 중 에러 발생: {e}")
+
+
+
 async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
     """
     BERT 모델 학습 여부를 체크하고, 완료되었다면 ml.run_analysis를 주기적으로 실행함
@@ -84,7 +106,7 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
                 # BERT 분석 작업 등록 (10분 주기로 실전 투입)
                 if not scheduler.get_job('ml_analysis'):
                     scheduler.add_job(
-                        ml.run_analysis,
+                        run_analysis_and_save,
                         'interval',
                         minutes=10,
                         id='ml_analysis',
@@ -113,7 +135,6 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
                 id='ml_analysis',
                 max_instances=1,  # 추가
                 replace_existing=True,  # 추가
-
             )
 
 
@@ -136,8 +157,8 @@ async def run_initial_batch(scheduler):
         # 수집된 데이터를 번역해서 news_origin으로 넘김
         await loop.run_in_executor(executor, translator_worker.process_translation)
 
-        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 파이프라인 즉시 가동")
-        await ml.run_analysis()
+        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 및 저장 가동")
+        await run_analysis_and_save()
         await manage_ml_pipeline(scheduler) # 그 다음 앞으로 10분마다 돌 수 있게 스케줄러에 등록
 
         logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
@@ -335,36 +356,68 @@ def delete_member(info: Dict[str, str]):
 
 # main 페이지 오늘의 뉴스 조회
 @app.get("/public_signals")
-def public_signals():
-    """ 메인 페이지 기사 요청 """
-    body = {"query": {"bool": {"filter": [{"range": {
-                            "published_date": {
-                                "gte": "now-12h",     # 현재 시각 기준 12시간 전부터
-                                "lte": "now",         # 현재 시각까지
-                            }}}]
+def public_signals(date: str = Query(None)):
+    """ 메인 페이지 기사 요청 및 필터링 """
+    # [1] 검색 조건 설정 (날짜가 있으면 해당 날짜, 없으면 최근 12시간)
+    if date:
+        date_filter = {
+            "range": {
+                "published_date": {
+                    "gte": f"{date}T00:00:00",
+                    "lte": f"{date}T23:59:59"
+                }
+            }
+        }
+    else:
+        date_filter = {
+            "range": {
+                "published_date": {
+                    "gte": "now-12h",
+                    "lte": "now"
+                }
+            }
+        }
+
+    # [2] 최종 Elasticsearch 쿼리 바디
+    search_body = {
+        "query": {
+            "bool": {
+                "filter": [date_filter]
             }
         },
-        "sort": [{ "published_date": "desc" }]        # 최신 기사가 먼저 나오도록 정렬
-        ,"size": 100
+        "sort": [{"published_date": "desc"}],
+        "size": 100
     }
-    res = es.search(index= "news_labeling", body={"size":100})
-    print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
-    # print(res['hits']['hits'])
-    public_news = []
-    for news in res['hits']['hits']:
-        # print(news["_source"])
-        _news = {
-            'title' : news["_source"]["title"],
-            'url' : news["_source"]["url"],
-            'main_image' : news["_source"]["main_image"],
-            'published_date' : news["_source"]["published_date"],
-            'press_name' : news["_source"]["press_name"],
-            'risk_level' : news["_source"]["risk_level"],
-            'risk_score' : news["_source"]["final_total_score"]["total"]
-        }
-        public_news.append(_news)
-    # print(public_news)
-    return {"msg": public_news}
+
+    try:
+        # 🔥 중요: 정의한 search_body를 실제로 사용합니다!
+        res = es.search(index="news_labeling", body=search_body)
+
+        print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
+
+        public_news = []
+        for news in res['hits']['hits']:
+            source = news.get("_source", {})
+
+            # [3] 모든 필드에 .get()을 사용하여 방어적으로 데이터 추출
+            _news = {
+                'title': source.get("title", "제목 없음"),
+                'url': source.get("url", "#"),
+                # 이미지가 없으면 기본 플레이스홀더 이미지 사용
+                'main_image': source.get("main_image") or "https://via.placeholder.com/400x300?text=No+Image",
+                'published_date': source.get("published_date"),
+                'press_name': source.get("press_name", "알 수 없음"),
+                'risk_level': source.get("risk_level", "안정"),
+                # 중첩된 score 데이터도 안전하게 가져오기
+                'risk_score': source.get("final_total_score", {}).get("total", 0)
+            }
+            public_news.append(_news)
+
+        return {"msg": public_news}
+
+    except Exception as e:
+        print(f"❌ 검색 중 오류 발생: {e}")
+        return {"msg": [], "error": str(e)}
 
 @app.get("/main/country")
 def country():
