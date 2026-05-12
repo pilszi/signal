@@ -245,8 +245,48 @@
         let selectedKeyword = null;
         let noti = [];
         let allSignals = [];
+        let keyword = [];
+        let filteredSignal = [];
         const SIGNALS_PER_PAGE = 15;
         let currentPage = 1;
+
+
+        async function fetchMainData() {
+            let {data} = await axios.get("/custom_news?id="+savedUserId);
+            console.log(data);
+            allSignals = data.news;
+            keyword = data.keyword;
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 현재 브라우저의 파일명만 추출
+            const currentPath = window.location.pathname.split("/").pop() || "index.html";
+            const navItems = document.querySelectorAll('.nav-item');
+
+            navItems.forEach(item => {
+                // href 속성값에서 파일명만 가져와서 비교
+                const itemHref = item.getAttribute('href').split("/").pop();
+                
+                if (currentPath === itemHref) {
+                    if (item.querySelector('i')) {
+                        item.classList.replace('text-gray-600', 'text-blue-600');
+                        item.classList.add('bg-blue-50');
+                    } else {
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
+                    }
+                }
+                
+            });
+            axios.get("/session_out");
+            await fetchMainData();
+            updateNavbar();
+            updateNotifUI();
+            render();
+            renderPagination()
+            if (window.lucide) lucide.createIcons();
+        });
+
 
         // Navbar 상태 업데이트
         function updateNavbar() {
@@ -451,8 +491,8 @@
                 "주의": "bg-yellow-100 text-yellow-700",
                 "심각": "bg-red-100 text-red-700"
             };
+            // console.log(news);
             const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
-
             let newBadge = '';
             if (!news.is_read) {
                 newBadge = '<div class="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>';
@@ -466,7 +506,7 @@
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-2">
                             <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level] || 'bg-gray-100'}">
-                                Signal ${news.displayScore}
+                                Signal ${displayScore}
                             </span>
                             <span class="text-xs text-blue-600 font-medium">${news.keyword}</span>
                         </div>
@@ -482,14 +522,48 @@
         }
 
         // 4. 필터 및 정렬 렌더링 함수
-        async function render() {
+        function render() {
             const filterContainer = document.getElementById('keyword-filters');
             const newsGrid = document.getElementById('news-grid');
             const statsText = document.getElementById('stats-text');
 
-            let {data} = await axios.get("/custom_news?id="+savedUserId);
-            console.log(data);
-            allSignals = data.news
+
+            let filtered = allSignals.filter(news => {
+                if (selectedKeyword === null) return true; // '전체'일 때는 모두 통과
+                
+                // 백엔드에서 준 키워드 방식에 맞춰 비교 (단일 문자열인 경우)
+                let targetKeyword = '';
+                if (news.keyword){
+                    targetKeyword = String(news.keyword).trim().toLowerCase();
+                }
+                return targetKeyword === selectedKeyword.trim().toLowerCase();
+            });
+            // 필터링 및 정렬 로직
+            filteredSignal = [...filtered].sort((a, b) => {
+                // 1. 읽음 상태 기준 정렬 (읽지 않은 기사 !is_read 가 위로 오도록)
+                const readA = !!a.is_read; 
+                const readB = !!b.is_read;
+                if (readA !== readB) {
+                    if (readA) {
+                        return 1;  // a가 읽은 상태면 뒤로 보냄
+                    } else {
+                        return -1; // a가 읽지 않은 상태면 앞으로 보냄
+                    }
+                }
+                // 2. 리스크 점수 기준 정렬 (낮은 점수가 위로)
+                if (a.risk_score !== b.risk_score) {
+                    return a.risk_score - b.risk_score;
+                }
+                // 3. 날짜 기준 정렬 (최신순)
+                const dateA = new Date(a.published_date);
+                const dateB = new Date(b.published_date);
+                return dateB - dateA;
+
+            });
+            const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
+            const endIndex = startIndex + SIGNALS_PER_PAGE;
+            const currentSignals = filteredSignal.slice(startIndex, endIndex);
+
             // 필터 버튼 생성
             filterContainer.innerHTML = '<i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>';
             
@@ -511,65 +585,42 @@
             allBtn.className = classNames;
             allBtn.onclick = () => { 
                 selectedKeyword = null; 
+                currentPage = 1;
                 render(); 
             };
             filterContainer.appendChild(allBtn);
 
             // 개별 키워드 버튼
-            data.keyword.forEach(kw => {
+            keyword.forEach(kw => {
                 const btn = document.createElement('button');
                 btn.innerText = kw;
-                let className = 'px-4 py-2 rounded-lg transition-colors';
 
-                if (selectedKeyword === kw){
-                    className += " bg-blue-500 text-white";
+                const isActive = selectedKeyword && (selectedKeyword.trim().toLowerCase() === kw.trim().toLowerCase());
+
+                btn.className = 'px-4 py-2 rounded-lg transition-colors';
+
+                if (isActive){
+                    btn.className += " bg-blue-500 text-white";
                 }else{
-                    className += " bg-blue-50 text-blue-600 hover:bg-blue-100"
+                    btn.className += " bg-blue-50 text-blue-600 hover:bg-blue-100"
                 }
-                btn.onclick = () => { 
-                    selectedKeyword = kw; 
+                btn.onclick = () => {
+                    currentPage = 1;
+                    selectedKeyword = kw.trim().toLowerCase(); 
+                    // console.log(`${selectedKeyword} / ${kw}`)
                     render(); 
                 };
-                btn.className = className;
                 filterContainer.appendChild(btn);
             });
 
-            const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
-            const endIndex = startIndex + SIGNALS_PER_PAGE;
-            const currentSignals = allSignals.slice(startIndex, endIndex);
-
-            // 필터링 및 정렬 로직
-            const filtered = currentSignals.filter(n => !selectedKeyword || n.keyword === selectedKeyword);
-            const sorted = [...filtered].sort((a, b) => {
-                // 1. 읽음 상태 기준 정렬 (읽지 않은 기사 !is_read 가 위로 오도록)
-                const readA = !!a.is_read; 
-                const readB = !!b.is_read;
-                if (readA !== readB) {
-                    if (readA) {
-                        return 1;  // a가 읽은 상태면 뒤로 보냄
-                    } else {
-                        return -1; // a가 읽지 않은 상태면 앞으로 보냄
-                    }
-                }
-                // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
-                if (a.risk_score !== b.risk_score) {
-                    return a.risk_score - b.risk_score;
-                }
-                // 3. 날짜 기준 정렬 (최신순)
-                const dateA = new Date(a.published_date);
-                const dateB = new Date(b.published_date);
-                return dateB - dateA;
-
-                renderPagination();
-            });
-
             // 뉴스 그리드 채우기
-            newsGrid.innerHTML = sorted.map(news => createNewsCard(news)).join('');
+            newsGrid.innerHTML = currentSignals.map(news => createNewsCard(news)).join('');
             
             // 통계 갱신
-            const unreadCount = sorted.filter(n => !n.is_read).length;
-            statsText.innerText = `${sorted.length}개의 뉴스 · 읽지 않은 뉴스 ${unreadCount}개`;
+            const unreadCount = filteredSignal.filter(n => !n.is_read).length;
+            statsText.innerText = `${filteredSignal.length}개의 뉴스 · 읽지 않은 뉴스 ${unreadCount}개`;
 
+            renderPagination();
             lucide.createIcons();
         }
 
@@ -583,7 +634,7 @@
                     id: savedUserId,
                     url: articleUrl
                 });
-                console.log("열람 로그 전송 완료");
+                // console.log("열람 로그 전송 완료");
                 window.open(articleUrl, '_blank');
                 setTimeout(() => {
                     window.location.reload();
@@ -594,9 +645,9 @@
         // 5. 페이지네이션 렌더링
         function renderPagination() {
             const paginationContainer = document.getElementById('pagination');
-            const totalPages = Math.ceil(allSignals.length / SIGNALS_PER_PAGE);
+            const totalPages = Math.ceil(filteredSignal.length / SIGNALS_PER_PAGE);
             
-            if (totalPages <= 1) {
+            if (totalPages <= 1) {  
                 paginationContainer.innerHTML = '';
                 return;
             }
@@ -628,38 +679,9 @@
         // 6. 이벤트 핸들러
         function handlePageChange(page) {
             currentPage = page;
-            createNewsCard();
-            renderPagination();
+            render();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
-            const navItems = document.querySelectorAll('.nav-item');
-
-            navItems.forEach(item => {
-                // href 속성값에서 파일명만 가져와서 비교
-                const itemHref = item.getAttribute('href').split("/").pop();
-                
-                if (currentPath === itemHref) {
-                    if (item.querySelector('i')) {
-                        item.classList.replace('text-gray-600', 'text-blue-600');
-                        item.classList.add('bg-blue-50');
-                    } else {
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
-                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
-                    }
-                }
-                
-            });
-            axios.get("/session_out");
-            updateNavbar();
-            updateNotifUI();
-            render();
-            renderPagination()
-            if (window.lucide) lucide.createIcons();
-        });
 
         async function handleLogout() {
             if(confirm("로그아웃 하시겠습니까?")){
