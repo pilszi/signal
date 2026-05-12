@@ -159,8 +159,7 @@
                 padding: 24px;
                 border-radius: 16px;
                 margin-bottom: 16px;
-                white-space: pre-wrap;
-                line-height: 0.2;
+                line-height: 1.5;
                 transition: all 0.3s ease;
                 box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
             }
@@ -348,15 +347,15 @@
                 // 리스크 레벨에 따른 클래스 결정 (getRiskClass 함수 활용)
                 const riskClass = getRiskClass(signal.risk_level);
                 // 날짜 안전하게 추출
-                const displayDate = signal.signal_time ? signal.signal_time.split('T')[0] : '날짜 미상';
-
+                // const displayDate = signal.signal_time ? signal.signal_time.split('T')[0] : '날짜 미상';
+                // timeAgo(시간) 사용하여 signal 분석이 몇분/ 몇시간/ 몇일 전 으로 표기
                 return `
                     <div class="report-card ${riskClass} p-4">
                         <div class="flex justify-between items-start mb-2">
-                            <span class="px-3 py-1 rounded-full text-xs font-bold bg-white/50 border border-current">
+                            <span class="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-bold bg-white/50 border border-current">
                                 ${signal.risk_level} 단계 시그널
                             </span>
-                            <span class="text-xs opacity-70 font-medium">${displayDate}</span>
+                            <span class="text-center text-xs opacity-70 font-medium">${timeAgo(signal.signal_time)}</span>
                         </div>
 
                         <div class="mb-3">
