@@ -145,7 +145,7 @@ class Config:
         # --- [중동 - 리스크 핵심 지역] ---
         "이스라엘": "Israel","이란": "Iran",
         "사우디아라비아": "Saudi Arabia", "사우디": "Saudi Arabia",
-        "아랍에미리트": "UAE", "아랍에미레이트": "UAE", "두바이": "UAE",
+        "아랍에미리트": "United Arab Emirates", "아랍에미레이트": "United Arab Emirates", "두바이": "United Arab Emirates",
         "카타르": "Qatar", "이라크": "Iraq", "쿠웨이트": "Kuwait",
         "이집트": "Egypt", "튀르키예": "Turkey", "터키": "Turkey", "중동": "Middle East",
         "시리아": "Syria","요르단": "Jordan","레바논": "Lebanon","오만": "Oman","예멘": "Yemen",
@@ -200,7 +200,7 @@ class Config:
             "Korea", "North Korea", "China", "Japan", "Taiwan", "Hong Kong", "Mongolia", "Macau"
         ],
         "Middle East": [
-            "Israel", "Iran", "Saudi Arabia", "UAE", "Qatar", "Iraq",
+            "Israel", "Iran", "Saudi Arabia", "United Arab Emirates", "Qatar", "Iraq",
             "Kuwait", "Egypt", "Turkey", "Syria", "Jordan", "Lebanon", "Oman", "Yemen", "Pakistan"
         ],
         "EU": [
@@ -248,7 +248,7 @@ class Config:
         "테헤란": "Iran", "이스파한": "Iran",
         "예루살렘": "Israel", "텔아비브": "Israel",
         "리야드": "Saudi Arabia", "제다": "Saudi Arabia",
-        "두바이": "UAE", "아부다비": "UAE",
+        "두바이": "United Arab Emirates", "아부다비": "United Arab Emirates",
         "도하": "Qatar",
         "바그다드": "Iraq",
         "카이로": "Egypt",
@@ -456,7 +456,8 @@ class Config:
     skip_keywords = [
         "아침 신문 보기", "뉴스투데이", "오늘의 날씨", "스포츠 뉴스", "뉴스클립", "뉴스 요약",
         "헤드라인", "주요뉴스", "뉴스전망대", "부고", "인사", "게시판", "오늘의 운세", "금통위 의사록(단순공지)",
-        "프로야구", "하이라이트", "시청률", "개봉예정", "단독포착", "연예"
+        "프로야구", "하이라이트", "시청률", "개봉예정", "단독포착", "연예", "페낭", "묘지 투어","개척자", "식민지",
+        "역사"
     ]
 
     industry_kws = [
@@ -568,78 +569,135 @@ class Config:
         "파업", "셧다운", "디폴트", "스태그플레이션", "희토류", "이중용도"
     ]
 
-    # 복합 국가명에 국가들 매핑 사전 (히트맵)
+    # 사건/지명 → 국가 리스트
     COMPOSITE_COUNTRY_MAP = {
-        # 3개국 이상 (가장 먼저 체크)
-        "한미일": ["Korea", "United States", "Japan"],
-        "북중러": ["North Korea", "China", "Russia"],
-        "한중일": ["Korea", "China", "Japan"],
+        # 🌍 해협/지정학 포인트
+        "Strait of Hormuz": ["Iran", "United Arab Emirates", "Oman", "Saudi Arabia"],
+        "Red Sea": ["Egypt", "Saudi Arabia", "Yemen", "Sudan", "Eritrea"],
+        "South China Sea": ["China", "Philippines", "Vietnam", "Malaysia", "Brunei", "Taiwan"],
+        "Taiwan Strait": ["China", "Taiwan"],
+        "Bab el-Mandeb": ["Yemen", "Djibouti", "Eritrea"],
+        "Panama Canal": ["United States", "Panama"],
+        "Suez Canal": ["Egypt"],
+
+        # 🌍 지정학/분쟁
+        "Ukraine War": ["Ukraine", "Russia"],
+        "Middle East Conflict": ["Israel", "Iran", "Saudi Arabia", "United Arab Emirates"],
+
+        # 🌍 경제 이슈
+        "Semiconductor Supply Chain": ["Taiwan", "Korea", "United States", "China"],
+        "Trade War": ["United States", "China"],
+        "Energy Crisis": ["Russia", "EU", "Middle East"],
+        "Financial Crisis": ["United States", "EU", "Japan", "China"],
+
+        # 🌍 블록
         "G7": ["United States", "United Kingdom", "France", "Germany", "Japan", "Italy", "Canada"],
-        "브릭스": ["Brazil", "Russia", "India", "China", "South Africa"],
         "BRICS": ["Brazil", "Russia", "India", "China", "South Africa"],
-        "유럽연합": ["Germany", "France", "Italy", "Spain", "Netherlands", "Belgium"],
         "EU": ["Germany", "France", "Italy", "Spain", "Netherlands", "Belgium"],
-        "중동": ["Israel", "Iran", "Saudi Arabia", "United Arab Emirates", "Qatar", "Iraq", "Egypt"],
-        "아세안": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia"],
         "ASEAN": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia"],
-        "중앙아시아": ["Kazakhstan", "Uzbekistan", "Kyrgyzstan", "Tajikistan", "Turkmenistan"],
-        "남미": ["Brazil", "Argentina", "Chile", "Colombia"],
-        "라틴아메리카": ["Brazil", "Argentina", "Chile", "Colombia", "Mexico"],
-
-        # 2개국 조합 (그 다음 체크)
-        "미·이란": ["United States", "Iran"],
-        "미이란": ["United States", "Iran"],
-        "미국과 이란": ["United States", "Iran"],
-        "러우": ["Russia", "Ukraine"], "러·우": ["Russia", "Ukraine"], "러시아와 우크라이나": ["Russia", "Ukraine"],
-        "미중": ["United States", "China"], "미·중": ["United States", "China"],
-        "한미": ["Korea", "United States"], "한·미": ["Korea", "United States"],
-        "한일": ["Korea", "Japan"], "한·일": ["Korea", "Japan"],
-        "한중": ["Korea", "China"], "한·중": ["Korea", "China"],
-        "북미": ["North Korea", "United States"], "북·미": ["North Korea", "United States"],
-        "남북": ["Korea ", "North Korea"], "남·북": ["Korea", "North Korea"],
-        "중러": ["China", "Russia"], "중·러": ["China", "Russia"],
-        "북러": ["North Korea", "Russia"], "북·러": ["North Korea", "Russia"],
-        "미일": ["United States", "Japan"], "미·일": ["United States", "Japan"],
-        "영미": ["United Kingdom", "United States"], "미영": ["United States", "United Kingdom"],
-        "일중": ["Japan", "China"], "일·중": ["Japan", "China"],
-        "한러": ["Korea", "Russia"], "한·러": ["Korea", "Russia"],
-
-        # 국가별 약어
-        "대중": ["China"],
-        "대미": ["United States"],
-        "대일": ["Japan"],
-        "대러": ["Russia"],
-        "대북": ["North Korea"],
-        "대한": ["Korea"],
-        "대유럽": ["Germany", "France", "Italy"],
+        "Central Asia": ["Kazakhstan", "Uzbekistan", "Kyrgyzstan", "Tajikistan", "Turkmenistan"],
+        "East Asia": ["China", "Japan", "Korea", "Taiwan"],
+        "North America": ["United States", "Canada", "Mexico"],
+        "Latin America": ["Brazil", "Argentina", "Chile", "Colombia"],
+        "Oceania": ["Australia", "New Zealand"],
+        "Middle East": ["Israel", "Iran", "Saudi Arabia", "United Arab Emirates", "Qatar", "Iraq", "Egypt"],
     }
 
-    # 복합 국가
+
+    # 별칭 테이블 (한글 → 영어 매핑)
+    COMPOSITE_ALIAS_MAP = {
+        # 🌍 지명 / 해협 / 운하
+        "호르무즈": "Strait of Hormuz",
+        "Strait of Hormuz": "Strait of Hormuz",
+
+        "홍해": "Red Sea",
+        "Red Sea": "Red Sea",
+
+        "남중국해": "South China Sea",
+        "South China Sea": "South China Sea",
+
+        "대만해협": "Taiwan Strait",
+        "Taiwan Strait": "Taiwan Strait",
+
+        "페르시아만": "Persian Gulf",
+        "Persian Gulf": "Persian Gulf",
+
+        "바브엘만데브": "Bab el-Mandeb",
+        "밥엘만데브": "Bab el-Mandeb",
+        "Bab el-Mandeb": "Bab el-Mandeb",
+
+        "파나마 운하": "Panama Canal",
+        "Panama Canal": "Panama Canal",
+
+        "수에즈 운하": "Suez Canal",
+        "Suez Canal": "Suez Canal",
+
+        # 🌍 전쟁/이슈
+        "우크라이나 전쟁": "Ukraine War",
+        "Ukraine War": "Ukraine War",
+
+        "중동 분쟁": "Middle East Conflict",
+        "Middle East Conflict": "Middle East Conflict",
+
+        "반도체 공급망": "Semiconductor Supply Chain",
+        "Semiconductor Supply Chain": "Semiconductor Supply Chain",
+
+        "관세 전쟁": "Trade War",
+        "Trade War": "Trade War",
+
+        "에너지 위기": "Energy Crisis",
+        "Energy Crisis": "Energy Crisis",
+
+        "금융위기": "Financial Crisis",
+        "Financial Crisis": "Financial Crisis",
+
+        # 🌍 지역
+        "중동": "Middle East",
+        "Middle East": "Middle East",
+
+        "유럽연합": "EU",
+        "EU": "EU",
+        "European Union": "EU",
+
+        "아세안": "ASEAN",
+        "동남아": "ASEAN",
+        "ASEAN": "ASEAN",
+
+        "브릭스": "BRICS",
+        "BRICS": "BRICS",
+
+        "G7": "G7",
+        "주요7개국": "G7",
+
+        "동아시아": "East Asia",
+        "East Asia": "East Asia",
+
+        "중앙아시아": "Central Asia",
+        "Central Asia": "Central Asia",
+
+        "남미": "Latin America",
+        "라틴아메리카": "Latin America",
+        "Latin America": "Latin America",
+
+        "북미": "North America",
+        "North America": "North America",
+
+        "오세아니아": "Oceania",
+        "Oceania": "Oceania",
+
+        "서방": "G7",
+        "인도태평양": "Global",
+    }
+
+    # 고정된 지역 단위 -> 국가명 리스트
     REGION_TO_COUNTRY_MAP = {
-        # 지명 기반
-        "호르무즈": "Middle East",
-        "홍해": "Middle East",
-        "페르시아만": "Middle East",
-        "남중국해": "East Asia",
-
-        # 지역 및 공식 연합체
-        "중동": "Middle East", "Middle East": "Middle East",
-        "유럽연합": "EU", "EU": "EU", "European Union": "EU", "유로존": "EU",
-        "중앙아시아": "Central Asia", "Central Asia": "Central Asia",
-        "동아시아": "East Asia", "East Asia": "East Asia", "동북아": "East Asia",
-        "동남아시아": "ASEAN", "ASEAN": "ASEAN", "동남아": "ASEAN", "아세안": "ASEAN",
-        "브릭스": "BRICS", "BRICS": "BRICS",
-        "G7": "G7", "주요7개국": "G7",
-        "북미": "North America", "North America": "North America", "북아메리카": "North America",
-        "남미": "Latin America", "Latin America": "Latin America", "라틴아메리카": "Latin America",
-        "오세아니아": "Oceania", "Oceania": "Oceania",
-
-        # --- [추가하면 좋은 핵심 키워드] ---
-        "걸프": "Middle East",
-        "인도태평양": "Global",  # 혹은 주요 관련국 리스트로 매핑
-        "서방": "G7"  # 뉴스 맥락에 따라 G7과 유사하게 쓰임
-
-    }
+    "G7": ["United States", "United Kingdom", "France", "Germany", "Japan", "Italy", "Canada"],
+    "BRICS": ["Brazil", "Russia", "India", "China", "South Africa"],
+    "EU": ["Germany", "France", "Italy", "Spain", "Netherlands", "Belgium"],
+    "ASEAN": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia"],
+    "Middle East": ["Israel", "Iran", "Saudi Arabia", "United Arab Emirates", "Qatar", "Iraq", "Egypt"],
+    "East Asia": ["China", "Japan", "Korea", "Taiwan"],
+}
 
     # 잘린 단어 이어 붙여줌
     correction_map = {
