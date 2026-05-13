@@ -76,16 +76,29 @@ def process_translation():
         for index_name in TARGET_INDICES:
             try:
                 # 1. ES에서 번역되지 않은 기사 1개 가져오기
-                query = {"query": {"term": {"is_translated": False}}}
-                res = es.search(index=index_name, body={**query, "size": 1}, ignore_unavailable=True)
+                query = {
+                            "query": {
+                                "bool": {
+                                    "should": [
+                                        {"term": {"is_translated": False}},
+                                        {"bool": {"must_not": {"exists": {"field": "is_translated"}}}}
+                                    ]
+                                }
+                            }
+                        }
+                res = es.search(index=index_name, body={**query, "size": 20}, ignore_unavailable=True)
                 hits = res['hits']['hits']
 
                 if not hits:
                     continue
 
+
+                    # ---- 실제 작업 대상 ----
+                hit = hits[0]
+                source = hit["_source"]
+                doc_id = hit["_id"]
+
                 found_job_in_this_turn = True
-                doc_id = hits[0]['_id']
-                source = hits[0]['_source']
 
                 # [가장 중요 - 선점 로직]
                 # 번역 시작하기 전에 일단 'True'로 업데이트해서 다른 스레드가 못 가져가게 막습니다.
@@ -154,8 +167,8 @@ def process_translation():
 
         # 모든 인덱스를 확인했는데 할 작업이 없다면 루프 종료
         if not found_job_in_this_turn:
-            logging.info("대기 중: 모든 번역 작업이 완료되었습니다.")
-            break
+            logging.info("모든 번역 작업이 완료되었습니다.")
+            return
 
 
 if __name__ == "__main__":

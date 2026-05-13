@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 # ==========================================
 # 1. bert 모델 설정 및 es 연결
 # ==========================================
-MODEL_PATH = "./final_finance_model_v2"  # 학습시킨 모델 경로
+MODEL_PATH = "./final_finance_model_v3"  # 학습시킨 모델 경로
 
 # # 학습 완료된 모델 및 토크나이저 로드
 # 1. 실행 장치 설정 (GPU가 있으면 사용, 없으면 CPU)
@@ -409,7 +409,7 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 30}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 20}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -422,6 +422,27 @@ async def run_analysis():
     for doc in docs:
         _id = doc['_id']
         data = doc['_source']
+
+        title = data.get('title', '')
+        url = data.get('url', '')
+
+        is_sports = any(kw in title for kw in Config.SPORTS_KEYWORDS)
+        is_economy_news = any(kw in title for kw in Config.economy_keywords) and not is_sports
+        is_politics = "sid=100" in url or any(kw in title for kw in Config.politics_kws)
+
+        # 🔥 [추가] 노이즈 초기 컷 (스포츠/연예/추천/잡뉴스)
+        is_noise = (
+                any(kw.lower() in title.lower() for kw in Config.SPORTS_KEYWORDS)
+                or any(kw.lower() in title.lower() for kw in Config.ENTERTAINMENT_KEYWORDS)
+                or any(kw.lower() in title.lower() for kw in Config.RECOMMENDATION_KEYWORDS)
+                or any(kw.lower() in title.lower() for kw in Config.skip_keywords)
+        )
+
+        if is_noise:
+            logger.info(f"⏩ [노이즈 컷] {title[:30]}")
+            es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
+            continue
+
 
         # ----------------------------------------------------------
         # 노이즈 기사 스킵 로직
@@ -545,13 +566,6 @@ async def run_analysis():
         raw_indicator_score = (ex_score * 0.5) + (ma_score * 0.5)
 
 
-        # [A] 기본 통합 점수 계산 (뉴스 비중 90%)
-        title = data.get('title', '')
-        url = data.get('url', '')
-
-        is_sports = any(kw in title for kw in Config.SPORTS_KEYWORDS)
-        is_economy_news = any(kw in title for kw in Config.economy_keywords) and not is_sports
-        is_politics = "sid=100" in url or any(kw in title for kw in Config.politics_kws)
 
         # [B] 점수 통합 (질문하신 0.9 / 0.7 로직이 여기 합쳐졌습니다)
         if is_sports:
@@ -573,6 +587,23 @@ async def run_analysis():
             total = min(1.0, total + 0.12)
             if total <= 0.63 and await check_yesterday_existence(refined_keywords):
                 total += (0.65 - total) * 0.2
+
+        is_stock_recommendation = any(
+            kw.lower() in title.lower()
+            for kw in Config.SAFE_FINANCE_PATTERNS
+        )
+        if is_stock_recommendation:
+            boost = 0.06
+            total = min(1.0, total * (1 + boost))
+
+        is_corporate_news = any(
+            kw.lower() in title.lower()
+            for kw in Config.CORPORATE_NEWS_KEYWORDS
+        )
+
+        if is_corporate_news:
+            floor = 0.52
+            total = (total * 0.8) + (floor * 0.2)
 
         # [E] 최종 가두기 및 등급 판정
         total = max(0.0, min(1.0, total))
@@ -635,7 +666,7 @@ async def run_analysis():
         # [STEP 6] ES 저장 및 상태 업데이트
         try:
             # 1. 분석 완료 데이터 저장 (ES_3)
-            es.index(index="news_labeling1", id=_id, body=labelled_doc)
+            es.index(index="news_labeling", id=_id, body=labelled_doc)
             # 2. 원본 데이터 처리 상태 업데이트 (ES_2)
             es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
             # 점수 산출 로그 추가

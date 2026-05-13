@@ -15,6 +15,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import os
 from config import Config
+from utils import is_noise_article
 
 # webdriver-manager 로그 끄기
 os.environ['WDM_LOG_LEVEL'] = '0'
@@ -111,8 +112,13 @@ def article_crawling(driver, p: int, keyword):
                 if contents:
                     content_text = " ".join([c.text for c in contents if c.text.strip()])
                     if content_text and len(content_text.strip()) > 10:
-                        article["content"] = content_text
-                        article_list.append(article)
+                        continue
+
+                    if is_noise_article(article["title"], content_text, article["url"]):
+                        continue
+
+                    article["content"] = content_text
+                    article_list.append(article)
             except:
                 continue
 
