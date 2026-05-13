@@ -78,9 +78,9 @@
                                 <span class="text-gray-600">아이디 저장</span>
                             </label>
                             <div class="flex items-center gap-2">
-                                <a href="find-id.html" class="text-blue-600 hover:text-blue-700">아이디 찾기</a>
+                                <a href="find_id.html" class="text-blue-600 hover:text-blue-700">아이디 찾기</a>
                                 <span class="text-gray-300">|</span>
-                                <a href="find-pw.html" class="text-blue-600 hover:text-blue-700">비밀번호 찾기</a>
+                                <a href="find_pw.html" class="text-blue-600 hover:text-blue-700">비밀번호 찾기</a>
                             </div>
                         </div>
 
@@ -192,8 +192,11 @@
                         } else {
                             localStorage.removeItem('savedUserId_Signal');
                         }
-
-                        window.location.href = "main.html";
+                        if (id === "admin") {
+                            window.location.href = "admin.html";
+                        } else {
+                            window.location.href = "main.html";
+                        }
                     } else {
                         showModal("아이디 또는 비밀번호가 일치하지 않습니다.");
                     }
