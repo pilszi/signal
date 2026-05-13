@@ -696,8 +696,8 @@ async def run_analysis():
     return processed_results # 루프가 다 끝나면 결과 리스트 반환
 
 
-
-def get_latest_signals(size=10):
+# 오늘의 뉴스
+def get_latest_signals():
     """
     ES3 인덱스에서 라벨링이 완료된 모든 데이터를 가져와서 main으로 보내주는 함수
     """
@@ -706,10 +706,12 @@ def get_latest_signals(size=10):
             "sort": [
                 {"analyzed_at": {"order": "desc"}}
             ],
-            "size": size
+            "size": 10
         }
         res = es.search(index="news_labeling", body=query)
         hits = res['hits']['hits']
+        print("ES 결과 개수 =", len(res['hits']['hits']))
+        print(res['hits']['hits'][0])
 
         if not hits:
             logger.warning(f"⚠️ news_labeling 인덱스에 데이터가 하나도 없습니다.")
