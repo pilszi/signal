@@ -8,7 +8,6 @@
         <script src="https://unpkg.com/lucide@latest"></script>
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-        <script src="https://unpkg.com/lucide@latest"></script>
         <style>
             /* 지도 내 국가 호버 효과 */
             .country-path:hover {
@@ -330,66 +329,65 @@
 
     </body>
     <script>
-        // --- 0. 국가명 변환 사전  ---
-        const KOR_TO_ENG = {
-            // --- 동아시아 및 주변국 ---
-            "대한민국": "Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
-            "북한": "North Korea", "북측": "North Korea",
-            "미국": "United States", "미": "United States", "미측": "United States",
-            "중국": "China", "중": "China", "중측": "China", "홍콩": "China",
-            "일본": "Japan", "일": "Japan",
-            "대만": "Taiwan", "타이완": "Taiwan",
-
-            // --- 중동 (리스크 핵심) ---
-            "이스라엘": "Israel", "이란": "Iran",
-            "사우디아라비아": "Saudi Arabia", "사우디": "Saudi Arabia",
-            "아랍에미리트": "UAE", "아랍에미레이트": "UAE", "두바이": "UAE",
-            "카타르": "Qatar", "이라크": "Iraq", "쿠웨이트": "Kuwait",
-            "이집트": "Egypt", "튀르키예": "Turkey", "터키": "Turkey",
-            "시리아": "Syria", "요르단": "Jordan", "레바논": "Lebanon", "오만": "Oman", "예멘": "Yemen",
-            "중동": "Middle East",
-
-            // --- 유럽 ---
-            "러시아": "Russia", "러": "Russia",
-            "우크라이나": "Ukraine", "우크라": "Ukraine",
-            "영국": "United Kingdom", "영": "United Kingdom",
-            "프랑스": "France", "불": "France",
-            "독일": "Germany", "독": "Germany",
-            "이탈리아": "Italy", "이탈리": "Italy",
-            "벨기에": "Belgium", "헝가리": "Hungary", "네덜란드": "Netherlands",
-            "스페인": "Spain", "폴란드": "Poland", "스웨덴": "Sweden", "오스트리아": "Austria", "그리스": "Greece",
-            "유럽연합": "EU", "EU": "EU",
-
-            // --- 동남아/오세아니아/기타 ---
-            "베트남": "Vietnam", "인도네시아": "Indonesia", "인니": "Indonesia",
-            "인도": "India", "싱가포르": "Singapore", "싱가폴": "Singapore",
-            "태국": "Thailand", "필리핀": "Philippines", "말레이시아": "Malaysia",
-            "미얀마": "Myanmar", "캄보디아": "Cambodia", "라오스": "Laos", "브루나이": "Brunei",
-            "호주": "Australia", "오스트레일리아": "Australia",
-            "동남아": "ASEAN", "동남아시아": "ASEAN", "아세안": "ASEAN",
-
-            // --- 아메리카/아프리카 ---
-            "캐나다": "Canada", "멕시코": "Mexico", "브라질": "Brazil", "아르헨티나": "Argentina",
-            "남아프리카공화국": "South Africa", "남아공": "South Africa", "남공": "South Africa",
-            "파나마": "Panama", "베네수엘라": "Venezuela",
-
-            // --- 기타 빈번 국가 ---
-            "파키스탄": "Pakistan", "우즈베키스탄": "Uzbekistan", "우즈벡": "Uzbekistan",
-            "아프가니스탄": "Afghanistan", "방글라데시": "Bangladesh", "스리랑카": "Sri Lanka"
-        };
-
         // 지역 키워드 발생 시 불이 들어올 국가 리스트
-        const REGION_TO_COUNTRIES = {
-            "Middle East": ["Israel", "Iran", "Saudi Arabia", "UAE", "Qatar", "Iraq", "Kuwait", "Egypt", "Turkey", "Syria", "Jordan", "Lebanon", "Oman", "Yemen", "Pakistan"],
-            "EU": ["France", "Germany", "Italy", "Spain", "Netherlands", "Belgium", "Poland", "Sweden", "Austria", "Greece"],
-            "ASEAN": ["Vietnam", "Indonesia", "Thailand", "Philippines", "Singapore", "Malaysia", "Myanmar", "Cambodia", "Laos", "Brunei"],
+        const REGION_MAP = {
+        "EU": {
+            label: "EU",
+            countries: ["France", "Germany", "Italy", "Spain", "Netherlands"]
+        },
+        "ASEAN": {
+            label: "ASEAN",
+            countries: ["Vietnam", "Indonesia", "Thailand", "Philippines"]
+        },
+        "Middle East": {
+            label: "Middle East",
+            countries: ["Israel", "Iran", "Saudi Arabia", "UAE"]
+        },
+        "East Asia": {
+            label: "East Asia",
+            countries: ["Korea", "China", "Japan", "Taiwan", "North Korea"]
+        },
+        "Strait of Hormuz": {
+            label: "Strait of Hormuz",
+            countries: ["Iran", "UAE", "Oman", "Saudi Arabia"]
+        },
+        "Red Sea": {
+            label: "Red Sea",
+            countries: ["Egypt", "Saudi Arabia", "Yemen"]
+        },
+        "South China Sea": {
+            label: "Middle East",
+            countries: ["China", "Philippines", "Vietnam", "Malaysia"]
+        },
+        "G20": {
+            label: "G20",
+            countries: ["United States", "China", "Japan", "Germany", "United Kingdom",
+                          "France", "Italy", "Canada", "South Korea", "India",
+                          "Russia", "Brazil", "Australia", "Indonesia", "Mexico",
+                          "Saudi Arabia", "Turkey", "South Africa", "Argentina"]
+        },
+        "Global": {
+            label: "Global",
+            countries: ["United States", "China", "Japan", "Germany", "France",
+                        "United Kingdom", "Russia", "India", "Brazil"]
+        },
+    };
 
-        };
+        // 영어로 표시용 정규화 함수
+        function normalizeCountry(name) {
+            if (!name) return "Global";
+
+            if (typeof name === "string") return name;
+
+            return "Global";
+        }
+
+
 
         // --- 1. 전역 상태 관리 ---
         let allSignals = [];      // 하단 뉴스 그리드용 (전체 뉴스)
         let filteredNews = [];    // 필터링된 뉴스
-        let heatmapData = {};     // 서버에서 받은 리스크 통계 ({score, level})
+        let heatmapData = [];     // 서버에서 받은 리스크 통계 ({score, level})
         // 초기 상태 데이터
         let savedUserId = sessionStorage.getItem('savedUserId');
         let selectedCountry = null;
@@ -411,9 +409,9 @@
 
             let chartDataMap = {}; // 최종적으로 지도에 그릴 데이터를 담는 객체
 
-            Object.entries(heatmapData).forEach(([korName, info]) => {
+            heatmapData.forEach((info) => {
                 // 1. 한글명을 영문명으로 변환
-                const engName = KOR_TO_ENG[korName] || korName;
+                const engName = info.name;
 
                 // 2. 시각화 등급 계산 (1:안정, 2:주의, 3:심각)
                 let visualValue = 1;
@@ -426,7 +424,7 @@
 
                 const dataPoint = {
                     value: visualValue,
-                    realScore: info.score,
+                    realScore: info.total_score || info.score,
                     riskLevel: level
                 };
 
@@ -473,71 +471,52 @@
             updateStation();
         });
 
-        // 환율/원자재 라벨링 3[서버에서 데이터 로드]
-        // --- 2. 데이터 통합 로드 (백엔드 API 호출) ---
         async function fetchMainData(date = null) {
             try {
-                // 날짜가 파라미터로 들어오면 쿼리 스트링 추가
                 let newsUrl = "/public_signals" + (date ? `?date=${date}` : "");
-                const [newsRes, indicatorRes, heatmapRes] = await Promise.all([
+
+                // 4개의 API를 호출하므로 4개의 변수로 받습니다.
+                const [newsRes, indicatorRes, heatmapStatsRes, countryRes] = await Promise.all([
                     axios.get(newsUrl),
                     axios.get('/api/market-indicators'),
-                    axios.get('/stats/heatmap') // 합산 점수 API
+                    axios.get('/stats/heatmap'),
                     axios.get('/main/country')
                 ]);
-                console.log(riskRes, indicatorRes, heatmapRes);
-                allSignals = riskRes.data.msg;
-                const rawHeatmapData = heatmapRes.data;
 
-                heatmapData = rawHeatmapData.country_signal.map(item => {
-                    let visualValue, level;
-                    const score = item.total_score;
-
-                    // 요청하신 점수 기준 로직
-                    if (score >= 300) {
-                        visualValue = 3; // 빨간색 (심각)
-                        level = "심각";
-                    } else if (score >= 200) {
-                        visualValue = 2; // 노란색 (주의)
-                        level = "주의";
-                    } else {
-                        visualValue = 1; // 초록색 (안정)
-                        level = "안정";
-                    }
-
-                    return {
-                        name: item.en_name,    // 국가 영문명
-                        value: visualValue,    // 차트 색상 결정용 (1, 2, 3)
-                        total_score: score,    // 실제 점수
-                        level: level           // 가공된 등급명 (심각, 주의, 안정)
-                    };
-                });
-
-                console.log("데이터 로드 완료:", { news: newsRes.data.msg.length, date: date || "전체" });
-
-
+                // 1. 뉴스 데이터 설정 (변수명 통일: newsRes)
                 allSignals = newsRes.data.msg || [];
-                heatmapData = heatmapRes.data || {}; // 서버에서 온 실제 데이터 저장
 
-                // 지도가 등록된 상태일 때만 히트맵 갱신
-                if (isMapRegistered) updateHeatmap();
+                // 2. 히트맵 데이터 가공 (MariaDB 데이터 우선 사용)
+                if (countryRes.data && countryRes.data.country_signal) {
+                    heatmapData = countryRes.data.country_signal.map(item => {
+                        let visualValue = 1;
+                        if (item.total_score >= 300) visualValue = 3;
+                        else if (item.total_score >= 200) visualValue = 2;
 
-                // console.log('Heatmap Data:', heatmapData);
+                        return {
+                            name: item.en_name,
+                            value: visualValue,
+                            total_score: item.total_score,
+                            level: visualValue === 3 ? "심각" : (visualValue === 2 ? "주의" : "안정")
+                        };
+                    });
+                    updateHeatmap(); // 히트맵 갱신
+                }
+
+                // 3. 환율 데이터 렌더링
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
                 }
 
-                // 5. UI 업데이트 (날짜가 바뀌었을 수 있으므로 1페이지부터 다시 보여줌)
+                // 4. UI 갱신
                 if (date) currentPage = 1;
+                renderNews();
+                renderPagination();
+                updateStation();
+                updateNotifUI();
 
-                // UI 렌더링 호출 (renderNews, renderPagination 등)
-                renderNews();        // 뉴스 그리드
-                renderPagination();  // 페이지네이션
-                updateStation();     // 우측 사이드바 랭킹
-                updateNotifUI();     // 알림 배지 및 리스트
-
-            }catch (error) {
-                    console.error("데이터 통합 로드 실패:", error);
+            } catch (error) {
+                console.error("데이터 통합 로드 실패:", error);
             }
         }
 
@@ -624,36 +603,74 @@
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
-            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
+            const savedUserId = localStorage.getItem("id"); // localStorage에서 다시 가져오기
 
-            const {data} = await axios.get("/noti/signal?id="+savedUserId);
-            console.log(data);
-            noti = data.noti;
-            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
-            if (!savedUserId || savedUserId === "guest") {
-                badge.style.display = 'none'; // 배지 숨김
+            // 비로그인 상태
+            if (
+                !savedUserId ||
+                savedUserId === "null" ||
+                savedUserId === "undefined" ||
+                savedUserId === "guest"
+            ) {
+
+                badge.style.display = 'none';
+
                 countText.innerText = '0개의 새 알림';
+
                 list.innerHTML = `
                     <div style="padding: 40px; text-align: center;">
-                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                    </div>`;
+                        <p style="color: #9ca3af; font-size: 14px;">
+                            로그인 후 알림을 확인하세요.
+                        </p>
+                    </div>
+                `;
+
+                // 여기서 함수 종료
                 return;
             }
 
+             // 로그인 사용자만 API 호출
+            const { data } = await axios.get(
+                `/noti/signal?id=${savedUserId}`
+            );
+            console.log(data);
+            const noti = data.noti;
+            renderList(list, noti);
             const unreads = noti.filter(n => !n.is_read);
-
-            // 새 알림이 있을 때만 배지 표시
             if (unreads.length > 0) {
                 badge.innerText = unreads.length;
-                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시
+                badge.style.display = 'flex';
             } else {
-                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김
+                badge.style.display = 'none';
             }
 
-            // 드롭다운 내부 문구 업데이트
             countText.innerText = `${unreads.length}개의 새 알림`;
-
         }
+<!--            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음-->
+<!--            if (!savedUserId || savedUserId === "guest") {-->
+<!--                badge.style.display = 'none'; // 배지 숨김-->
+<!--                countText.innerText = '0개의 새 알림';-->
+<!--                list.innerHTML = `-->
+<!--                    <div style="padding: 40px; text-align: center;">-->
+<!--                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>-->
+<!--                    </div>`;-->
+<!--                return;-->
+<!--            }-->
+
+<!--            const unreads = noti.filter(n => !n.is_read);-->
+
+<!--            // 새 알림이 있을 때만 배지 표시-->
+<!--            if (unreads.length > 0) {-->
+<!--                badge.innerText = unreads.length;-->
+<!--                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시-->
+<!--            } else {-->
+<!--                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김-->
+<!--            }-->
+
+<!--            // 드롭다운 내부 문구 업데이트-->
+<!--            countText.innerText = `${unreads.length}개의 새 알림`;-->
+
+<!--        }-->
 
         function renderList(container, noti) {
 
@@ -700,7 +717,7 @@
         // 아이템 클릭 (읽음 처리 및 이동)
         async function readItem(id) {
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === id) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -717,7 +734,7 @@
         async function deleteItem(e, id) {
             e.stopPropagation();
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === id) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -795,7 +812,6 @@
                 // console.log(option);
                 myChart.setOption(option);
 
-                renderList(list, noti);
             });
 
         myChart.on('click', function (params) {
@@ -807,107 +823,76 @@
             } else {
                 selectCountry(params.name, 0);
             }
-            renderNews(params.name);
+            renderNews();
             // 여기서 FastAPI 서버에 fetch() 요청을 날려 5.3 영역 데이터를 가져오면 됩니다!
         });
 
-
-        // Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
-        function updateStation() {
-            const list = document.getElementById('station-list');
-            // heatmapData가 없으면 실행 중단
-            if (!list || !heatmapData) return;
 
 
         // 3. Signal Station: 서버에서 계산된 리스크 점수 상위 3개국 표시
             function updateStation() {
                 const list = document.getElementById('station-list');
 
-                // heatmapData를 배열로 변환하여 점수(score) 높은 순으로 정렬
-                const sortedRisks = [...heatmapData].sort((a, b) => b.total_score - a.total_score).slice(0, 3);
-            // 1. 데이터 처리: 객체를 배열로 변환하고 점수순 정렬
-            const sorted = Object.entries(heatmapData)
-                .map(([name, info]) => {
-                    // 소수점 데이터(예: 0.54)가 오면 100을 곱해줍니다.
-                    let rawScore = info.score;
-                    if (Math.abs(rawScore) < 1.1) { rawScore = rawScore * 100; }
-
-                if (sortedRisks.length === 0) {
-                    list.innerHTML = '<p class="text-xs text-blue-200">현재 감지된 주요 시그널이 없습니다.</p>';
+                if (!Array.isArray(heatmapData) || heatmapData.length === 0) {
+                    list.innerHTML = `
+                        <p class="text-xs text-blue-200 text-center py-4">
+                            현재 분석된 리스크 데이터가 없습니다.
+                        </p>
+                    `;
                     return;
                 }
-                    return {
-                        name: countryNamesKOR[name] || name, // 한글 이름 변환
-                        score: rawScore,
-                        level: info.level
-                    };
-                })
-                .sort((a, b) => b.score - a.score) // 높은 점수 순서로 정렬
-                .slice(0, 3); // 상위 3개만 추출
 
-            // [예외 처리] 데이터가 없을 경우
-            if (sorted.length === 0) {
-                list.innerHTML = '<p class="text-xs text-blue-200 text-center py-4">현재 분석된 리스크 데이터가 없습니다.</p>';
-                return;
-            }
+                // total_score 기준 정렬
+                const sorted = [...heatmapData]
+                    .sort((a, b) => b.total_score - a.total_score)
+                    .slice(0, 3);
 
-                list.innerHTML = sortedRisks.map((item, index) => {
-                    let scoreColor = "text-green-300";
-                    let badgeIcon = "✅";
+                list.innerHTML = sorted.map((item, index) => {
 
-                    if (item.level === "심각") {
-                        scoreColor = "text-red-400";
-                        badgeIcon = "🔥";
-                    } else if (item.level === "주의") {
-                        scoreColor = "text-yellow-200";
-                        badgeIcon = "⚠️";
-                    }
-            // 상위 3개국 리스트 생성
-            list.innerHTML = sorted.map((item, index) => {
-                // 1. 점수 반올림 (깔끔하게 정수로 표시)
-                const displayScore = Math.round(item.score);
-                // 2. 등급 및 색상 로직 통합
-                // 등급 문자열이 있으면 등급으로, 없으면 점수(70점 기준)로 색상 결정
-                const isSerious = item.level === "심각" || item.level === "Serious" || displayScore >= 70;
-                const scoreColor = isSerious ? "text-red-300" : "text-yellow-200";
-                const badgeIcon = isSerious ? "🔥" : "⚠️";
+                    const displayScore = Math.round(item.total_score);
+
+                    const isSerious =
+                        item.level === "심각" ||
+                        item.level === "Serious" ||
+                        displayScore >= 300;
+
+                    const scoreColor =
+                        isSerious
+                            ? "text-red-300"
+                            : "text-yellow-200";
+
+                    const badgeIcon =
+                        isSerious
+                            ? "🔥"
+                            : "⚠️";
 
                     return `
-                        <div class="flex items-center justify-between border-b border-blue-500/30 pb-2">
+                        <div class="flex items-center justify-between border-b border-blue-500/30 pb-3 last:border-0">
                             <div class="flex flex-col">
-                                <span class="text-[10px] text-blue-200 font-medium">RANK 0${index + 1}</span>
-                                <span class="font-bold text-[16px]">${countryNamesKOR[item.name] || item.name} ${badgeIcon}</span>
+                                <span class="text-[9px] text-blue-200 font-bold uppercase tracking-wider">
+                                    RANK 0${index + 1}
+                                </span>
+
+                                <span class="font-bold text-sm text-white flex items-center gap-1">
+                                    ${countryNamesKOR[item.name] || item.name}
+                                    <span class="text-[10px]">${badgeIcon}</span>
+                                </span>
                             </div>
+
                             <div class="text-right">
-                                <span class="block font-bold text-[20px] ${scoreColor}">${item.total_score}</span>
-                                <span class="text-[9px] uppercase opacity-70">${item.level}</span>
+                                <span class="block font-bold text-lg ${scoreColor}">
+                                    ${displayScore}점
+                                </span>
+
+                                <span class="text-[8px] uppercase opacity-70 text-white font-medium">
+                                    ${item.level}
+                                </span>
                             </div>
                         </div>
                     `;
                 }).join('');
             }
 
-        // --- 5. 필터 및 검색 핸들러 (기존 로직 유지) ---
-                return `
-                    <div class="flex items-center justify-between border-b border-blue-500/30 pb-3 last:border-0">
-                        <div class="flex flex-col">
-                            <span class="text-[9px] text-blue-200 font-bold uppercase tracking-wider">RANK 0${index + 1}</span>
-                            <span class="font-bold text-sm text-white flex items-center gap-1">
-                                ${item.name} <span class="text-[10px]">${badgeIcon}</span>
-                            </span>
-                        </div>
-                        <div class="text-right">
-                            <span class="block font-bold text-lg ${scoreColor}">
-                                ${displayScore}점
-                            </span>
-                            <span class="text-[8px] uppercase opacity-70 text-white font-medium">
-                                ${item.level || (isSerious ? 'SERIOUS' : 'CAUTION')}
-                            </span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
 
 
         // 필터 및 검색 핸들러
@@ -938,29 +923,14 @@
             renderPagination();
         }
 
-        function updateDateDisplay() {
-            const display = document.getElementById('date-display');
 
-            if (!startDate) {
-                display.innerText = "날짜를 선택해주세요";
-                display.classList.add('text-gray-400');
-            } else if (!endDate) {
-                // 시작일만 있을 때
-                display.innerText = `${startDate} ~ 시작일 선택됨`;
-                display.classList.remove('text-gray-400');
-            } else {
-                // 기간이 모두 선택되었을 때
-                display.innerText = `${startDate} ~ ${endDate}`;
-                display.classList.remove('text-gray-400');
-            }
-        }
 
         // 검색어 초기화 함수
         function resetFilters() {
             searchQuery = '';
-            startDate = '';
-            endDate = '';
-            selectedCountry = '';
+            startDate = null;
+            endDate = null;
+            selectedCountry = null;
 
             // UI 요소들도 초기값으로 변경
             document.getElementById('search-input').value = '';
@@ -1021,36 +991,51 @@
             const grid = document.getElementById('news-grid');
             if (!grid) return;
 
-            // 1️⃣ [중복 제거] URL 기준으로 중복 기사를 하나만 남깁니다.
-            const uniqueSignals = Array.from(
-                new Map(allSignals.map(item => [item['url'], item])).values()
-            );
-
-            // 2️⃣ [정렬 로직] 리스크 점수 절대값(높은순) -> 날짜(최신순) 순서로 정렬합니다.
-            const sorted = uniqueSignals.sort((a, b) => {
-                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
-                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
-
-                if (scoreA !== scoreB) {
-                    return scoreB - scoreA; // 점수 높은 게 위로
-                }
-                // 점수가 같다면 최신 날짜가 위로
-                return new Date(b.published_date) - new Date(a.published_date);
-            });
-
-            // 3️⃣ [페이지네이션] 현재 페이지에 해당하는 데이터만 자릅니다.
             let targetData = [];
-            const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
+
+            const isFilterActive =
+                searchQuery ||
+                startDate ||
+                endDate ||
+                selectedCountry;
+
             if (isFilterActive) {
                 targetData = filteredNews;
             } else {
                 targetData = allSignals;
             }
 
+            // URL 기준 중복 제거
+            const uniqueSignals = Array.from(
+                new Map(targetData.map(item => [item.url, item])).values()
+            );
+
+            // 정렬
+            const sorted = uniqueSignals.sort((a, b) => {
+
+                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
+                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
+
+                if (scoreA !== scoreB) {
+                    return scoreB - scoreA;
+                }
+
+                return new Date(b.published_date) - new Date(a.published_date);
+            });
+
+            // 페이지네이션
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
-            const endIndex = startIndex + SIGNALS_PER_PAGE;
-            const currentSignals = targetData.slice(startIndex, endIndex);
-            const currentSignals = sorted.slice(startIndex, startIndex + SIGNALS_PER_PAGE);
+            const currentSignals =
+                sorted.slice(startIndex, startIndex + SIGNALS_PER_PAGE);
+
+            if (currentSignals.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-span-full text-center py-20 text-gray-500">
+                        조회된 뉴스가 없습니다.
+                    </div>
+                `;
+                return;
+            }
 
             const riskColors = {
                 "안정": "bg-blue-100 text-blue-700",
@@ -1058,79 +1043,78 @@
                 "심각": "bg-red-100 text-red-700"
             };
 
-            // 2. 정렬 로직: 리스크 점수(낮은순) -> 날짜(최신순)
-            const sorted = [...currentSignals].sort((a, b) => {
-                // 리스크 점수 기준 정렬
-
-                // 1) 실제 점수(낮은순: 심각 - 주의 - 안정 순서)
-                if(a.risk_score !== b.risk_score){
-                    return a.risk_score - b.risk_score
-                }
-
-                // 날짜 기준 정렬
-                return new Date(b.published_date) - new Date(a.published_date);
-                
-            });
-            renderPagination()
-            
-            // 4. HTML 생성 및 출력
-            if (sorted.length === 0) {
-                grid.innerHTML = `<div class="col-span-full text-center py-10 text-gray-500">해당하는 뉴스가 없습니다.</div>`;
-
-            // 4️⃣ [예외 처리] 데이터가 없을 경우
-            if (currentSignals.length === 0) {
-                grid.innerHTML = `<div class="col-span-full text-center py-20 text-gray-500">조회된 뉴스가 없습니다.</div>`;
-                return;
-            }
-
-            // 5️⃣ [HTML 생성] Version 2의 고도화된 디자인을 적용합니다.
             grid.innerHTML = currentSignals.map(news => {
-                const displayScore = Math.round(Math.abs(news.risk_score || 0) * 100);
 
-            grid.innerHTML = sorted.map(news => {
-                // 음수 제거, 100 곱하기, 반올림 처리된 점수
-                const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
-                const displayDate = news.published_date ? news.published_date.split('T')[0] : "";
+                const country = normalizeCountry(news.country_name);
+                console.log(news);
+                console.log("LABEL TEST:", news.news_labeling, news.news_origin);
 
-                // 이미지 유효성 체크 및 플레이스홀더 처리
-                const imageUrl = (news.main_image && news.main_image !== "")
-                                 ? news.main_image
-                                 : 'https://via.placeholder.com/400x320?text=Signal+News';
+                const displayScore =
+                    Math.round(Math.abs(news.risk_score || 0) * 100);
+
+                const displayDate =
+                    news.published_date
+                        ? news.published_date.split('T')[0]
+                        : "";
+
+                const imageUrl =
+                    news.main_image && news.main_image !== ""
+                        ? news.main_image
+                        : "https://via.placeholder.com/400x320?text=Signal+News";
 
                 return `
-                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative"
+                         onclick="logNewsClick('${news.url}')">
+
                         <div class="relative h-48 overflow-hidden">
-                            <img src="${imageUrl}" alt="news" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                            <img src="${imageUrl}"
+                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+
                             <div class="absolute top-2 left-2 flex gap-1">
+
                                 <span class="px-2 py-1 text-[10px] font-bold rounded shadow-sm ${riskColors[news.risk_level] || 'bg-gray-100'}">
                                     ${news.risk_level}
                                 </span>
-                                <span class="px-2 py-1 text-[10px] font-bold rounded shadow-sm ${riskColors[news.risk_level] || 'bg-gray-100'}">
+
+                                <span class="px-2 py-1 text-[10px] font-bold rounded shadow-sm bg-black/70 text-white">
                                     Signal ${displayScore}
                                 </span>
+
                             </div>
                         </div>
+
                         <div class="p-5">
+
                             <div class="flex justify-between items-center mb-2 text-[11px] text-blue-600 font-bold uppercase">
-                                <span>#${countryNamesKOR[news.country_name] || 'Global'}</span>
-                                <span class="text-gray-400 font-normal">${displayDate}</span>
+                                <span>
+                                    #${news.country_name || "Global"}
+                                </span>
+
+                                <span class="text-gray-400 font-normal">
+                                    ${displayDate}
+                                </span>
                             </div>
+
                             <h3 class="font-bold leading-tight text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-2 mb-4">
                                 ${news.title}
                             </h3>
+
                             <div class="flex items-center justify-between mt-auto border-t pt-3">
-                                <span class="text-xs font-medium text-gray-500">${news.press_name}</span>
-                                <i data-lucide="external-link" class="w-3 h-3 text-gray-300"></i>
+                                <span class="text-xs font-medium text-gray-500">
+                                    ${news.press_name}
+                                </span>
+
+                                <i data-lucide="external-link"
+                                   class="w-3 h-3 text-gray-300"></i>
                             </div>
+
                         </div>
                     </div>
                 `;
             }).join('');
 
-            // Lucide 아이콘 다시 그리기
-            if (window.lucide) lucide.createIcons();
+            lucide.createIcons();
         }
-
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
         async function logNewsClick(articleUrl) {
 
@@ -1182,19 +1166,7 @@
             initCalendar();
         }
 
-        // 6. 공통 UI (Navbar, Logout)
-        function updateNavbar() {
-            const id = sessionStorage.getItem('savedUserId');
-            const authContainer = document.getElementById('authContainer');
-            if (id && id !== 'guest') {
-                document.getElementById('user-greeting').classList.remove('hidden');
-                document.getElementById('user_name').innerText = id;
-                authContainer.innerHTML = `<button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 uppercase">LOG OUT</button>`;
-            } else {
-                authContainer.innerHTML = `<a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 uppercase">LOG IN</a>`;
-            }
-        }
-        function handleLogout() { if(confirm("로그아웃 하시겠습니까?")) { axios.get("/logout"); sessionStorage.clear(); location.href="login.html"; }}
+
 
         function selectDate(day) {
 
@@ -1257,14 +1229,17 @@
             }else{
                 targetData = allSignals
             }
-            // console.log(targetData.length);
+
+
             const paginationContainer = document.getElementById('pagination');
-            // 🔥 중요: 중복을 제거한 실제 기사 수로 페이지 계산
-            const uniqueCount = new Set(allSignals.map(s => s.url)).size;
-            const totalPages = Math.ceil(uniqueCount / SIGNALS_PER_PAGE);
-            // console.log(allSignals.length);
             if (!paginationContainer) return;
-            const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
+
+            // URL 기준 중복 제거
+            const uniqueSignals = Array.from(
+                new Map(targetData.map(item => [item.url, item])).values()
+            );
+            // 중복 제거된 데이터 기준으로 페이지 계산
+            const totalPages = Math.ceil(uniqueSignals.length / SIGNALS_PER_PAGE);
             if (totalPages <= 1) {
                 paginationContainer.innerHTML = '';
                 return;
@@ -1299,13 +1274,23 @@
 
             let targetData;
 
-            if (filteredNews && filteredNews.length > 0) {
+            // 필터 활성 여부 확인
+            const isFilterActive =
+                searchQuery || startDate || endDate || selectedCountry;
+
+            // 필터가 켜져 있으면 filteredNews 사용
+            if (isFilterActive) {
                 targetData = filteredNews;
             } else {
                 targetData = allSignals;
             }
-            const totalPages = Math.ceil(targetData.length / SIGNALS_PER_PAGE);
 
+            // URL 기준 중복 제거
+            const uniqueSignals = Array.from(
+                new Map(targetData.map(item => [item.url, item])).values()
+            );
+
+            const totalPages = Math.ceil(uniqueSignals.length / SIGNALS_PER_PAGE);
             if (page < 1 || page > totalPages) return;
 
             currentPage = page;
@@ -1353,11 +1338,14 @@
         // 바깥 클릭 시 캘린더 닫기
         window.addEventListener('click', (e) => {
             const dropdown = document.getElementById('calendar-dropdown');
-            if (!dropdown.contains(e.target) && !e.target.closest('button[onclick="toggleCalendar()"]')) {
+            if (
+                dropdown &&
+                !dropdown.contains(e.target) &&
+                !e.target.closest('button[onclick="toggleCalendar()"]')
+            ) {
                 dropdown.classList.add('hidden');
             }
         });
 
     </script>
-</body>
 </html>
