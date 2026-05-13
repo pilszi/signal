@@ -5,6 +5,7 @@ import asyncio
 from typing import Dict, Any
 import traceback
 import sqlalchemy
+import notifier
 from concurrent.futures import ThreadPoolExecutor
 from elasticsearch import Elasticsearch
 from fastapi import FastAPI, Request, Query
@@ -48,16 +49,16 @@ global_scheduler = AsyncIOScheduler()
 es = Elasticsearch(["http://100.123.232.79:9200"])
 
 
+
+
 # ==========================================
 # 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
 # ==========================================
 # 분석 실행 후 결과를 DB에 저장하는 함수
 async def run_analysis_and_save():
     logger.info("🧠 [Analysis] AI 분석 및 DB 저장 시퀀스 시작")
-
     # 1. AI 분석 실행
     results = await ml.run_analysis()
-
     if not results:
         logger.info("ℹ️ [Analysis] 분석할 새로운 데이터가 없습니다.")
         return
@@ -70,7 +71,36 @@ async def run_analysis_and_save():
             cursor = conn.cursor()
 
             for res in results:
+                # DB에 시그널 저장
                 save_analysis_result(cursor, conn, res)
+
+                # '심각' 단계일 경우 이메일 발송 로직 가동
+                if res.get('level') == '심각':
+                    # 해당 기사의 키워드 (리스트 형태)
+                    news_keywords = res.get('keywords', [])
+
+                    # DB에서 해당 키워드를 등록한 회원들 조회
+                    # (member_info의 이메일과 member_keyword의 키워드 조인)
+                    match_sql = sqlalchemy.text("""
+                                        SELECT DISTINCT m.email, mk.keyword 
+                                        FROM member_info m
+                                        JOIN member_keyword mk ON m.member_no = mk.member_no
+                                        WHERE mk.keyword IN :kw_list
+                                    """)
+
+                    # 키워드가 하나라도 일치하는 회원들 리스트
+                    matches = session.execute(match_sql, {"kw_list": news_keywords}).fetchall()
+
+                    for match in matches:
+                        # notifier.py의 함수 호출
+                        notifier.send_emergency_email(
+                            to_email=match.email,
+                            ai_report={'prediction': res['pred'], 'reason': res['reason']},
+                            news_url=res.get('url', '#'),  # ml.run_analysis에서 url도 넘겨줘야 함
+                            risk_level=res['level'],
+                            keywords_str=", ".join(news_keywords),
+                            title=res.get('title', '리스크 감지')
+                        )
 
             # 2. 커넥션 커밋 외에 세션 자체를 커밋/플러시 해줍니다.
             session.commit()  # 세션을 확정
@@ -82,7 +112,7 @@ async def run_analysis_and_save():
 
 async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
     """
-    BERT 모델 학습 여부를 체크하고, 완료되었다면 ml.run_analysis를 주기적으로 실행함
+    BERT 모델 학습 여부를 체크하고, 완료되었다면 utils.run_analysis_and_save 주기적으로 실행함
     """
     if not os.path.exists(TRAIN_LOCK_FILE):
         logger.info("📡 [Pipeline] 첫 실행: 기존 CSV 데이터를 이용한 모델 학습을 시작합니다.")
@@ -129,7 +159,7 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
             # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
             from datetime import datetime
             scheduler.add_job(
-                ml.run_analysis,
+                run_analysis_and_save,
                 'interval',
                 minutes=10,
                 id='ml_analysis',
@@ -245,12 +275,15 @@ def login(info: Dict[str, str], req: Request):
             client_ip = req.client.host
             log_sql = sqlalchemy.text(
                 "INSERT INTO member_login_log (member_no, login_ip, status) VALUES(:member_no, :login_ip, 1)")
-            res = db.execute(log_sql, {"member_no": result.member_no, "login_ip": client_ip})
+            db.execute(log_sql, {
+                "member_no": result.member_no,
+                "login_ip": client_ip
+            })
 
-            # 세션에 중요 정보 기록
+            # 세션 저장
             req.session['login_id'] = info["id"]
             req.session['user_name'] = result.user_name
-            req.session["current_log_no"] = res.lastrowid
+            req.session["member_no"] = result.member_no
             return {"msg": True}
         else:
             return {"msg": False}
@@ -259,12 +292,20 @@ def login(info: Dict[str, str], req: Request):
 @app.get("/logout")
 def logout(req: Request):
     """로그아웃 및 로그 엔드타임 갱신"""
-    log_no = req.session.get("current_log_no")
-    if log_no:
+    member_no = req.session.get("member_no")
+    if member_no:
         with get_db() as db:
             db.execute(
-                sqlalchemy.text("UPDATE member_login_log SET logout_time = NOW(), status = 0 WHERE log_no = :log_no"),
-                {"log_no": log_no})
+                sqlalchemy.text("""
+                        UPDATE member_login_log
+                        SET logout_time = NOW(),
+                            status = 0
+                        WHERE member_no = :member_no
+                        AND status = 1
+                    """),
+                {"member_no": member_no}
+            )
+
     req.session.clear()
     return
 
@@ -373,7 +414,7 @@ def public_signals(date: str = Query(None)):
         date_filter = {
             "range": {
                 "published_date": {
-                    "gte": "now-12h",
+                    "gte": "now-30d",
                     "lte": "now"
                 }
             }
@@ -383,34 +424,60 @@ def public_signals(date: str = Query(None)):
     search_body = {
         "query": {
             "bool": {
-                "filter": [date_filter]
+                "filter": [
+                    {
+                        "range": {
+                            "published_date": {
+                                "gte": "now-30d/d",
+                                "lte": "now",
+                                "time_zone": "+09:00"
+                            }
+                        }
+                    }
+                ]
             }
         },
         "sort": [{"published_date": "desc"}],
         "size": 100
     }
-
     try:
-        # 🔥 중요: 정의한 search_body를 실제로 사용합니다!
+
         res = es.search(index="news_labeling", body=search_body)
 
         print(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
 
         public_news = []
+        seen = set()
+
         for news in res['hits']['hits']:
             source = news.get("_source", {})
+            print(f'👉: source.keys()')
+            print(source)
+
+            title = source.get("title", "").strip()
+            url = source.get("url", "").strip()
+
+            # URL 있으면 URL 기준, 없으면 제목 기준
+            key = url if url else title
+
+            # 중복 제거
+            if key in seen:
+                continue
+
+            seen.add(key)
 
             # [3] 모든 필드에 .get()을 사용하여 방어적으로 데이터 추출
             _news = {
-                'title': source.get("title", "제목 없음"),
-                'url': source.get("url", "#"),
-                # 이미지가 없으면 기본 플레이스홀더 이미지 사용
+                'title': title,
+                'url': url,
                 'main_image': source.get("main_image") or "https://via.placeholder.com/400x300?text=No+Image",
                 'published_date': source.get("published_date"),
                 'press_name': source.get("press_name", "알 수 없음"),
                 'risk_level': source.get("risk_level", "안정"),
-                # 중첩된 score 데이터도 안전하게 가져오기
-                'risk_score': source.get("final_total_score", {}).get("total", 0)
+                'risk_score': source.get("final_total_score", {}).get("total", 0),
+                'country_name': source.get("country_name"),
+                'news_origin': source.get("news_origin"),
+                'news_labeling': source.get("news_labeling")
             }
             public_news.append(_news)
 
@@ -555,18 +622,7 @@ def custom_news(id:str):
     return {"keyword": keywords, "total_val": len(custom_news), "news": custom_news}
 
 
-# # ==========================================
-# # 3. 실시간 알림 API (ml.py 활용)
-# # ==========================================
-# @app.get("/api/signals")
-# async def get_risk_signals():
-#     """Elasticsearch 기반 최신 리스크 뉴스 데이터 제공"""
-#     try:
-#         # ml.py에 만든 get_latest_signals 함수를 호출
-#         results = ml.get_latest_signals(size=20)
-#         return {"status": "success", "data": results or []}
-#     except Exception as e:
-#         return {"status": "error", "message": str(e)}
+
 
 # 시그널로그 페이지
 @app.get("/signal_log")
@@ -636,6 +692,7 @@ def signal_log(id:str):
     return {"data": doc_no}
 
 
+
 # 네이게이션바 signal 알림 토글 요청
 @app.get("/noti/signal")
 def noti_signal(id:str):
@@ -666,6 +723,8 @@ def noti_signal(id:str):
             notis.append(noti)
     return {"noti": notis}
 
+
+
 # 알림토글 읽음 요청
 @app.post("/noti/read")
 def noti_read(info: Dict[str, Any]):
@@ -679,6 +738,8 @@ def noti_read(info: Dict[str, Any]):
         res = db.execute(sql, {"signal_no": info["id"], "id": info["user_id"]})
         logger.info(f'알림 확인 업데이트 = {res.rowcount}개')
     return
+
+
 
 # 모든 알림트글 읽음 요청
 @app.get("/noti/read_all")
@@ -726,6 +787,8 @@ async def get_risk_signals():
     except Exception as e:
         logger.error(f"Error in get_risk_signals: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+
 
 # 시그널 로그를 브라우저 알림에 뜨게 해주는 함수
 @app.get("/api/stream-risk")
@@ -805,7 +868,7 @@ async def get_heatmap_stats():
         for doc in docs:
             c_name = doc.get('country_name')
 
-            # [핵심] 'Middle East' 같은 지역명이 오면 해당 지역 국가 전체에 점수 전파
+            # 'Middle East' 같은 지역명이 오면 해당 지역 국가 전체에 점수 전파
             target_countries = [c_name]
             if c_name in Config.REGION_TO_COUNTRIES:
                 target_countries = Config.REGION_TO_COUNTRIES[c_name]
@@ -828,10 +891,9 @@ async def get_heatmap_stats():
         print(f"❌ 히트맵 통계 에러: {e}")
         return {}
 
+
 if __name__ == "__main__":
     import uvicorn
-    # reload=True는 개발 중에만 사용하기
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
     import sys
 
     # 정책 설정은 임포트 직후 최상단에 있는 것도 좋지만, 실행 직전에도 한 번 더 확인

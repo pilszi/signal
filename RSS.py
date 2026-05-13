@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from dateutil import parser as date_parser
 from config import Config as AppConfig
+from utils import is_noise_article
 
 # --- 0. Python 3.14+ 호환성 패치 ---
 try:
@@ -91,6 +92,7 @@ def get_source_name(url):
     if 'zerohedge' in domain: return "ZeroHedge"
     if 'yahoo' in domain: return "Yahoo Finance"
     if 'marketwatch' in domain: return "MarketWatch"
+    if 'scmp' in domain: return "SCMP"
     return "Global News"
 
 
@@ -249,6 +251,9 @@ def crawl_job(keywords):
                 title = entry.title.lower()
                 summary = entry.get('summary', '').lower()
                 search_text = (title + " " + summary)
+
+                if is_noise_article(title, summary, entry.link):
+                    continue
 
                 # --- [블랙리스트 필터링 추가] ---
                 # 1. 제목/요약에 매수 유도 키워드가 있으면 즉시 패스

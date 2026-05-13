@@ -12,6 +12,7 @@ from elasticsearch import Elasticsearch
 import random
 from dateutil import parser as date_parser
 from concurrent.futures import ThreadPoolExecutor
+from utils import is_noise_article
 
 es = Elasticsearch(["http://localhost:9200"])
 INDEX_NAME = "news_origin"
@@ -93,6 +94,9 @@ def bulk_search_naver_news():
                     # 상세 페이지 접속 전 ES 중복 체크
                     if es.exists(index=INDEX_NAME, id=doc_id):
                         already_exists += 1
+                        continue
+
+                    if is_noise_article(clean_title, "", item['link']):
                         continue
 
                     # 중복이 아닌 기사만 작업 목록에 추가

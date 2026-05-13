@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <script>
+            (function checkAuth() {
+                // 1. 세션 스토리지에서 아이디 확인
+                const savedUserId = sessionStorage.getItem("savedUserId");
+                
+                // 2. 로그인 여부 판단 (값이 없거나 'guest'인 경우)
+                if (savedUserId != "admin" || savedUserId === "guest" || savedUserId === "null") {
+                    // 로그인 안 됨: 경고창을 띄우고 로그인 페이지로 이동
+                    alert("관리자 ID 로그인 후 이용해주세요.");
+                    location.href = "login.html";
+                    
+                    // 페이지 본문이 보이지 않도록 즉시 중단 (일종의 가드)
+                    document.documentElement.style.display = 'none';
+                }
+            })();
+        </script>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>관리자 페이지</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://unpkg.com/lucide@latest"></script>
+        <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+        <style>
+            .notif-container {
+                position: relative;
+                display: inline-block;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            }
+        .notif-trigger {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 8px;           /* 적절한 클릭 영역 */
+                transition: all 0.2s;   /* 부드러운 hover 효과 */
+                position: relative;
+                border: none;           /* 기본 보더 제거 */
+                background: none;       /* 기본 배경 제거 */
+                cursor: pointer;
+            }
+
+            .notif-badge {
+                position: absolute;
+                top: 2px;
+                right: 2px;
+                background-color: #ef4444; /* red-500 */
+                color: white;
+                font-size: 10px;
+                font-weight: bold;
+                width: 16px;
+                height: 16px;
+                border-radius: 9999px;
+                align-items: center;
+                justify-content: center;
+                border: 2px solid white; /* 버튼 배경과 구분되도록 흰색 테두리 추가 */
+            }
+
+            /* 드롭다운 본체 */
+            .notif-dropdown {
+                position: absolute;
+                right: 0;
+                top: calc(100% + 8px);
+                width: 350px;
+                background-color: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 0.75rem; /* rounded-xl */
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+                z-index: 9999 !important;
+            }
+
+            .hidden { display: none; }
+
+            /* 헤더 */
+            .notif-header {
+                padding: 16px;
+                border-bottom: 1px solid #f3f4f6;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .header-title { font-size: 16px; font-weight: bold; color: #111827; }
+            .header-count { font-size: 13px; color: #6b7280; }
+
+            /* 알림 목록 */
+            .notif-body {
+                max-height: 400px;
+                overflow-y: auto;
+            }
+
+            .notif-item {
+                padding: 16px;
+                display: flex;
+                gap: 12px;
+                border-bottom: 1px solid #f3f4f6;
+                cursor: pointer;
+                transition: background-color 0.2s;
+                position: relative;
+            }
+
+            .notif-item:hover { background-color: #f9fafb; }
+            .notif-item.unread { background-color: #eff6ff; }
+
+            /* 아이콘 박스 */
+            .icon-wrapper {
+                width: 40px;
+                height: 40px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+
+            .type-signal { background-color: #fee2e2; color: #dc2626; }
+            .type-keyword { background-color: #dbeafe; color: #2563eb; }
+            .type-profile { background-color: #f3f4f6; color: #4b5563; }
+
+            .content-wrapper { flex: 1; }
+            .item-title { font-size: 14px; font-weight: 600; color: #1f2937; margin-bottom: 2px; }
+            .item-msg { font-size: 13px; color: #4b5563; line-height: 1.4; }
+            .item-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+            .item-time { font-size: 12px; color: #9ca3af; }
+            .unread-dot { width: 6px; height: 6px; background-color: #3b82f6; border-radius: 50%; }
+
+            /* 삭제 버튼 */
+            .delete-btn {
+                background: none;
+                border: none;
+                color: #d1d5db;
+                padding: 4px;
+                cursor: pointer;
+                height: fit-content;
+            }
+
+            .delete-btn:hover { color: #9ca3af; }
+
+            /* 푸터 */
+            .notif-footer {
+                padding: 12px;
+                text-align: center;
+                background-color: #f9fafb;
+            }
+
+            .all-read-btn {
+                background: none;
+                border: none;
+                color: #2563eb;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+            }
+
+            .all-read-btn:hover { text-decoration: underline; }
+        </style>
+    </head>
+    <body class="bg-gray-50">
+        <!-- Navbar -->
+        <nav class="border-b bg-white sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-20">
+                    <div class="flex items-center gap-8">
+                        <!-- href에서 / 제거 -->
+                        <a href="main.html" class="flex items-center gap-2">
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
+                                Signal
+                            </span>
+                        </a>
+                        
+                        <div class="hidden md:flex gap-1">
+                            <!-- 상대 경로 적용 -->
+                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
+                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
+                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
+                        <span id="user-greeting" class="hidden text-sm text-gray-600">
+                            <span id="user_name"></span>님 반갑습니다
+                        </span>
+                        <!-- 알림 컴포넌트 -->
+                        <div class="notif-container" id="notifContainer">
+                            <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
+                            <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
+                                <i data-lucide="bell" class="w-5 h-5"></i>
+                                <!-- 알림 숫자 배지 -->
+                                 <!-- 초기 상태는 숨김 처리 -->
+                                <span class="notif-badge" id="notifBadge" style="display: none;"></span>
+                            </button>
+
+                            <!-- 드롭다운 메뉴 (기본 숨김) -->
+                            <div class="notif-dropdown hidden" id="notifDropdown">
+                                <div class="notif-header">
+                                    <span class="header-count" id="notifCountText"></span>                                  
+                                </div>
+                                 <div id="notifList"></div>
+                            </div>
+                        </div>
+                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
+                            <i data-lucide="user" class="w-5 h-5"></i>
+                        </a>
+                        <div id="authContainer">
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 관리자 페이지 -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+            <!-- 페이지 제목 -->
+            <div class="mb-8">
+                <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <i data-lucide="shield-check" class="w-6 h-6 text-blue-600"></i>
+                    관리자 페이지
+                </h1>
+                <p class="text-sm text-gray-500 mt-1">
+                    회원 정보 및 시스템 로그를 관리할 수 있습니다.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-12 gap-6">
+
+                <!-- 왼쪽: 알림 로그 -->
+                <div class="col-span-4">
+                    <div class="bg-white border rounded-xl shadow-sm h-full">
+
+                        <div class="p-5 border-b">
+                            <h2 class="font-bold text-lg flex items-center gap-2">
+                                <i data-lucide="bell-ring" class="w-5 h-5 text-red-500"></i>
+                                알림 로그
+                            </h2>
+                        </div>
+
+                        <div class="max-h-[600px] overflow-y-auto divide-y divide-gray-100 border rounded-lg bg-white">
+
+                            <div id="signal_log" class="p-4 hover:bg-gray-50 cursor-pointer">
+                            </div>
+
+                            <div id="user_log">
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- 오른쪽: 회원 정보 -->
+                <div class="col-span-8 space-y-6">
+
+                    <!-- 회원 리스트 -->
+                    <div class="bg-white border rounded-xl shadow-sm">
+
+                        <div class="p-5 border-b flex justify-between items-center">
+                            <h2 class="font-bold text-lg flex items-center gap-2">
+                                <i data-lucide="users" class="w-5 h-5 text-blue-600"></i>
+                                회원정보 리스트
+                            </h2>
+
+                            <input
+                                id="searchId"
+                                type="text"
+                                placeholder="회원 검색"
+                                class="px-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-gray-600">
+                                    <tr>
+                                        <th class="text-left px-4 py-3">아이디</th>
+                                        <th class="text-left px-4 py-3">이메일</th>
+                                        <th class="text-left px-4 py-3">가입일</th>
+                                        <th class="text-left px-4 py-3">상태</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody id="user_list" class="divide-y">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+
+                    <!-- 회원 상세 -->
+                    <div class="bg-white border rounded-xl shadow-sm p-6">
+
+                        <h2 class="font-bold text-lg mb-4 flex items-center gap-2">
+                            <i data-lucide="user-circle" class="w-5 h-5 text-blue-600"></i>
+                            회원 상세보기
+                        </h2>
+
+                        <div id="member_detail" class="grid md:grid-cols-2 gap-4 text-sm">
+                        </div>
+                    </div>
+
+
+                    <!-- 로그인 내역 -->
+                    <div class="bg-white border rounded-xl shadow-sm p-6">
+
+                        <h2 class="font-bold text-lg mb-4 flex items-center gap-2">
+                            <i data-lucide="history" class="w-5 h-5 text-blue-600"></i>
+                            로그인 내역
+                        </h2>
+
+                        <div id="login_log" class="space-y-3 text-sm">
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </body>
+    <script>
+        let savedUserId = sessionStorage.getItem("savedUserId");
+        let userData = [];
+        let currentLogPage = 1;
+        const logPerPage = 10;
+        let allLogs = [];
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            axios.get("/session_out");
+            await fetchMainData();
+            admin_log();
+            updateNavbar();
+            loadUsers();
+            if (window.lucide) lucide.createIcons();
+        });
+
+        async function fetchMainData() {
+            let {data}= await axios.get("/admin/user_list");
+            userData = data.user;
+            console.log(userData);
+        }
+
+        // Navbar 상태 업데이트
+        function updateNavbar() {
+            const authContainer = document.getElementById('authContainer');
+            // 태그가 없을 시 함수 종료(에러방지)
+            // console.log(authContainer);
+            if (!authContainer){return};
+            const userNameSpan = document.getElementById('user_name');
+            const userGreeting = document.getElementById('user-greeting');
+            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
+
+            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+                // 1. 인사말 영역 처리
+                if (userGreeting && userNameSpan) {
+                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
+                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
+                }
+
+                // 2. 로그아웃 버튼 표시
+                authContainer.innerHTML = `
+                    <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG OUT
+                    </button>
+                `;
+            } else {
+                // 로그아웃 상태일 때
+                if (userGreeting) {
+                    userGreeting.classList.add('hidden'); // 인사말 숨김
+                }
+
+                authContainer.innerHTML = `
+                    <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG IN
+                    </a>
+                `;
+            }
+            
+            if (window.lucide) lucide.createIcons();
+        }
+
+        async function handleLogout() {
+            if(confirm("로그아웃 하시겠습니까?")){
+                try {
+                    await axios.get("/logout");
+                    sessionStorage.removeItem('savedUserId');
+                    location.href = "login.html";
+                }catch (error) {
+                    console.error("로그아웃 중 오류 발생:", error);
+                    alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
+                }
+            } 
+        } 
+
+        // 모든 user 나열 함수
+        async function loadUsers(user = userData) {
+            
+            const tbody = document.getElementById("user_list");
+
+            tbody.innerHTML = user.map(user => `
+                <tr class="hover:bg-gray-50 cursor-pointer"
+                    onclick="showUserDetail('${user.id}')">
+
+                    <td class="px-4 py-3">${user.id}</td>
+                    <td class="px-4 py-3">${user.email}</td>
+                    <td class="px-4 py-3">${user.create_at}</td>
+                    <td class="px-4 py-3">
+                        ${
+                            user.status == true
+                            ? `<span class="px-2 py-1 bg-green-100 text-green-700 rounded-md text-xs">로그인</span>`
+                            : `<span class="px-2 py-1 bg-gray-100 text-gray-600 rounded-md text-xs">로그아웃</span>`
+                        }
+                    </td>
+                </tr>
+            `).join("");
+        }
+
+        // 회원 검색 필터링 함수
+        document.getElementById("searchId")
+            .addEventListener("input", function () {
+
+                const keyword = this.value.toLowerCase();
+
+                const filteredUsers = userData.filter(user => {
+                    const searchText = `
+                        ${user.id}
+                        ${user.email}
+                        ${user.create_at}
+                        ${user.status ? "로그인" : "로그아웃"}
+                    `.toLowerCase();
+
+                    return searchText.includes(keyword);
+                });
+
+                loadUsers(filteredUsers);
+            });
+
+
+        // 회원정보 상세보기 함수
+        // 관심키워드는 기본 4개만 보여지고, '더보기' 버튼으로 나머지 키워드 나열
+        async function showUserDetail(id){
+
+            const detail = document.getElementById('member_detail');
+            const user = userData.find(user => user.id === id);
+
+            if (!user) return;
+
+            const keywords = user.keywords.split(", ");
+            const visibleKeywords = keywords.slice(0, 4);
+            const hiddenKeywords = keywords.slice(4); 
+
+            detail.innerHTML = `
+                <div>
+                    <label class="text-gray-500">아이디</label>
+                    <div class="font-medium text-[17px]">${user.id}</div>
+                </div>
+
+                <div>
+                    <label class="text-gray-500">이메일</label>
+                    <div class="font-medium text-[17px]">${user.email}</div>
+                </div>
+
+                <div>
+                    <label class="text-gray-500">연락처</label>
+                    <div class="font-medium text-[17px]">${formatPhoneNumber(user.phone_number)}</div>
+                </div>
+
+                <div>
+                    <label class="text-gray-500">관심 키워드</label>
+                    <div class="flex gap-2 mt-1">
+                        ${visibleKeywords.map(k => `
+                            <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-[17px]">
+                                ${k}
+                            </span>
+                        `).join("")}
+
+                        ${
+                            hiddenKeywords.length > 0
+                            ? `
+                            <button
+                                onclick="toggleKeywords(this)"
+                                class="px-2 py-1 bg-gray-100 text-gray-600 rounded-md text-[13px] hover:bg-gray-200"
+                            >
+                                더보기
+                            </button>
+                            `
+                            : ""
+                        }
+                    </div>
+
+                    <!-- 숨겨진 키워드 -->
+                    ${
+                        hiddenKeywords.length > 0
+                        ? `
+                        <div class="hidden-keywords hidden flex flex-wrap gap-2 mt-2">
+                            ${hiddenKeywords.map(k => `
+                                <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-[17px]">
+                                    ${k}
+                                </span>
+                            `).join("")}
+                        </div>
+                        `
+                        : ""
+                    }
+                </div>
+            `;
+            // console.log(id);
+            // 회원 상세보기시 로그인 로그 나열(시간순서대로)
+            await userLoginLog(id);
+                            
+        }
+        
+        // 로그인로그 가져오기 함수
+        async function userLoginLog(id) {
+            const {data} = await axios.get("/admin/login_log?id="+id);
+            console.log(data);            
+
+            // 최근 접속시간 순서로 정렬
+            allLogs = data.res.sort((a, b) => new Date(b.login_time) - new Date(a.login_time));
+
+            currentLogPage = 1;
+            renderLogPage();
+        }
+
+        // 로그인로그 페이징 함수
+        function renderLogPage() {
+            const loginLog = document.getElementById('login_log');
+            
+            const startIndex = (currentLogPage - 1) * logPerPage;
+            const endIndex = startIndex + logPerPage;
+            const pagedLogs = allLogs.slice(startIndex, endIndex);
+
+            let html = `
+                <div class="flex justify-between py-3 border-b text-sm font-semibold text-gray-500">
+                    <span>로그인</span>
+                    <span>로그아웃</span>
+                    <span>IP</span>
+                </div>
+            `;
+
+            html += pagedLogs.map(log => `
+                        <div class="flex justify-between py-0.5 border-b text-sm">
+                            <span>${log.login_time}</span>
+                            <span>${log.logout_time || '<span class="text-blue-500 font-bold text-[12px]">접속중</span>'}</span>
+                            <span class="text-gray-500">${log.login_ip}</span>
+                        </div>
+                    `).join("");
+
+                    // 3. 페이지네이션 컨트롤(버튼) 추가
+            const totalPages = Math.ceil(allLogs.length / logPerPage);
+            
+            html += `
+                <div class="flex justify-center items-center gap-4 mt-4">
+                    <button onclick="changeLogPage(-1)" ${currentLogPage === 1 ? 'disabled' : ''} 
+                        class="px-2 py-1 border rounded disabled:opacity-30 text-sm">이전</button>
+                    <span class="text-sm font-medium">${currentLogPage} / ${totalPages || 1}</span>
+                    <button onclick="changeLogPage(1)" ${currentLogPage === totalPages || totalPages === 0 ? 'disabled' : ''} 
+                        class="px-2 py-1 border rounded disabled:opacity-30 text-sm">다음</button>
+                </div>
+            `;
+
+            loginLog.innerHTML = html;
+        }
+
+        // 페이지 변경 함수
+        function changeLogPage(direction) {
+            currentLogPage += direction;
+            renderLogPage();
+        }
+        
+        // 관심키워드 더보기 함수
+        function toggleKeywords(button) {
+            const hiddenDiv = button.parentElement.nextElementSibling;
+
+            if (hiddenDiv.classList.contains('hidden')) {
+                hiddenDiv.classList.remove('hidden');
+                button.textContent = '접기';
+            } else {
+                hiddenDiv.classList.add('hidden');
+                button.textContent = `더보기`;
+            }
+        }
+
+        // 전화번호 사이 (-) 추가 함수
+        function formatPhoneNumber(phoneNumber) {
+            return phoneNumber
+                .replace(/[^0-9]/g, '') // 숫자가 아닌 문자 제거 (안전장치)
+                .replace(/^(\d{2,3})(\d{3,4})(\d{4})$/, `$1-$2-$3`);
+        }
+        
+        // 시간 변화 함수(예. 방금전, 30분전, 1시간전...)
+        function timeAgo(dateString) {
+            
+            if (!dateString) return "-";
+            
+            const now = new Date();
+            const past = new Date(dateString);
+            const diffInSeconds = Math.floor((now - past) / 1000);
+
+            if (diffInSeconds < 60) return '방금 전';
+            
+            const diffInMinutes = Math.floor(diffInSeconds / 60);
+            if (diffInMinutes < 60) return `${diffInMinutes}분 전`;
+            
+            const diffInHours = Math.floor(diffInMinutes / 60);
+            if (diffInHours < 24) return `${diffInHours}시간 전`;
+            
+            const diffInDays = Math.floor(diffInHours / 24);
+            if (diffInDays < 7) return `${diffInDays}일 전`;
+            
+            // 일주일이 넘어가면 그냥 원래 날짜(년-월-일)를 보여줍니다.
+            return dateString.split('T')[0]; 
+        }
+
+        // 회원 알림 로그
+        async function admin_log() {
+            const {data} = await axios.get("/admin/admin_log");
+            console.log(data.res);
+
+            const user_log = document.getElementById('user_log');
+
+            user_log.innerHTML = data.res.map(log =>`
+                <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors">
+                    <div class="flex justify-between items-start">
+                        <h4 class="font-bold text-[17px] text-gray-900">${log.title}</h4>
+                        <span class="text-sm text-gray-400">${timeAgo(log.created_at)}</span>
+                    </div>
+                    <p class="text-gray-600 mt-1 text-[15px]">
+                        ${log.content}
+                    </p>
+                </div>
+            `).join('');
+        }
+        // <div class="text-sm font-semibold text-gray-800">
+        //     3단계 Signal 위험 감지
+        // </div>
+        // <div class="text-sm text-gray-500 mt-1">
+        //     원자재 가격 급등 감지
+        // </div>
+        // <div class="text-xs text-gray-400 mt-2">
+        //     5분 전
+        // </div>
+
+        
+    </script>
+</html>

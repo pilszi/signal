@@ -366,3 +366,13 @@ def save_analysis_result(cursor, connection, analysis_data):
     cursor.execute("INSERT INTO alarm_log (signal_no, member_no) SELECT %s, member_no FROM member_info", (signal_no,))
 
     connection.commit()
+
+
+def is_noise_article(title, content, url):
+    return (
+        any(kw.lower() in title.lower() for kw in Config.SPORTS_KEYWORDS)
+        or any(kw.lower() in title.lower() for kw in Config.ENTERTAINMENT_KEYWORDS)
+        or any(kw.lower() in title.lower() for kw in Config.RECOMMENDATION_KEYWORDS)
+        or any(kw.lower() in title.lower() for kw in Config.skip_keywords)
+        or len(content) < 100
+    )
