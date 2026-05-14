@@ -334,6 +334,10 @@
             const keywords = Array.from(document.querySelectorAll('.keyword-input')).map(i => i.value.trim()).filter(k => k);
 
             if (!isUsernameChecked || isUsernameTaken) { showModal("아이디 중복확인을 완료해주세요."); return; }
+            if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pw)) {
+                showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.");
+                return;
+            }
             if (pw !== confirmPw) { showModal("비밀번호가 일치하지 않습니다."); return; }
             if (!emailVerified) { showModal("이메일 인증을 완료해주세요."); return; }
             if (keywords.length === 0) { showModal("최소 하나 이상의 관심 키워드를 입력해주세요."); return; }
