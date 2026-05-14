@@ -2,10 +2,10 @@ import re
 import html
 from collections import Counter
 import hashlib
-
+import sqlalchemy
 import logger
+from sqlalchemy.orm import Session
 from config import Config
-
 from konlpy.tag import Okt
 
 okt = Okt()
@@ -329,43 +329,46 @@ def extract_keywords(title, content, top_n=10):
 
 
 # 스케줄러 내부에 들어갈 저장 로직
-def save_analysis_result(cursor, connection, analysis_data):
+def save_analysis_result(session: Session, analysis_data: dict):
     """
         분석 결과를 DB에 저장하는 함수
         :param cursor: DB 커서 객체
         :param connection: DB 연결 객체 (commit용)
         :param analysis_data: 분석 결과 딕셔너리
+        분석 결과를 DB에 저장하고 생성된 signal_no를 반환
     """
-    # 1. 시그널 본체 저장 (signal_message)
-    cursor.execute("""
-        INSERT INTO signal_message (risk_level, prediction, prediction_reason, document_no)
-        VALUES (%s, %s, %s, %s)
-    """, (analysis_data['level'], analysis_data['pred'], analysis_data['reason'], analysis_data['doc_id']))
+    # 1. 시그널 본체 저장 (signal_message) (url 필드 제외)
+    sql_msg = sqlalchemy.text("""
+            INSERT INTO signal_message (risk_level, document_no, prediction, prediction_reason, url)
+            VALUES (:level, :doc_no, :pred, :reason, :url)
+        """)
 
-    signal_no = cursor.lastrowid  # 방금 저장된 시그널 번호 추출
+    result = session.execute(sql_msg, {
+        'level': analysis_data.get('level'),
+        'doc_no': analysis_data.get('doc_id') or analysis_data.get('id') or 'unknown_id',
+        'pred': analysis_data.get('pred'),
+        'reason': analysis_data.get('reason'),
+        'url': analysis_data.get('url')  # ml.py에서 넘어온 url 저장
+    })
 
-    # 2. 국가 매핑 (signal_country)
-    extracted_countries = analysis_data['countries']  # 예: ['United States', 'Middle East']
+    # 방금 생성된 PK(signal_no) 추출
+    signal_no = result.lastrowid
 
+    # 2. 국가 매핑 (기존과 동일)
+    extracted_countries = analysis_data.get('countries', [])
     for eng_name in extracted_countries:
-        # REGION_TO_COUNTRIES에 해당 키가 있는지 확인 (지역 연합인 경우)
         target_list = Config.REGION_TO_COUNTRIES.get(eng_name, [eng_name])
-
         for country_name in target_list:
-            # DB에서 해당 영문명의 country_no 조회
-            cursor.execute("SELECT country_no FROM country WHERE country_en_name = %s", (country_name,))
-            row = cursor.fetchone()
+            sql_c = sqlalchemy.text("SELECT country_no FROM country WHERE country_en_name = :c_name")
+            row = session.execute(sql_c, {"c_name": country_name}).fetchone()
+
             if row:
-                # 튜플의 첫 번째 값인 [0]을 가져옵니다.
                 country_no = row[0]
-                cursor.execute("INSERT INTO signal_country (signal_no, country_no) VALUES (%s, %s)",
-                               (signal_no, country_no))
+                sql_map = sqlalchemy.text("INSERT INTO signal_country (signal_no, country_no) VALUES (:s_no, :c_no)")
+                session.execute(sql_map, {"s_no": signal_no, "c_no": country_no})
 
-    # 3. 알림 생성 (alarm_log)
-    # 모든 멤버에게 알림을 보낼지, 특정 멤버에게 보낼지 결정하여 INSERT
-    cursor.execute("INSERT INTO alarm_log (signal_no, member_no) SELECT %s, member_no FROM member_info", (signal_no,))
-
-    connection.commit()
+    # 3. 생성된 번호를 밖으로 던져줍니다!
+    return signal_no
 
 
 def is_noise_article(title, content, url):
