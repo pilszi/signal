@@ -42,71 +42,153 @@ def is_hanja(char):
 def find_target_country(title, content):
     """
     국가 추출 로직 최종 고도화 버전
-    순위: 한국 영향권 > 주요 엔티티 > 지정학 요충지 > 제목 국가명 > 본문 스코어링
+    순위:
+    한국 영향권 > 주요 엔티티 > 지정학 요충지 >
+    제목 국가명 > 본문 스코어링
     """
-    # [Step 1] 전처리: 노이즈 제거 및 텍스트 결합
+
+    # ---------------------------------------------------
+    # [Step 1] 전처리
+    # ---------------------------------------------------
     noise_pattern = "|".join(Config.COUNTRY_NOISE_INSTITUTIONS)
+
     clean_title = re.sub(noise_pattern, "", title)
     clean_content = re.sub(noise_pattern, "", content)
-    clean_full_text = f"{clean_title} {clean_content}"
 
-    # [Step 2] 한국 실질 영향력 체크 (Impact First - 제목 위주)
-    # 중동 전쟁 기사라도 '국내 주유소', '원화 환율' 등이 제목에 있으면 Korea로 분류
-    for impact_word in Config.KOREA_PRIORITY_KEYWORDS:
-        if impact_word in clean_title:
-            return "Korea"
-
-    # [Step 3] 주요 엔티티(기업/기관) 체크 (Subject First)
-    # 리스크의 주체(삼성전자, 현대차, 엔비디아 등)가 명확하면 해당 국가로 즉시 반환
+    # ---------------------------------------------------
+    # [Step 2] 주요 엔티티 체크
+    # ---------------------------------------------------
     for entity, country in Config.ENTITY_TO_COUNTRY_MAP.items():
         if entity in clean_title:
             return country
 
-    # [Step 4] 지정학적 요충지 체크 (Region)
-    # "호르무즈", "홍해" 등 특정 국가로 묶기 힘든 분쟁 지역 처리
+    # ---------------------------------------------------
+    # [Step 3] 지정학 지역 체크
+    # ---------------------------------------------------
     for region, country in Config.REGION_TO_COUNTRY_MAP.items():
         if region in clean_title:
             return country
 
-    # [Step 5] 제목(Title) 기반 국가명 직접 매칭
-    # 1. 한자(美, 中 등) 매칭
-    # 2. 한글 한 글자(한, 미 등) - '한-미' 등 특수기호/공백 포함 시만 인정
-    # 3. 일반 국가명 매칭
+    # ---------------------------------------------------
+    # [Step 4] 제목 국가 점수화
+    # ---------------------------------------------------
+    title_scores = {}
+
+    title_countries = set()
+
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
+
+        score = 0
+
+        # 한자 국가명
         if is_hanja(kr_name) and kr_name in clean_title:
-            return en_name
+            score += 5
 
-        if len(kr_name) == 1:
+        # 한 글자 국가명
+        elif len(kr_name) == 1:
             if re.search(rf'{kr_name}[\s\-·\.]', clean_title):
-                return en_name
-        elif kr_name in clean_title:
-            return en_name
+                score += 4
 
-    # [Step 6] 도시명 매칭 (제목 기반 Fallback)
+        # 일반 국가명
+        elif kr_name in clean_title:
+            score += 3
+
+        if score > 0:
+            title_scores[en_name] = (
+                title_scores.get(en_name, 0) + score
+            )
+
+            title_countries.add(en_name)
+
+    # ---------------------------------------------------
+    # [Step 4-1] 한국 영향 키워드 가산
+    # ---------------------------------------------------
+    korea_score = 0
+
+    for impact_word in Config.KOREA_PRIORITY_KEYWORDS:
+        if impact_word in clean_title:
+            korea_score += 2
+
+    if korea_score > 0:
+        title_scores["Korea"] = (
+            title_scores.get("Korea", 0) + korea_score
+        )
+
+    # ---------------------------------------------------
+    # [Step 5] 도시명 보정
+    # ---------------------------------------------------
     for city_name, en_name in Config.CITY_TO_COUNTRY_MAP.items():
         if city_name in clean_title:
-            return en_name
+            title_scores[en_name] = (
+                title_scores.get(en_name, 0) + 2
+            )
 
-    # [Step 7] 본문 가중치 기반 언급 국가 산출
-    # 제목에서 결정 안 된 경우, 인트로(상단 500자) 가중치 3.0을 주어 본문 분석
+    # ---------------------------------------------------
+    # [Step 6] 본문 스코어링
+    # ---------------------------------------------------
     intro = clean_content[:500]
     body = clean_content[500:]
-    country_scores = {}
+
+    country_scores = dict(title_scores)
+
+    LOW_PRIORITY_COUNTRIES = {
+        "North Korea",
+        "China",
+        "USA",
+        "Russia"
+    }
+
 
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-        # 한자이거나 두 글자 이상인 국가명만 본문 스코어링에 포함 (노이즈 방지)
+
+        # 한자이거나 두 글자 이상만 허용
         if is_hanja(kr_name) or len(kr_name) >= 2:
-            score = (intro.count(kr_name) * 3.0) + (body.count(kr_name) * 1.0)
+
+            score = (
+                    (intro.count(kr_name) * 3.0) +
+                    (body.count(kr_name) * 1.0)
+            )
+
+            # 제목에 없는 강대국은 본문 점수 약화
+            if (
+                    en_name in LOW_PRIORITY_COUNTRIES
+                    and en_name not in title_countries
+            ):
+                score *= 0.55
+
             if score > 0:
-                country_scores[en_name] = country_scores.get(en_name, 0) + score
+                country_scores[en_name] = (
+                        country_scores.get(en_name, 0) + score
+                )
 
-    # 최다 점수 국가 반환
+    # ---------------------------------------------------
+    # [Step 7] 최종 국가 판정
+    # ---------------------------------------------------
     if country_scores:
-        return max(country_scores, key=country_scores.get)
 
-    # [Step 8] 최종 매칭 실패 시 Global
+        sorted_scores = sorted(
+            country_scores.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        top_country, top_score = sorted_scores[0]
+
+        second_score = (
+            sorted_scores[1][1]
+            if len(sorted_scores) > 1 else 0
+        )
+
+        # 점수 차이 적으면 글로벌 기사 처리
+        if top_score - second_score < 2:
+            return "Global"
+
+        return top_country
+
+    # ---------------------------------------------------
+    # [Step 8] 실패 시 Global
+    # ---------------------------------------------------
     return "Global"
-
 
 
 # 히트맵 데이터 가공
@@ -187,7 +269,6 @@ def prepare_heatmap_data(articles):
             "score": total_score,
             "level": level
         }
-
     return final_heatmap_data
 
 # 상위 3개 국가 뽑는 함수 (signal station)

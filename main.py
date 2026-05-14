@@ -48,7 +48,9 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-es = Elasticsearch(["http://localhost:9200"])
+es = Elasticsearch(["http://100.123.232.79:9200"])
+
+
 
 
 # ==========================================
@@ -177,10 +179,6 @@ async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
                         max_instances=1,  # 작업 겹침 방지
                         replace_existing=True  # 기존 작업 교체
                     )
-
-                # BERT 분석 작업 등록 (10분)
-                if not scheduler.get_job('ml_analysis'):
-                    scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
             else:
                 logger.error(f"❌ [Pipeline] 학습 도중 에러 발생: {stderr.decode()}")
         except Exception as e:
@@ -941,32 +939,32 @@ async def get_heatmap_stats():
 
         # 2. 모든 국가를 기본 '안정(Stable)'으로 초기화
         # Config.G20_COUNTRY_MAP.values()에서 유니크한 영어 국가명들을 가져옵니다.
-        unique_countries = set(Config.G20_COUNTRY_MAP.values())
-        stats = {country: {"score": 0, "level": "Stable"} for country in unique_countries}
+        heatmap_data = prepare_heatmap_data(docs)
 
-        # 3. 데이터를 순회하며 국가별 최신 상태 업데이트
-        for doc in docs:
-            c_name = doc.get('country_name')
+        chart_data = []
 
-            # 'Middle East' 같은 지역명이 오면 해당 지역 국가 전체에 점수 전파
-            target_countries = [c_name]
-            if c_name in Config.REGION_TO_COUNTRIES:
-                target_countries = Config.REGION_TO_COUNTRIES[c_name]
+        for country, info in heatmap_data.items():
 
-            for country in target_countries:
-                if country in stats:
-                    # 이미 데이터가 들어있다면(최신순 정렬이므로) 건너뜁니다.
-                    if stats[country]["score"] != 0: continue
+            level = info.get("level", "Stable")
 
-                    # ml.py에서 저장한 점수와 등급 가져오기
-                    raw_score = doc.get('final_total_score', {}).get('total', 0)
-                    # RISK 점수로 변환 (0~100 사이)
-                    risk_score = round(abs(raw_score * 100), 1)
+            # ECharts 단계값 변환
+            if level == "Serious":
+                value = 3
 
-                    stats[country]["score"] = risk_score
-                    stats[country]["level"] = doc.get('risk_level', '안정')
+            elif level == "Caution":
+                value = 2
 
-        return stats  # FastAPI는 jsonify 없이 그냥 리턴!
+            else:
+                value = 1
+
+            chart_data.append({
+                "name": country,
+                "value": value,
+                "score": info.get("score", 0)
+            })
+
+        return chart_data
+
     except Exception as e:
         print(f"❌ 히트맵 통계 에러: {e}")
         return {}

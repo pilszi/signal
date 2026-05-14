@@ -83,7 +83,7 @@ async def check_yesterday_existence(keywords):
                 }
             }
         }
-        res = es.search(index="news_labeling", body=query, size=1)
+        res = await es.search(index="news_labeling", body=query, size=1)
         return res['hits']['total']['value'] > 0
     except Exception as e:
         logger.error(f"Error checking yesterday news: {e}")
@@ -648,26 +648,26 @@ async def run_analysis():
 
         # [D] 정치 및 반복 뉴스 보정
         if is_politics:
-            total = min(1.0, total + 0.12)
+            total = (total * 0.72)
             if total <= 0.63 and await check_yesterday_existence(refined_keywords):
-                total += (0.65 - total) * 0.2
+                total = (total*0.85)
 
+        # 주식 추천기사
         is_stock_recommendation = any(
             kw.lower() in title.lower()
             for kw in Config.SAFE_FINANCE_PATTERNS
         )
         if is_stock_recommendation:
-            boost = 0.06
-            total = min(1.0, total * (1 + boost))
+            total = (total * 0.75)
 
+        # 기업경영 뉴스
         is_corporate_news = any(
             kw.lower() in title.lower()
             for kw in Config.CORPORATE_NEWS_KEYWORDS
         )
 
         if is_corporate_news:
-            floor = 0.52
-            total = (total * 0.8) + (floor * 0.2)
+            total = (total * 0.8)
 
         # [E] 최종 가두기 및 등급 판정
         total = max(0.0, min(1.0, total))
@@ -735,13 +735,13 @@ async def run_analysis():
             # 2. 원본 데이터 처리 상태 업데이트 (ES_2)
             es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
             # 점수 산출 로그 추가
-            logger.info(
-                f"🎯 [분석 완료] {data['title'][:20]}...\n"
-                f"   - AI 감성 점수: {final_sent_score}\n"
-                f"   - 지표 합산 점수: {round(total, 4)}\n"
-                f"   - 최종 위험 등급: [{risk_lv}]\n"
-                f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
-            )
+            # logger.info(
+            #     f"🎯 [분석 완료] {data['title'][:20]}...\n"
+            #     f"   - AI 감성 점수: {final_sent_score}\n"
+            #     f"   - 지표 합산 점수: {round(total, 4)}\n"
+            #     f"   - 최종 위험 등급: [{risk_lv}]\n"
+            #     f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
+            # )
 
             #  DB 저장을 위해 main.py로 보낼 배달 바구니에 담기
             processed_results.append({
