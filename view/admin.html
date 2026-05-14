@@ -179,9 +179,7 @@
 
                     <div class="flex items-center gap-3">
                         <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <span id="user-greeting" class="hidden text-sm text-gray-600">
-                            <span id="user_name"></span>님 반갑습니다
-                        </span>
+                        <div id="user-greeting"></div>
                         <!-- 알림 컴포넌트 -->
                         <div class="notif-container" id="notifContainer">
                             <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
@@ -239,11 +237,102 @@
                         </div>
 
                         <div class="max-h-[600px] overflow-y-auto divide-y divide-gray-100 border rounded-lg bg-white">
-
-                            <div id="signal_log" class="p-4 hover:bg-gray-50 cursor-pointer">
+                            <div id="signal_log">
                             </div>
+                            <div id="signalDetailModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                                <div class="bg-white rounded-xl w-[600px] max-w-[90vw] p-6 shadow-lg">
+                                    <div class="flex justify-between items-center mb-4">
+                                        <h3 class="text-lg font-bold">Signal 알림 상세보기</h3>
+                                        <button onclick="closeDetail(this)" class="text-gray-400 hover:text-black">
+                                            ✕
+                                        </button>
+                                    </div>
+                                    <div class="space-y-3 text-sm">
+                                        <div>
+                                           <div class="text-gray-500">시그널 번호</div>
+                                           <div id="signal_id" class="font-medium"></div>
+                                       </div>
 
+                                        <div>
+                                           <div class="text-gray-500">해당 회원번호</div>
+                                           <div id="user_no" class="font-medium"></div>
+                                       </div>
+                                        
+                                        <div>
+                                            <div class="text-gray-500">위험 레벨</div>
+                                            <div id="signal_level" class="font-medium"></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">시그널 내용</div>
+                                            <div id="signal_content"></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">시그널 시간</div>
+                                            <div id="signal_time"></div>
+                                        </div>
+                                        <div>
+                                            <div class="text-gray-500">관련 링크</div>
+                                                <a
+                                                    id="signal_url"
+                                                    href="#"
+                                                    target="_blank"
+                                                    class="text-blue-600 hover:underline break-all"
+                                                >
+                                                </a>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
                             <div id="user_log">
+                            </div>
+                            <div id="logDetailModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                                <div class="bg-white rounded-xl w-[600px] max-w-[90vw] p-6 shadow-lg">
+                                    
+                                    <div class="flex justify-between items-center mb-4">
+                                        <h3 class="text-lg font-bold">로그 상세보기</h3>
+                                        <button onclick="closeDetail(this)" class="text-gray-400 hover:text-black">
+                                            ✕
+                                        </button>
+                                    </div>
+
+                                    <div class="space-y-3 text-sm">
+                                        <div>
+                                            <div class="text-gray-500">ID</div>
+                                            <div id="detail_id" class="font-medium"></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">제목</div>
+                                            <div id="detail_title" class="font-medium"></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">내용</div>
+                                            <div id="detail_content"></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">시간</div>
+                                            <div id="detail_created_at"></div>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">변경 전</div>
+                                            <pre id="detail_before"
+                                                class="bg-gray-50 p-3 rounded text-xs overflow-auto"></pre>
+                                        </div>
+
+                                        <div>
+                                            <div class="text-gray-500">변경 후</div>
+                                            <pre id="detail_after"
+                                                class="bg-gray-50 p-3 rounded text-xs overflow-auto"></pre>
+                                        </div>
+                                    </div>
+
+                                </div>
                             </div>
 
                         </div>
@@ -324,13 +413,17 @@
         let currentLogPage = 1;
         const logPerPage = 10;
         let allLogs = [];
+        let adminLog = [];
+        let warnningLog = [];
 
         document.addEventListener('DOMContentLoaded', async () => {
             axios.get("/session_out");
             await fetchMainData();
             admin_log();
+            signalLog ();
             updateNavbar();
             loadUsers();
+            
             if (window.lucide) lucide.createIcons();
         });
 
@@ -346,16 +439,27 @@
             // 태그가 없을 시 함수 종료(에러방지)
             // console.log(authContainer);
             if (!authContainer){return};
-            const userNameSpan = document.getElementById('user_name');
             const userGreeting = document.getElementById('user-greeting');
-            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
                 // 1. 인사말 영역 처리
-                if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
-                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
+                // 관리자 계정일 경우 
+                if (savedUserId === 'admin') {
+                    userGreeting.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a> 
+                                반갑습니다 
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
+                
 
                 // 2. 로그아웃 버튼 표시
                 authContainer.innerHTML = `
@@ -446,13 +550,18 @@
             if (!user) return;
 
             const keywords = user.keywords.split(", ");
-            const visibleKeywords = keywords.slice(0, 4);
-            const hiddenKeywords = keywords.slice(4); 
+            const visibleKeywords = keywords.slice(0, 5);
+            const hiddenKeywords = keywords.slice(5); 
 
             detail.innerHTML = `
                 <div>
                     <label class="text-gray-500">아이디</label>
                     <div class="font-medium text-[17px]">${user.id}</div>
+                </div>
+
+                <div>
+                    <label class="text-gray-500">이름</label>
+                    <div class="font-medium text-[17px]">${user.user_name}</div>
                 </div>
 
                 <div>
@@ -469,7 +578,7 @@
                     <label class="text-gray-500">관심 키워드</label>
                     <div class="flex gap-2 mt-1">
                         ${visibleKeywords.map(k => `
-                            <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-[17px]">
+                            <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-[15px]">
                                 ${k}
                             </span>
                         `).join("")}
@@ -494,7 +603,7 @@
                         ? `
                         <div class="hidden-keywords hidden flex flex-wrap gap-2 mt-2">
                             ${hiddenKeywords.map(k => `
-                                <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-[17px]">
+                                <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-[15px]">
                                     ${k}
                                 </span>
                             `).join("")}
@@ -616,31 +725,186 @@
         async function admin_log() {
             const {data} = await axios.get("/admin/admin_log");
             console.log(data.res);
-
+            adminLog = data.res;
             const user_log = document.getElementById('user_log');
 
-            user_log.innerHTML = data.res.map(log =>`
-                <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors">
+            let html = `
+                <div class="flex justify-between py-3 px-4 text-sm font-semibold text-gray-500 bg-gray-100/50">
+                    <span>회원정보 알림</span>
+                </div>
+            `;
+
+            html += adminLog.map(log => `
+                <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors" onclick='showLogDetail(${log.log_id})'>
                     <div class="flex justify-between items-start">
                         <h4 class="font-bold text-[17px] text-gray-900">${log.title}</h4>
-                        <span class="text-sm text-gray-400">${timeAgo(log.created_at)}</span>
+                        <span class="text-sm text-gray-400 font-normal">${timeAgo(log.created_at)}</span>
                     </div>
                     <p class="text-gray-600 mt-1 text-[15px]">
                         ${log.content}
                     </p>
                 </div>
             `).join('');
-        }
-        // <div class="text-sm font-semibold text-gray-800">
-        //     3단계 Signal 위험 감지
-        // </div>
-        // <div class="text-sm text-gray-500 mt-1">
-        //     원자재 가격 급등 감지
-        // </div>
-        // <div class="text-xs text-gray-400 mt-2">
-        //     5분 전
-        // </div>
 
+            user_log.innerHTML = html;
+        }
+
+        async function signalLog () {
+            const {data} = await axios.get("/admin/alarm_log");
+            console.log(data.res);
+            warnningLog = data.res;
+            const signal_log = document.getElementById('signal_log');
+
+            const riskMap = {
+                "심각" : 3,
+                "주의" : 2,
+                "안정" : 1
+            };
+
+            let html = `
+                <div class="flex justify-between py-3 px-4 text-sm font-semibold text-gray-500 bg-gray-100/50">
+                    <span>시그널 알림</span>
+                </div>
+            `;
+            html += warnningLog.map(log =>
+                `
+                <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors" onclick='signalDetail(${log.signal_no})'>
+                    <div class="flex justify-between items-start">
+                        ${riskMap[log.risk_level] || 3}단계 Signal 위험 감지
+                    </div>
+                    <div class="text-xs text-gray-400 mt-2">
+                        ${timeAgo(log.alarm_time)}
+                    </div>
+                </div>
+                `
+            ).join('');
+            signal_log.innerHTML = html;
+        }
         
+        // 로그 상세보기(팝업) 함수
+        function showLogDetail(log_id) {
+            const log = adminLog.find(x => x.log_id === log_id)
+            const diff = getChangedOnly(
+                log.before_data,
+                log.after_data
+            );
+            
+            document.getElementById("detail_id").textContent =
+                log.target_id || "-";
+
+            document.getElementById("detail_title").textContent =
+                log.title || "-";
+
+            document.getElementById("detail_content").textContent =
+                log.content || "-";
+
+            document.getElementById("detail_created_at").textContent =
+                log.created_at || "-";   
+
+            document.getElementById("detail_before").textContent =
+                formatJson(diff.before);
+
+            document.getElementById("detail_after").textContent =
+                formatJson(diff.after);
+
+            document
+                .getElementById("logDetailModal")
+                .classList.remove("hidden");
+        }
+
+        // 팝업 닫기
+        function closeDetail(btn) {
+            const modal = btn.closest(".fixed"); 
+
+            if (modal) {
+                modal.classList.add("hidden");
+            }
+        }
+
+        // object 형태 데이터를 JSON 형태로 변형 함수
+        function formatJson(data) {
+            if (!data) return "-";
+
+            try {
+                if (typeof data === "string") {
+                    data = JSON.parse(data);
+                }
+
+                return JSON.stringify(data, null, 2);
+            } catch {
+                return data;
+            }
+        }
+
+        // 수정 전/ 후 정보 중 바뀐 정보만 추출 함수
+        function getChangedOnly(beforeData, afterData) {
+            let before = beforeData;
+            let after = afterData;
+
+            // 문자열이면 JSON 파싱
+            if (typeof before === "string") {
+                before = JSON.parse(before);
+            }
+
+            if (typeof after === "string") {
+                after = JSON.parse(after);
+            }
+
+            const changedBefore = {};
+            const changedAfter = {};
+
+            const keys = new Set([
+                ...Object.keys(before || {}),
+                ...Object.keys(after || {})
+            ]);
+
+            for (const key of keys) {
+                if (before?.[key] !== after?.[key]) {
+                    changedBefore[key] = before?.[key];
+                    changedAfter[key] = after?.[key];
+                }
+            }
+
+            return {
+                before: changedBefore,
+                after: changedAfter
+            };
+        }
+
+        // signal 알림 상세보기 함수
+        function signalDetail(signal) {
+            const log = warnningLog.find(x => x.signal_no === signal)
+            
+            document.getElementById("signal_id").textContent =
+                log.signal_no || "-";
+
+            document.getElementById("user_no").innerHTML =
+                log.member_list.split(",").join("<br>");
+
+            document.getElementById("signal_level").textContent =
+                log.risk_level || "-";
+
+            document.getElementById("signal_content").textContent =
+                log.prediction || "-";   
+
+            document.getElementById("signal_time").textContent =
+                log.alarm_time;
+
+            const link = document.getElementById("signal_url");
+                if (log.news_url) {
+                    link.href = log.news_url;
+                    link.textContent = log.news_url;
+                } else {
+                    link.href = "#";
+                    link.textContent = "링크 없음";
+                }
+
+            document
+                .getElementById("signalDetailModal")
+                .classList.remove("hidden");
+        }
+        
+
+
     </script>
 </html>
