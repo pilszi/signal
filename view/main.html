@@ -1017,7 +1017,7 @@
                 const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
 
                 if (scoreA !== scoreB) {
-                    return scoreB - scoreA;
+                    return scoreA - scoreB;
                 }
 
                 return new Date(b.published_date) - new Date(a.published_date);

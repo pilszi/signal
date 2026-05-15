@@ -22,7 +22,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 okt = Okt()
 es = Elasticsearch(
-    ["http://100.123.232.79:9200"],
+    ["http://localhost:9200"],
     request_timeout=30,
     retry_on_timeout=True
 )
@@ -107,7 +107,7 @@ def process_translation():
                     "doc": {"is_translated": True}
                 }, refresh=True)
 
-                logging.info(f"[{index_name}] 선점 성공 & 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
+                # logging.info(f"[{index_name}] 선점 성공 & 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
 
 
                 # 2. 날짜 KST(+9시간) 변환
@@ -157,7 +157,7 @@ def process_translation():
                 }
 
                 es.index(index=DEST_INDEX, id=doc_id, document=analysis_doc)
-                logging.info(f"✅ 저장 완료 (KST: {final_pub_date})")
+                # logging.info(f"✅ 저장 완료 (KST: {final_pub_date})")
 
             except Exception as e:
                 logging.error(f"❌ [{index_name}] 처리 중 오류 발생: {e}")

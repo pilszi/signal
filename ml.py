@@ -8,7 +8,7 @@ import re
 import json
 import time
 import asyncio
-
+import ollama
 import config
 from utils import extract_keywords
 from datetime import datetime, timedelta, timezone
@@ -225,46 +225,18 @@ def get_weighted_keyword_score(title, content):
     return round(final_dict_score, 4), analysis_text
 
 
-# 제미나이 프롬프트
+# 젬마 프롬프트
 async def get_ai_prediction_report(risk_level, title, keywords, scores):
-    """Gemini AI 활용 리포트 생성"""
-    # ---------------------------------------------------------
-    # [임시 우회 모드] 등급별 고정 멘트 반환 (오후 5시 리셋 전까지 사용)
-    # ---------------------------------------------------------
-    if risk_level == "심각":
-        return {
-            "prediction": f"[심각] {keywords[:2]}... 관련 중대한 리스크 감지",
-            "reason": f"위험 등급(심각) 및 지표 점수({scores['sent']})를 바탕으로 분석된 실시간 경보입니다. 즉각적인 대응 및 자산 보호 검토가 필요합니다."
-        }
-    elif risk_level == "주의":
-        return {
-            "prediction": f"[주의] {keywords[:2]}... 시장 모니터링 강화 필요",
-            "reason": "일부 지표에서 불안정성이 포착되었습니다. 단기적인 변동성 확대 가능성이 있으니 관련 국가의 뉴스를 주의 깊게 살펴주시기 바랍니다."
-        }
-    else:  # "안정"인 경우
-        return {
-            "prediction": f"[안정] {keywords[:2]}... 시장 상황 양호",
-            "reason": "현재 수집된 데이터 분석 결과, 특이 리스크가 발견되지 않았습니다. 주요 지표들이 정상 범위 내에서 유지되고 있습니다."
-        }
-    # ---------------------------------------------------------
-    # 키워드 상위 2개를 뽑아 문장에 자연스럽게 삽입
-    kw_str = ", ".join(keywords[:2]) if keywords else "주요 지표"
+    """Ollama(Gemma2:2b) 모델을 활용한 리포트 생성"""
+    # 1. 등급별 즉시 반환 로직 (기존 로직 유지)
+    kw_str = ", ".join(keywords[:3]) if keywords else "주요 지표"
     subject = title[:20] + "..." if len(title) > 20 else title
 
-    if risk_lv == "주의":
-        return {
-            "prediction": f"⚠️ {subject} 이슈로 인한 시장 변동성 확대 및 심리 위축 예상",
-            "reason": f"현재 [{kw_str}] 등 리스크 요인이 관찰되고 있습니다. 시장의 변동성이 커질 수 있는 상태이므로, 관련 동향을 예의주시하며 투자 및 의사결정에 주의하시기 바랍니다."
-        }
-    elif risk_lv == "안정":
-        return {
-            "prediction": f"✅ {subject} 상황에도 불구하고 지표 안정세 및 완만한 흐름 전망",
-            "reason": f"분석 결과 [{kw_str}]를(을) 포함한 전반적인 시장 지표가 큰 위협 없이 안정적인 흐름을 보이고 있습니다. 당분간은 현재의 완만한 상태가 유지될 것으로 예상됩니다."
-        }
+    # 2. Gemma에게 보낼 프롬프트 구성
     prompt = f"""
         [Role]
-        데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고,
-        사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
+        글로벌 거시경제와 공급망 분석에 능통한 '수석 경제 전략가'. 
+        단순한 뉴스 전달자가 아닌, 데이터 이면의 리스크를 식별하고 시장의 연쇄 반응을 예측함.
 
         [Input Data]
         - 기사 제목: {title}
@@ -272,53 +244,145 @@ async def get_ai_prediction_report(risk_level, title, keywords, scores):
         - 위험 지수 및 지표: {scores}
 
         [작성 가이드라인 - 필수 준수]
-        1. '비유(예: 황금알을 낳는 거위, 폭풍우 속의 배 등)'는 절대 사용하지 마십시오.
-        2. 기사 제목과 키워드를 바탕으로 '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함되도록 사실 위주로 요약하십시오.
-        3. 예측 근거는 논리적 인과관계(A로 인해 B가 발생하고, 결과적으로 C가 우려됨)로 작성하십시오.
-        4. 이 사건 이후 발생할 2차 파장이나 예상되는 변화를 예측하여 작성하십시오(Short-term/Mid-term).
-        5. 말투는 정중하고 둥근 대화체를 사용하되, 마지막에는 반드시 사용자가 참고할 만한 실질적인 대응 방안이나 관전 포인트를 추천하십시오.
-
-        [출력 형식 (JSON)]
+        1. 전문 용어 사용: '기회비용', '유동성 리스크', '헷징(Hedging)', '스프레드 확대', '신용 등급 하향' 등 금융 전문 용어를 활용하십시오.
+        2. '비유' 금지: 비유 대신 '기회비용', '유동성 리스크', '헷징(Hedging)', '수익성 악화' 등 전문 용어를 사용하십시오.
+        3. 인과관계 명확화: 사건(A) -> 시장 변수 변화(B) -> 산업별 손익(C)의 흐름으로 서술하십시오.
+        4. 일반론 배제: '주의가 필요하다' 같은 도덕책 문구는 금지하며, 실제 자금 흐름에 기반한 조언을 하십시오.
+        5. 규모 예측: 가능하다면 수치적 영향(예: 가계 부채 부담 증가, 생산 단가 상승 등)을 추론하여 포함하십시오.
+        
+        [Task: JSON으로만 답변]
+        1. "prediction": [현상 요약] 이후 [예상되는 연쇄 반응 및 최종 결과]가 나타날 전망 (~할 가능성, ~로 이어질 전망 등 미래 시제 사용).
+        2. "reason": 아래 구조를 반드시 지키되, 뉴스 내용과 상관없는 산업은 언급하지 마십시오.
+           - [거시 흐름]: 국가 신용, 금리, 환율 등에 미칠 장기적 영향.
+           - [섹터 변화]: 해당 이슈와 직접 관련된 산업군의 실질적 손익 및 비용 구조 변화.
+           - [리스크 관리]: 분석가로서 제안하는 구체적 자산 방어 전략 및 헷징 방안.
+           
+        [출력 형식]
         {{
-          "prediction": "🚨 [기사 내 핵심 사건과 그로 인한 직접적인 리스크를 한 줄로 요약]",
-          "reason": "1. [사건의 핵심 내용]: 기사 속 주체와 행동, 구체적 수치를 바탕으로 현재 상황을 요약해 주세요.\\n2. [향후 변화 및 파급 효과]: 이 사건이 앞으로 시장이나 기업 가치에 미치는 구체적 영향을 예측해 주세요.\\n3. [행동 조언 및 대응]: 사용자가 앞으로 주의 깊게 살펴야 할 지표나 권장하는 대응 방안을 구체적으로 제안해 주세요."
+          "prediction": "🚨 전망 문구",
+          "reason": "[거시 흐름]: ...\\n[섹터 변화]: ...\\n[리스크 관리]: ..."
         }}
+        
+        [중요 지시 - 위반 시 답변 재구성]
+        1. 출력 형식 엄수: 서론, 결론, 주석, 마크다운 기호(
+    ```json)를 절대 포함하지 마십시오. 오직 {{ }}로 시작하고 끝나는 순수 JSON 데이터만 출력하십시오.
+        2. 전문적 통찰: 사용자가 즉각적으로 납득할 수 있는 금융/경제적 통찰을 담되, 일반적인 도덕책 같은 뻔한 조언이나 원론적인 이야기는 철저히 배제하십시오.
+        3. 도메인 일관성: 뉴스 내용과 무관한 '반도체, IT, 에너지' 등의 단어를 기계적으로 반복하는 것을 금지합니다. 오직 기사 맥락과 핵심 키워드에 부합하는 산업군만 논리적으로 분석하십시오.
+        4. 언어: 모든 답변은 한국어로 작성하십시오.
         """
-    for attempt in range(len(Config.GEMINI_API_KEYS)):
+
+    try:
+        # 3. Ollama 호출 (로컬 실행이므로 API 키 순회 불필요)
+        client = ollama.AsyncClient()
+        response = await client.chat(
+            model='gemma2:2b',
+            messages=[{'role': 'user', 'content': prompt}],
+            options={'temperature': 0.3}  # 분석 보고서이므로 일관성을 위해 낮게 설정
+        )
+
+        # json 형식만 추출
+        res_text = response['message']['content'].strip()
+        res_text = res_text.replace('\xa0', ' ').replace('\u200b', '')
+
+        print("\n--- [젬마 원본 응답 시작] ---")
+        print(res_text)
+        print("--- [젬마 원본 응답 끝] ---\n")
+
+        json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+        if not json_match:
+            raise ValueError("응답에서 JSON 구조를 찾을 수 없습니다.")
+
+        clean_json = json_match.group()
+
+        # [강력 정제 시작]
+        # 1. 따옴표 내부의 실제 줄바꿈을 문자열 \n으로 치환
+        def fix_newlines(match):
+            return match.group(0).replace('\n', '\\n').replace('\r', '')
+
+        # 큰따옴표로 둘러싸인 값 안의 줄바꿈만 찾아 바꿉니다.
+        clean_json = re.sub(r'":\s*".*?"', fix_newlines, clean_json, flags=re.DOTALL)
+
+        # 2. 마지막 쉼표 제거 (Trailing comma)
+        clean_json = re.sub(r',\s*\}', '}', clean_json)
+
+        # 3. 제어 문자 제거 (단, 줄바꿈 관련은 이미 \n으로 바꿨으므로 안전)
+        clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in ['\n', '\r'])
+
+        # --- 파싱 로직 시작 ---
+        result = None
         try:
-            # 요청 전 간격을 무료 티어 권장 속도에 맞추기
-            await asyncio.sleep(5)
-            client = Config.get_next_client()
-            response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
-            res_text = response.text.strip()
-            json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
-            return json.loads(json_match.group()) if json_match else json.loads(res_text)
+            result = json.loads(clean_json)
+        except json.JSONDecodeError:
+            # 마지막 수단: 더 공격적인 정제 (줄바꿈 강제 제거)
+            try:
+                very_clean = clean_json.replace('\n', ' ').replace('\r', ' ')
+                result = json.loads(very_clean)
+            except Exception as e:
+                raise ValueError(f"JSON 파싱 실패: {str(e)}")
 
-        except Exception as e:
-            err_msg = str(e)
+        # [성공 로직]
+        if isinstance(result, dict):
+            # 1. 필수 키(prediction, reason) 누락 시 방어 로직
+            if 'prediction' not in result:
+                # 데이터가 아예 없으면 기본값, 있으면 첫 번째 값 사용
+                result['prediction'] = next(iter(result.values())) if result else "분석 결과 요약 없음"
 
-            # [수정 2] 429(할당량 초과) 발생 시 로직 강화
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                # 구글이 요청한 대로 최소 30~40초는 쉬어줘야 IP 차단을 피합니다.
-                wait_time = 45
-                print(
-                    f"🚦 [Quota] 모든 키 소진 가능성. {wait_time}초 대기 후 키 교체... (현재 시도: {attempt + 1}/{len(Config.GEMINI_API_KEYS)})")
-                await asyncio.sleep(wait_time)
-                continue  # 다음 키로 시도
+            if 'reason' not in result:
+                # prediction을 제외한 나머지 모든 키의 내용을 합쳐서 reason으로 생성
+                all_text = " ".join([str(v) for k, v in result.items() if k != 'prediction'])
+                result['reason'] = all_text if all_text else "상세 분석 근거 없음"
 
-            # 다른 일반적인 에러라면 짧게 쉬고 다음 키로
-            print(f"⚠️ Gemini 일반 에러: {err_msg}")
-            await asyncio.sleep(2)
-            continue
+            # 2. 젬마가 "reason" 키 외에 "2", "3" 등으로 쪼개놨을 경우 합치기 (기존 로직 보강)
+            final_reason = str(result.get('reason', ''))
+            extra_parts = []
+            for k, v in result.items():
+                if k not in ['prediction', 'reason']:
+                    extra_parts.append(f"{k}: {v}")
 
-    # 모든 키를 다 돌았는데도 실패했다면?
-    # 에러를 던져서 멈추게 하지 말고, '기본값'을 리턴해서 시스템을 살립니다.
-    print("🚨 [Critical] 모든 Gemini 키의 할당량이 소진되었습니다. 기본값으로 대체합니다.")
-    return {
-        "prediction": f"분석 일시 지연 ({title[:20]}...)",
-        "reason": "AI 서비스 할당량 초과로 인해 상세 분석 리포트를 생성할 수 없습니다. 위험 등급 점수를 참고해 주세요."
-    }
+            if extra_parts:
+                final_reason += "\\n" + "\\n".join(extra_parts)
 
+            result['reason'] = final_reason
+            # 3. 데이터 타입 정제 (리스트로 왔을 경우 문자열로 합침)
+            if isinstance(result.get('reason'), list):
+                result['reason'] = "\\n".join(map(str, result['reason']))
+
+            # 4. 터미널 출력 로직 (심각/주의 등급)
+            if risk_level in ["심각", "주의"]:
+                print("\n" + "=" * 50)
+                print(f"📡 [AI 분석 모니터링 - 등급: {risk_level}]")
+                print(f"📌 제목: {title}")
+                print(f"🤖 AI 예측: {result.get('prediction')}")
+
+                # 출력용 줄바꿈 처리
+                reason_display = str(result.get('reason', ''))
+                print(f"💡 AI 근거: \n{reason_display.replace('\\n', '\n')}")
+                print("=" * 50 + "\n")
+
+            return result  # 최종 정제된 딕셔너리 반환
+        else:
+            raise ValueError("결과가 사전(dict) 형식이 아닙니다.")
+
+    except Exception as e:
+        # 4. 에러 발생 시 기본값 반환 (기존 시스템 안정성 유지)
+        print(f"⚠️ Gemma 로컬 분석 실패: {str(e)}")
+
+        # 위험 등급에 따른 기본 멘트 리턴
+        if risk_level == "주의":
+            return {
+                "prediction": f"⚠️ {subject} 이슈로 인한 시장 변동성 확대 예상",
+                "reason": f"현재 [{kw_str}] 등 리스크 요인이 관찰됩니다. 관련 동향을 예의주시하며 의사결정에 주의하시기 바랍니다."
+            }
+        elif risk_level == "안정":
+            return {
+                "prediction": f"✅ {subject} 상황에도 불구하고 지표 안정세 전망",
+                "reason": f"분석 결과 [{kw_str}]를 포함한 전반적인 지표가 안정적입니다. 당분간 완만한 상태가 유지될 것으로 보입니다."
+            }
+        else:
+            return {
+                "prediction": f"분석 리포트 생성 지연 ({title[:15]}...)",
+                "reason": "로컬 AI 모델이 현재 응답할 수 없습니다. 데이터 시각화 지표를 먼저 참고해 주세요."
+            }
 
 # ==========================================
 # 3. 지표 분석 로직 (Z-Score 산출)
@@ -584,26 +648,26 @@ async def run_analysis():
 
         # [D] 정치 및 반복 뉴스 보정
         if is_politics:
-            total = min(1.0, total + 0.12)
+            total = (total * 0.72)
             if total <= 0.63 and await check_yesterday_existence(refined_keywords):
-                total += (0.65 - total) * 0.2
+                total = (total*0.85)
 
+        # 주식 추천기사
         is_stock_recommendation = any(
             kw.lower() in title.lower()
             for kw in Config.SAFE_FINANCE_PATTERNS
         )
         if is_stock_recommendation:
-            boost = 0.06
-            total = min(1.0, total * (1 + boost))
+            total = (total * 0.75)
 
+        # 기업경영 뉴스
         is_corporate_news = any(
             kw.lower() in title.lower()
             for kw in Config.CORPORATE_NEWS_KEYWORDS
         )
 
         if is_corporate_news:
-            floor = 0.52
-            total = (total * 0.8) + (floor * 0.2)
+            total = (total * 0.8)
 
         # [E] 최종 가두기 및 등급 판정
         total = max(0.0, min(1.0, total))
@@ -641,7 +705,8 @@ async def run_analysis():
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
             "prediction": ai_rep['prediction'],
-            "prediction_reason": ai_rep['reason'],
+            "prediction_result": ai_rep.get('prediction', '분석 결과 생성 중입니다.'),
+            "prediction_reason": ai_rep.get('reason', '세부 분석 내용을 생성할 수 없습니다.'),
             "risk_level": risk_lv,
             "debug_text": balanced_text, # 모델이 분석하는 본문
             "final_total_score": {
@@ -670,13 +735,13 @@ async def run_analysis():
             # 2. 원본 데이터 처리 상태 업데이트 (ES_2)
             es.update(index="news_origin", id=_id, body={"doc": {"is_processed": True}})
             # 점수 산출 로그 추가
-            logger.info(
-                f"🎯 [분석 완료] {data['title'][:20]}...\n"
-                f"   - AI 감성 점수: {final_sent_score}\n"
-                f"   - 지표 합산 점수: {round(total, 4)}\n"
-                f"   - 최종 위험 등급: [{risk_lv}]\n"
-                f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
-            )
+            # logger.info(
+            #     f"🎯 [분석 완료] {data['title'][:20]}...\n"
+            #     f"   - AI 감성 점수: {final_sent_score}\n"
+            #     f"   - 지표 합산 점수: {round(total, 4)}\n"
+            #     f"   - 최종 위험 등급: [{risk_lv}]\n"
+            #     f"   - 상태 업데이트: news_origin ID({_id}) -> is_processed: True"
+            # )
 
             #  DB 저장을 위해 main.py로 보낼 배달 바구니에 담기
             processed_results.append({
@@ -726,6 +791,13 @@ def get_latest_signals():
         return []
 
 
+# ml.py 안에 추가할 함수 예시
+async def update_es_status(doc_id, status: bool):
+    try:
+        es.update(index="news_origin", id=doc_id, body={"doc": {"is_processed": status}})
+    except Exception as e:
+        logger.error(f"ES 상태 업데이트 실패 ({doc_id}): {e}")
+
 
 if __name__ == "__main__":
     async def main_loop():
@@ -739,4 +811,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
-        logger.info("🛑 사용자에 의해 분석 엔진이 중단되었습니다.")
+        logger.info("🛑 사용자에 의해 분석 엔진이 중단")

@@ -7,6 +7,9 @@ from typing import Dict, Any
 import traceback
 import sqlalchemy
 import notifier
+from datetime import datetime
+from ml import run_analysis
+from contextlib import contextmanager
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from concurrent.futures import ThreadPoolExecutor
@@ -60,150 +63,107 @@ es = Elasticsearch(['http://localhost:9200'])
 # 분석 실행 후 결과를 DB에 저장하는 함수
 async def run_analysis_and_save():
     logger.info("🧠 [Analysis] AI 분석 및 DB 저장 시퀀스 시작")
-    # 1. AI 분석 실행
-    results = await ml.run_analysis() # 분석 결과 (기사제목, 키워드, 점수, 레벨 등)
+
+    results = await ml.run_analysis()
     if not results:
-        logger.info("❌ [Analysis] 분석할 기사 리스트가 비어있습니다 (results=None)")
+        logger.info("❌ [Analysis] 분석할 기사가 없습니다.")
         return
-    logger.info(f"🔥 [Analysis] 분석 대상 {len(results)}건 발견! DB 저장 시작")
 
-    processed_ids = []  # 성공한 문서 ID를 담을 바구니
+    processed_ids = []  # 성공한 문서 ID 바구니
 
-    # 2. DB 연결 및 개인화 처리
     try:
         with get_db() as session:
             for res in results:
-                # [STEP 1] 공통 시그널 DB 저장
+                # [STEP 1] MariaDB 저장
                 new_signal_no = save_analysis_result(session, res)
 
                 if new_signal_no:
-                    processed_ids.append(res.get('doc_id'))  # 성공 리스트에 추가
-                    logger.info(f"✅ [DB Success] 신규 시그널 저장 완료 (signal_no: {new_signal_no})")
+                    processed_ids.append(res.get('doc_id'))
+                    logger.info(f"✅ [DB Success] signal_no: {new_signal_no}")
                 else:
-                    # 만약 이 로그가 찍힌다면 utils.py의 return값이 문제인 겁니다!
-                    logger.error("❌ [DB Error] signal_no를 받지 못했습니다. utils.py를 확인하세요.")
-                    continue  # 번호가 없으면 다음 루프로 넘어가서 에러 방지
+                    logger.error(f"❌ [DB Error] {res.get('title')} 저장 실패")
+                    continue
 
-                # [STEP 2] 키워드 매칭 (이 기사의 키워드를 등록한 사용자 찾기)
+                # [STEP 2] 키워드 매칭
                 news_keywords = res.get('keywords', [])
                 if news_keywords:
-                    # 💡키워드가 리스트이므로 공백을 제거한 깔끔한 리스트로 변환
-                    clean_kw_list = [k.strip() for k in news_keywords if k.strip()]
-                    if clean_kw_list:
-                        # 사용자가 등록한 키워드와 기사 키워드가 정확히 일치하는지 조회
-                        match_sql = sqlalchemy.text("""
-                                SELECT DISTINCT mk.member_no 
-                                FROM member_keyword mk
-                                WHERE :prediction LIKE CONCAT('%', mk.keyword, '%')
-                                   OR :reason LIKE CONCAT('%', mk.keyword, '%')
-                            """)
-                        matched_users = session.execute(match_sql, {
-                            "prediction": res.get('pred', ''),
-                            "reason": res.get('reason', '')
-                        }).fetchall()
+                    match_sql = sqlalchemy.text("""
+                        SELECT DISTINCT m.member_no, m.email 
+                        FROM member_keyword mk
+                        JOIN member_info m ON mk.member_no = m.member_no
+                        WHERE :prediction LIKE CONCAT('%', mk.keyword, '%')
+                           OR :reason LIKE CONCAT('%', mk.keyword, '%')
+                    """)
 
-                        for user in matched_users:
-                            logger.info(f"🎯 매칭 성공! 사용자 번호: {user.member_no}, 키워드: {clean_kw_list}")
-                            # A. 사용자의 alarm_log에 저장 (모든 매칭 시그널은 signal.html에 띄움)
-                            alarm_sql = sqlalchemy.text("""
-                                                        INSERT INTO alarm_log (member_no, signal_no, alarm_time, alarm_view)
-                                                        VALUES (:m_no, :s_no, NOW(), 0)
-                                                        ON DUPLICATE KEY UPDATE alarm_time = NOW()
-                                                    """)
-                            session.execute(alarm_sql, {"m_no": user.member_no, "s_no": new_signal_no})
+                    matched_users = session.execute(match_sql, {
+                        "prediction": res.get('pred', ''),
+                        "reason": res.get('reason', '')
+                    }).fetchall()
 
-                        # B. '심각' 단계일 때만 비상 이메일 발송
-                        if res.get('level') == '심각' and hasattr(user, 'email'):
+                    # 💡 사용자별 처리 루프 시작
+                    for user in matched_users:
+                        logger.info(f"🎯 매칭 성공! 사용자: {user.member_no}")
+
+                        # A. alarm_log 저장
+                        alarm_sql = sqlalchemy.text("""
+                            INSERT INTO alarm_log (member_no, signal_no, alarm_time, alarm_view)
+                            VALUES (:m_no, :s_no, NOW(), 0)
+                            ON DUPLICATE KEY UPDATE alarm_time = NOW()
+                        """)
+                        session.execute(alarm_sql, {"m_no": user.member_no, "s_no": new_signal_no})
+
+                        # B. [위치 이동] '심각' 단계 이메일 발송 (매칭된 사용자에게 직접 발송)
+                        if res.get('level') == '심각':
                             try:
                                 notifier.send_emergency_email(
                                     to_email=user.email,
-                                    ai_report={
-                                        'prediction': res.get('pred'),
-                                        'reason': res.get('reason')
-                                    },
+                                    ai_report={'prediction': res.get('pred'), 'reason': res.get('reason')},
                                     news_url=res.get('url'),
                                     risk_level='심각',
                                     keywords_str=", ".join(news_keywords),
                                     title=res.get('title', '리스크 감지 알림')
                                 )
                             except Exception as mail_err:
-                                # 이메일 발송 실패가 전체 흐름을 방해하지 않도록 개별 예외 처리
                                 logger.error(f"📧 이메일 발송 실패 ({user.email}): {mail_err}")
 
-            # 3. 모든 루프가 정상적으로 끝나면 세션 확정
+            # [STEP 3] MariaDB 확정
             session.commit()
-            logger.info(f"✅ [Analysis] {len(results)}건 분석 및 개인화 알림 처리 완료")
+            logger.info(f"✅ [Analysis] {len(processed_ids)}건 DB 커밋 완료")
 
-        # [STEP 4] 보완: DB 저장이 성공한 것들만 골라서 ES 상태를 업데이트!
+        # [STEP 4] ES 상태 업데이트 (DB 커밋 성공 후에만 실행)
         if processed_ids:
             for doc_id in processed_ids:
-                # ml.py에 작성하신 업데이트 함수를 호출합니다.
                 await ml.update_es_status(doc_id, True)
-            logger.info(f"🚀 [Sync] {len(processed_ids)}건 ES 상태 업데이트(is_processed=True) 완료")
+            logger.info(f"🚀 [Sync] {len(processed_ids)}건 ES 업데이트 완료")
 
     except Exception as e:
-        logger.error(f"❌ [Analysis] 분석 결과 처리 중 오류 발생: {e}")
+        logger.error(f"❌ [Analysis] 처리 중 오류 발생: {e}")
 
 
+# main.py
 
 async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
     """
-    BERT 모델 학습 여부를 체크하고, 완료되었다면 utils.run_analysis_and_save 주기적으로 실행함
+    ml.py에 로드된 모델을 사용하여 주기적으로 분석을 수행하도록 스케줄러에 등록합니다.
     """
-    if not os.path.exists(TRAIN_LOCK_FILE):
-        logger.info("📡 [Pipeline] 첫 실행: 기존 CSV 데이터를 이용한 모델 학습을 시작합니다.")
-        try:
-            logger.info("🧠 [Pipeline] BERT 모델 파인튜닝 가동 (subprocess)...")
-            # 가상환경 파이썬으로 train_model.py 실행
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                os.path.join(os.getcwd(), "train_model.py"),  # 절대 경로로 변경
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-
-            #  학습이 갓 끝난 직후 등록할 때
-            if process.returncode == 0:
-                logger.info("🎊 [Pipeline] 모델 학습 완료! 분석 모드로 전환합니다.")
-                # 학습이 끝났다는 '락 파일'을 생성
-                with open(TRAIN_LOCK_FILE, "w") as f:
-                    f.write(f"Finished at {os.path.getmtime('train_model.py')}")
-                # BERT 분석 작업 등록 (10분 주기로 실전 투입)
-                if not scheduler.get_job('ml_analysis'):
-                    scheduler.add_job(
-                        run_analysis_and_save,
-                        'interval',
-                        minutes=10,
-                        id='ml_analysis',
-                        max_instances=1,  # 작업 겹침 방지
-                        replace_existing=True  # 기존 작업 교체
-                    )
-
-                # BERT 분석 작업 등록 (10분)
-                if not scheduler.get_job('ml_analysis'):
-                    scheduler.add_job(ml.run_analysis, 'interval', minutes=10, id='ml_analysis')
-            else:
-                logger.error(f"❌ [Pipeline] 학습 도중 에러 발생: {stderr.decode()}")
-        except Exception as e:
-            logger.error(f"❌ [Pipeline] 파이프라인 실행 중 예외 발생: {str(e)}")
-            logger.error(traceback.format_exc())
-    else:
-        # 이미 학습이 완료된 경우 바로 분석 작업 등록
+    try:
+        # 이미 등록된 분석 작업이 있는지 확인
         if not scheduler.get_job('ml_analysis'):
-            logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
-            # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
-            from datetime import datetime
+            logger.info("🚀 [Pipeline] 실시간 분석 모드 가동을 시작합니다.")
+
             scheduler.add_job(
-                run_analysis_and_save,
+                run_analysis,
                 'interval',
-                minutes=10,
+                minutes=10,  # 테스트용
                 id='ml_analysis',
-                max_instances=1,  # 추가
-                replace_existing=True,  # 추가
-
+                max_instances=1,
+                replace_existing=True,
+                next_run_time=datetime.now()  # 서버 시작 즉시 1회 실행
             )
+            logger.info("✅ [Pipeline] 분석 작업(10분 주기)이 정상적으로 스케줄러에 등록되었습니다.")
 
+    except Exception as e:
+        logger.error(f"❌ [Pipeline] 파이프라인 설정 중 오류 발생: {str(e)}")
 
 # ==========================================
 # 1. 서버 생애주기(Lifespan) 설정
@@ -298,7 +258,6 @@ def regist(info: RegistModel):
         child_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES (:member_no, :keyword)")
         for key in info.keyword:
             db.execute(child_sql, {"member_no": member_no, "keyword": key})
-        save_admin_log(db=db, log_type='join', title='신규 회원가입', content=f'신규 회원 {info.id} 생성', target_id=info.id, after_data=info)
     return
 
 
@@ -386,8 +345,8 @@ def update_profile(info: Dict[str, Any]):
     """회원 정보 수정 (키워드 포함)"""
     with get_db() as db:
         # 1. 회원 번호 확인
-        id_sql = sqlalchemy.text("SELECT member_no, email, phone_number FROM member_info WHERE id = :id")
-        user = db.execute(id_sql, {"id": info["id"]}).mappings().fetchone()
+        id_sql = sqlalchemy.text("SELECT member_no FROM member_info WHERE id = :id")
+        member_no = db.execute(id_sql, {"id": info["id"]}).mappings().fetchone()["member_no"]
 
         # 2. 기본 정보 및 비밀번호 수정
         if info.get("pw"):
@@ -411,9 +370,7 @@ def update_profile(info: Dict[str, Any]):
             ins_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES(:member_no, :keyword)")
             res = db.execute(ins_sql, {"member_no": user["member_no"], "keyword": key})
             key_insert += res.rowcount
-        save_admin_log(db=db, log_type='update', title='정보수정', target_id=info["id"], content=f'{info["id"]} 회원 정보수정',
-                       before_data={"email": user["email"], "phone_number": user["phone_number"], "keyword": bef_keyword}
-                       ,after_data={"email": info["email"], "phone_number": info["phone_number"], "keyword": info["keyword"]})
+
     return {"updated_keywords": key_insert}
 
 
@@ -532,8 +489,6 @@ def public_signals(date: str = Query(None)):
         logger.info(f"❌ 검색 중 오류 발생: {e}")
         return {"msg": [], "error": str(e)}
 
-
-
 @app.get("/main/country")
 def country():
     """ 히트맵 데이터 요청 """
@@ -554,7 +509,7 @@ def country():
                 FROM signal_country t1
                     JOIN signal_message t2 ON t1.signal_no = t2.signal_no
                         JOIN country t3 ON t3.country_no = t1.country_no
-                        WHERE t2.signal_time <= (NOW() - INTERVAL 12 HOUR)
+                        WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
                             GROUP BY t1.country_no;
             """)
         country_all = db.execute(sql).mappings().fetchall()
@@ -591,30 +546,35 @@ def news_view(info:Dict[str, str]):
 @app.get("/custom_news")
 def custom_news(id: str):
     """ 맞춤형 뉴스 데이터 요청 """
-    print(f'맞춤형 요청 id = {id}')
+    logger.info(f'📡 맞춤형 요청 id = {id}')
+
     with get_db() as db:
-        sql = sqlalchemy.text("""
-                    SELECT 
-                        t1.member_no
-                        ,t2.keyword
-                        ,t3.news_url
-                    FROM member_info t1 JOIN member_keyword t2 ON t1.member_no = t2.member_no
-                        JOIN news_view t3 ON t1.member_no = t3.member_no
-                            WHERE t1.id = :id
-            """)
-        res = db.execute(sql, {"id": id}).mappings().fetchall()
-        keyword = []
-        read_url = []
-        for key in res:
-            # print(keywords['keyword'])
-            clean_key = key["keyword"].strip()
-            if clean_key:
-                keyword.append(clean_key)
-            read_url.append(key["news_url"])
+        # 1. 사용자의 관심 키워드 조회 (단순하고 확실하게)
+        kw_sql = sqlalchemy.text("""
+            SELECT mk.keyword 
+            FROM member_keyword mk 
+            JOIN member_info m ON mk.member_no = m.member_no 
+            WHERE m.id = :id
+        """)
+        user_keywords = db.execute(kw_sql, {"id": id}).scalars().all()
 
-        keywords = list(set(keyword))
-        # print(f'관심 키워드 = {keywords} / 열람 url = {read_url}')
+        # 2. 사용자가 읽은 기사 URL 목록 조회 (중복 제거를 위해)
+        view_sql = sqlalchemy.text("""
+            SELECT nv.news_url 
+            FROM news_view nv 
+            JOIN member_info m ON nv.member_no = m.member_no 
+            WHERE m.id = :id
+        """)
+        read_urls = db.execute(view_sql, {"id": id}).scalars().all()
 
+        # 키워드가 없으면 바로 빈 결과 반환
+        if not user_keywords:
+            return {"keyword": [], "total_val": 0, "news": []}
+
+        # 공백 제거 및 중복 제거
+        clean_keywords = list(set(k.strip() for k in user_keywords if k.strip()))
+
+        # 3. Elasticsearch 쿼리 구성
         body = {
             "query": {
                 "bool": {
@@ -624,7 +584,7 @@ def custom_news(id: str):
                                 "should": [
                                     # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
                                     {"term": {"extracted_keywords": {"value": kw, "_name": kw}}}
-                                    for kw in keyword
+                                    for kw in clean_keywords
                                 ],
                                 "minimum_should_match": 1  # terms 쿼리처럼 최소 하나는 매치되어야 함
                             }
@@ -634,50 +594,57 @@ def custom_news(id: str):
                         {
                             "range": {
                                 "published_date": {
-                                    # "gte": "now-24h",
-                                    "gte": "now-30d",
-                                    "lt": "now"
+                                    "gte": "now-30d",  # 57건을 보려면 범위를 넉넉히 잡으세요
+                                    "lte": "now"
                                 }
                             }
                         }
                     ]
                 }
             },
-            "sort": [{"analyzed_at": "desc"}],
+            "sort": [{"published_date": "desc"}],
             "size": 100
         }
 
+        # 4. ES 검색 실행
         res = es.search(index="news_labeling", body=body)
-        logger.info(f'{id} 의 관심 뉴스 갯수 = {res['hits']['total']['value']}')
-        custom_news = []
-        for news in res['hits']['hits']:
-            # print(news["_source"])
-            display_keyword = news.get('matched_queries', [])
-            logger.info(f'매칭 키워드 = {display_keyword}')
-            _news = {
-                'title': news["_source"]["title"],
-                'url': news["_source"]["url"],
-                'main_image': news["_source"]["main_image"],
-                'published_date': news["_source"]["published_date"],
-                'press_name': news["_source"]["press_name"],
+
+        custom_news_list = []
+        for hit in res['hits']['hits']:
+            source = hit["_source"]
+            # hit 객체에서 바로 matched_queries를 가져옵니다.
+            display_keyword = hit.get('matched_queries', [])
+            logger.info(f"🎯 매칭 키워드 = {display_keyword}")
+
+            custom_news_list.append({
+                'title': source.get("title"),
+                'url': source.get("url"),
+                'main_image': source.get("main_image") or "https://via.placeholder.com/400x300",
+                'published_date': source.get("published_date"),
+                'press_name': source.get("press_name", "알 수 없음"),
                 'keyword': display_keyword,
-                'risk_score': news["_source"]["final_total_score"]["total"],
-                'risk_level': news["_source"]["risk_level"],
-                'is_read': news["_source"]["url"] in read_url
-            }
-            custom_news.append(_news)
-        logger.info(f'{id} 의 맞춤형 뉴스 {len(custom_news)}개')
-    return {"keyword": keywords, "total_val": len(custom_news), "news": custom_news}
+                'risk_score': source.get("final_total_score", {}).get("total", 0),
+                'risk_level': source.get("risk_level", "안정"),
+                # 여기서 열람 여부를 체크합니다.
+                'is_read': source.get("url") in read_urls
+            })
+
+    logger.info(f'✅ {id}님의 맞춤형 뉴스 {len(custom_news_list)}개 추출 완료')
+    return {
+        "keyword": clean_keywords,
+        "total_val": len(custom_news_list),
+        "news": custom_news_list
+    }
+
 
 
 
 # 시그널로그 페이지
 @app.get("/signal_log")
-def signal_log(id:str, db: Session = Depends(get_db)):
+def signal_log(id:str):
     """ 로그인한 사용자의 관심 키워드 기반 시그널만 조회
     (ES 검색 대신, 분석 시점에 미리 매칭된 alarm_log 테이블 활용)
     """
-    # logger.info(f'==={id}===')
     logger.info(f"📋 {id}님의 시그널 로그 조회 요청")
 
     with get_db() as db:
@@ -711,20 +678,6 @@ def signal_log(id:str, db: Session = Depends(get_db)):
 
         # 프론트엔드(signal.html)가 기대하는 데이터 형식으로 변환
         doc_no = []
-        for r in rows:
-            # 1. 문자열로 온 키워드들을 리스트(배열)로 변환
-            kw_list = r["matched_keywords"].split(',') if r["matched_keywords"] else []
-            # 2. 결과 리스트에 딕셔너리 추가
-            doc_no.append({
-                "id": r["id"],
-                "risk_level": r["risk_level"],
-                "signal_time": r["signal_time"].strftime("%Y-%m-%d %H:%M") if r["signal_time"] else "시간 미상",
-                "prediction": r["prediction"],
-                "prediction_reason": r["prediction_reason"],
-                "url": r["url"] if r["url"] else "#",  # URL 부재 시 방어 코드
-                "is_read": r["alarm_view"],
-                "match_keyword": kw_list  # 👈 이제 배지가 정상적으로 뜹니다!
-            })
 
         logger.info(f"✅ {id} 리더님 매칭 문서 {len(doc_no)}건 반환 완료")
 

@@ -506,30 +506,48 @@
             container.innerHTML = noti.map(n => {
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                // 🔥  유형별 아이콘 및 스타일 설정
+                let icon = "bell";
+                let iconColor = "text-gray-400";
+                let bgColor = "bg-gray-100";
+
+                if (n.type === 'emergency') {
+                    icon = "alert-triangle"; iconColor = "text-red-500"; bgColor = "bg-red-50";
+                } else if (n.type === 'keyword') {
+                    icon = "tag"; iconColor = "text-blue-500"; bgColor = "bg-blue-50";
+                } else if (n.type === 'system') {
+                    icon = "user"; iconColor = "text-gray-600"; bgColor = "bg-gray-200";
+                }
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
-                    <div class="notif-item ${n.is_read ? '' : 'unread'}" 
-                        onclick="readItem(${n.signal_no})" 
-                        style="cursor: pointer;">
-                        <div class="notif-icon">
-                            ${iconTag}
+                    <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
+                         onclick="readItem(${n.id})">
+                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0">
+                            <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
-                        <div class="notif-content">
-                            <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
-                            <div class="notif-message">${n.prediction}</div>
-                            <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
+
+                        <div class="flex-1 pr-6">
+                            <div class="text-sm font-bold text-gray-900 mb-0.5">${n.title}</div>
+                            <div class="text-xs text-gray-600 line-clamp-2">${n.message}</div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <span class="text-[10px] text-gray-400">${timeAgo(n.time)}</span>
+                                ${n.is_read ? '' : '<span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>'}
+                            </div>
                         </div>
-                        <div class="notif-delete" 
-                            onclick="deleteItem(event, ${n.signal_no})" 
-                            style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
-                            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-                        </div>
+
+                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
                     </div>
-                    `;               
-            }).join('')+`<div class="hover:cursor-pointer" style="padding: 5px; text-align: center; color: #9ca3af;" onclick=allRead()>
-                            모두읽음
-                        </div>`;
+                `;
+            }).join('') + `
+                <div class="p-3 text-center bg-gray-50 rounded-b-xl">
+                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline">
+                        모두 읽음으로 표시
+                    </button>
+                </div>`;
+
             lucide.createIcons();
         }
 
@@ -556,18 +574,26 @@
 
         // 아이템 삭제
         async function deleteItem(e, id) {
-            e.stopPropagation();
-            noti = noti.map(n => {
-                if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, is_read: 1 };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
-                }
-            });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
-            updateNotifUI();
+            e.stopPropagation(); // 1. 부모 클릭 이벤트(읽음 처리) 방지
+
+            try {
+                // 2. 서버 DB에서 해당 알림 삭제 요청
+                await axios.post("/noti/delete", {
+                    "id": id,
+                    "user_id": savedUserId
+                });
+
+                // 3. 내 화면(자바스크립트 변수)에서도 즉시 삭제
+                // 'noti' 배열에서 클릭한 'id'와 일치하지 않는 것들만 남김
+                noti = noti.filter(n => n.id !== id);
+
+                // 4. 목록 다시 그리기 (서버에 또 물어보지 않고 현재 바뀐 'noti'로만 렌더링)
+                updateNotifUI_Static();
+
+                console.log(`알림 ${id}번 삭제 완료`);
+            } catch (error) {
+                console.error("알림 삭제 실패:", error);
+            }
         }
 
         // 모두 읽음
@@ -776,6 +802,7 @@
 
             renderProfile();
             toggleEdit(); // 수정 모드 종료
+            await updateNotifUI(); // 수정 완료 후 알림 배지와 목록을 즉시 새로고침!
             showModal("개인정보가 성공적으로 수정되었습니다.", "success");
         }
 
