@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from config import get_env
@@ -23,17 +22,17 @@ engine = create_engine(
 )
 
 # 세션 생성
-Session = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
 
 # db 통로 함수
-@contextmanager
 def get_db():
-    db_session = Session()
+    db = SessionLocal()
     try:
-        yield db_session # 사용하는 곳에서 세션을 빌려줌
-        db_session.commit() # 성공 시 자동 커밋
-    except Exception:
-        db_session.rollback() # 에러 발생 시 롤백
-        raise
+        yield db
     finally:
-        db_session.close() # 작업 끝나면 무조건 연결 닫기
+        db.close()

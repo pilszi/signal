@@ -277,7 +277,7 @@
                 ]);
 
                 allSignals = signalsRes.data.data;
-                noti = notiRes.data.noti;
+                noti = notiRes.data.data;
 
                 applyFilterAndRender(); // 메인 리스트 렌더링
                 updateNotifUI_Static(); // 알림 배지 및 사이드바 렌더링
@@ -486,12 +486,18 @@
                 container.innerHTML = '<div class="p-10 text-center text-gray-400">알림이 없습니다.</div>';
                 return;
             }
+            // 알림창 출력 필드
             container.innerHTML = data.map(n => `
-                <div class="notif-item p-4 border-b relative ${n.is_read ? '' : 'bg-blue-50 hover:bg-blue-100'}" onclick="readItem(${n.signal_no})">
-                    <div class="text-xs font-bold ${n.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} mb-1">${n.risk_level} 단계 알림</div>
+                <div class="notif-item p-4 border-b relative ${n.is_read ? '' : 'bg-blue-50 hover:bg-blue-100'}" onclick="readItem(${n.id})">
+                    <div class="text-xs font-bold ${n.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} mb-1">
+                        ${n.risk_level} 단계 알림
+                    </div>
+
                     <div class="text-sm text-gray-800 mb-1 pr-6">${n.prediction}</div>
+
                     <div class="text-[10px] text-gray-400">${timeAgo(n.signal_time)}</div>
-                    <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+
+                    <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
                         <i data-lucide="x" class="w-4 h-4"></i>
                     </button>
                 </div>
@@ -499,6 +505,18 @@
                 <div class="p-3 text-center bg-gray-50">
                     <button onclick="allRead()" class="text-xs text-blue-600 hover:underline">모두 읽음으로 처리</button>
                 </div>`;
+        }
+
+        // 스크립트 아무 곳에나 추가
+        function updateNavbar() {
+            const savedUserId = sessionStorage.getItem("savedUserId");
+            const userNameElement = document.getElementById('user_name');
+            const userGreeting = document.getElementById('user-greeting');
+
+            if (savedUserId && userNameElement) {
+                userNameElement.innerText = savedUserId;
+                userGreeting.classList.remove('hidden');
+            }
         }
 
         // 12. 초기 실행 및 실시간 폴링

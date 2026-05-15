@@ -19,13 +19,29 @@ from utils import is_noise_article
 
 # webdriver-manager 로그 끄기
 os.environ['WDM_LOG_LEVEL'] = '0'
-options = ChromiumOptions()
+options = webdriver.ChromeOptions()
 options.add_argument("--remote-allow-origins=*")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 options.add_argument("--disable-gpu")
 options.add_argument("--start-maximized")
-options.add_argument("--headless")  # 속도 향상을 위해 Headless 권장
+options.add_argument("--disable-blink-features=AutomationControlled")
+
+# 1. 최신 헤드리스 모드 (봇 감지 회피율이 훨씬 높습니다)
+options.add_argument("--headless=new")
+
+# 2. 유저 에이전트 추가 (사람이 크롬을 쓰는 것처럼 위장)
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+# 3. 자동화 제어 메시지 제거 및 탐지 회피
+options.add_experimental_option("excludeSwitches", ["enable-automation"])
+options.add_experimental_option("useAutomationExtension", False)
+
+# 4. 이미지 로딩 끄기 (연합뉴스 페이지의 무거운 사진들을 안 읽어서 속도가 3배 빨라집니다)
+options.add_argument("--blink-settings=imagesEnabled=false")
+
+# 5. 페이지 로딩 전략 (eager: DOM은 로드됐지만 광고/이미지가 덜 떴어도 진행)
+options.page_load_strategy = 'eager'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -34,7 +50,7 @@ logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그
 logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
 
 def get_es():
-    return Elasticsearch("http://100.123.232.79:9200")
+    return Elasticsearch("http://localhost:9200")
 
 
 def close_es(es):
@@ -111,8 +127,8 @@ def article_crawling(driver, p: int, keyword):
                 contents = driver.find_elements(By.CSS_SELECTOR, "article#articleWrap div.story-news.article p")
                 if contents:
                     content_text = " ".join([c.text for c in contents if c.text.strip()])
-                    if content_text and len(content_text.strip()) > 10:
-                        continue
+                    if not content_text or len(content_text.strip()) < 10:
+                        continue  # 내용이 없거나 너무 부실하면 저장하지 않고 패스
 
                     if is_noise_article(article["title"], content_text, article["url"]):
                         continue

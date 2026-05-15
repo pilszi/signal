@@ -292,13 +292,6 @@ def get_top_risk_countries(heatmap_data):
         for country, info in top_3
     ]
 
-def extract_country(title, content):
-    """
-    혹시 다른 파일에서 extract_country를 호출하더라도
-    에러 없이 find_target_country이 돌아가게 함
-    """
-    return find_target_country(title, content)
-
 # 4. 키워드 필터링 도구 (STOPWORDS/NOISE_WORDS 활용)
 # 지저분한 단어들 제외하고 핵심 단어들만 뽑기
 def filter_keywords(keywords, filter_set):
@@ -421,13 +414,13 @@ def save_analysis_result(session: Session, analysis_data: dict):
     # 1. 시그널 본체 저장 (signal_message) (url 필드 제외)
     sql_msg = sqlalchemy.text("""
             INSERT INTO signal_message (risk_level, document_no, prediction, prediction_reason, url)
-            VALUES (:level, :doc_no, :pred, :reason, :url)
+            VALUES (:level, :doc_no, :prediction, :reason, :url)
         """)
 
     result = session.execute(sql_msg, {
         'level': analysis_data.get('level'),
         'doc_no': analysis_data.get('doc_id') or analysis_data.get('id') or 'unknown_id',
-        'pred': analysis_data.get('pred'),
+        'prediction': analysis_data.get('prediction'),
         'reason': analysis_data.get('reason'),
         'url': analysis_data.get('url')  # ml.py에서 넘어온 url 저장
     })
@@ -437,17 +430,86 @@ def save_analysis_result(session: Session, analysis_data: dict):
 
     # 2. 국가 매핑 (기존과 동일)
     extracted_countries = analysis_data.get('countries', [])
+    # 문자열 하나로 들어온 경우 보정
+    if isinstance(extracted_countries, str):
+        extracted_countries = [extracted_countries]
+
     for eng_name in extracted_countries:
-        target_list = Config.REGION_TO_COUNTRIES.get(eng_name, [eng_name])
-        for country_name in target_list:
-            sql_c = sqlalchemy.text("SELECT country_no FROM country WHERE country_en_name = :c_name")
-            row = session.execute(sql_c, {"c_name": country_name}).fetchone()
 
-            if row:
-                country_no = row[0]
-                sql_map = sqlalchemy.text("INSERT INTO signal_country (signal_no, country_no) VALUES (:s_no, :c_no)")
-                session.execute(sql_map, {"s_no": signal_no, "c_no": country_no})
+        # 리스트 중첩 방어
+        if isinstance(eng_name, list):
+            for sub_name in eng_name:
 
+                target_list = Config.REGION_TO_COUNTRIES.get(
+                    sub_name,
+                    [sub_name]
+                )
+
+                for country_name in target_list:
+
+                    sql_c = sqlalchemy.text("""
+                        SELECT country_no
+                        FROM country
+                        WHERE country_en_name = :c_name
+                    """)
+
+                    row = session.execute(
+                        sql_c,
+                        {"c_name": country_name}
+                    ).fetchone()
+
+                    if row:
+                        country_no = row[0]
+
+                        sql_map = sqlalchemy.text("""
+                            INSERT INTO signal_country
+                            (signal_no, country_no)
+                            VALUES (:s_no, :c_no)
+                        """)
+
+                        session.execute(
+                            sql_map,
+                            {
+                                "s_no": signal_no,
+                                "c_no": country_no
+                            }
+                        )
+
+        else:
+            target_list = Config.REGION_TO_COUNTRIES.get(
+                eng_name,
+                [eng_name]
+            )
+
+            for country_name in target_list:
+
+                sql_c = sqlalchemy.text("""
+                    SELECT country_no
+                    FROM country
+                    WHERE country_en_name = :c_name
+                """)
+
+                row = session.execute(
+                    sql_c,
+                    {"c_name": country_name}
+                ).fetchone()
+
+                if row:
+                    country_no = row[0]
+
+                    sql_map = sqlalchemy.text("""
+                        INSERT INTO signal_country
+                        (signal_no, country_no)
+                        VALUES (:s_no, :c_no)
+                    """)
+
+                    session.execute(
+                        sql_map,
+                        {
+                            "s_no": signal_no,
+                            "c_no": country_no
+                        }
+                    )
     # 3. 생성된 번호를 밖으로 던져줍니다!
     return signal_no
 

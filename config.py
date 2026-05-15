@@ -28,6 +28,8 @@ def get_env(key: str, default=None, required=True):
     return value
 
 
+load_dotenv()
+
 
 class Config:
     # --- 1. 시스템 설정 ---
@@ -394,7 +396,8 @@ class Config:
 
     BLACKLIST = [
         'buy now', 'stock to buy', 'should you buy', 'price target',
-        'dividend', 'top picks', 'better buy', 'earnings result'
+        'dividend', 'top picks', 'better buy', 'earnings result',
+        'recovered', 'bodies', 'murder', 'arrested', 'suspect'
     ]
 
     # 5. 감성 사전 및 불용어
@@ -823,5 +826,10 @@ class Config:
         '뉴욕증시': "United States", '다우': "United States", '나스닥': "United States",
         "OpenAI": "United States", "연준": "United States"
     }
+
+    # brevo 이메일 발송 변수
+    BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+    SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+    SENDER_NAME = os.getenv("SENDER_NAME")
 
 

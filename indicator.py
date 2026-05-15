@@ -1,18 +1,19 @@
 import json
 import requests
-import numpy as np
+from db import SessionLocal
 import yfinance as yf
 import pandas as pd
 import time
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from config import Config
-from db import get_db
+from logger import get_logger
 from sqlalchemy import text
 import random
 # 전역 변수 유지
 cny_key_index = 0
 
+logger = get_logger(__name__)
 
 def get_cny_rate_with_rotation():
     """위안화 API 로테이션 수집 (금액 반환)"""
@@ -51,47 +52,84 @@ def collect_market_data_job():
 
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # db.py의 get_db() 사용
-    with get_db() as session:
+    # DB 세션 생성
+    session = SessionLocal()
+
+    try:
         for cat, t_list in tickers.items():
             for t in t_list:
                 try:
                     price = None
+
                     if t == "CNY=X":
                         price = get_cny_rate_with_rotation()
+
                         if price is None:
-                            data = yf.download("CNYKRW=X", period="1d", interval="1m", progress=False)
-                            if not data.empty: price = data['Close'].iloc[-1]
+                            data = yf.download(
+                                "CNYKRW=X",
+                                period="1d",
+                                interval="1m",
+                                progress=False
+                            )
+
+                            if not data.empty:
+                                price = data['Close'].iloc[-1]
+
                     else:
-                        data = yf.download(t, period="1d", interval="1m", progress=False)
+                        data = yf.download(
+                            t,
+                            period="1d",
+                            interval="1m",
+                            progress=False
+                        )
+
                         if not data.empty:
                             last_val = data['Close'].iloc[-1]
-                            price = float(last_val) if not isinstance(last_val, (pd.Series, pd.DataFrame)) else float(
-                                last_val.iloc[0])
+
+                            price = (
+                                float(last_val)
+                                if not isinstance(last_val, (pd.Series, pd.DataFrame))
+                                else float(last_val.iloc[0])
+                            )
 
                     if price is not None:
                         final_price = round(price, 4)
                         i_no = ticker_to_no.get(t)
 
-                        # SQLAlchemy의 session.execute 사용 (SQL문 작성)
-                        # :variable 형식을 사용하여 SQL 인젝션 방지
                         query = text("""
-                                INSERT INTO indicator_data (indicator_no, gathering_time, price)
-                                VALUES (:no, :time, :price)
-                            """)
-                        session.execute(query, {"no": i_no, "time": current_time, "price": final_price})
+                            INSERT INTO indicator_data
+                            (indicator_no, gathering_time, price)
+                            VALUES (:no, :time, :price)
+                        """)
 
-                        print(f"  ✅ [DB저장] {t:10} (No.{i_no}) | {final_price}")
+                        session.execute(
+                            query,
+                            {
+                                "no": i_no,
+                                "time": current_time,
+                                "price": final_price
+                            }
+                        )
+
+                        logger.info(f"  ✅ [DB저장] {t:10} (No.{i_no}) | {final_price}")
                     else:
-                        print(f"  ⚠️ [데이터없음] {t}")
+                        logger.info(f"  ⚠️ [데이터없음] {t}")
 
                 except Exception as e:
-                    print(f"  ❌ [오류] {t}: {e}")
+                    logger.info(f"  ❌ [오류] {t}: {e}")
 
-        # yield가 끝나면 get_db 내부에서 자동으로 commit()이 호출됩니다.
+        # 최종 커밋
+        session.commit()
 
-    print(f"📊 [INDICATOR] {datetime.now().strftime('%H:%M:%S')} 기준 11종 지표 업데이트 완료")
+    finally:
+        # 세션 종료
+        session.close()
 
+    print(
+        f"📊 [INDICATOR] "
+        f"{datetime.now().strftime('%H:%M:%S')} 기준 "
+        f"11종 지표 업데이트 완료"
+    )
 # --- 스케줄러 설정 ---
 
 scheduler = BackgroundScheduler()
