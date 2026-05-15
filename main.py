@@ -6,6 +6,9 @@ from typing import Dict, Any
 import traceback
 import sqlalchemy
 import notifier
+from datetime import datetime
+from ml import run_analysis
+from contextlib import contextmanager
 from fastapi import Depends
 from sqlalchemy.orm import Session
 from concurrent.futures import ThreadPoolExecutor
@@ -60,146 +63,106 @@ es = Elasticsearch(["http://100.123.232.79:9200"])
 async def run_analysis_and_save():
     logger.info("🧠 [Analysis] AI 분석 및 DB 저장 시퀀스 시작")
 
-    # 1. AI 분석 실행
-    results = await ml.run_analysis() # 분석 결과 (기사제목, 키워드, 점수, 레벨 등)
+    results = await ml.run_analysis()
     if not results:
-        logger.info("❌ [Analysis] 분석할 기사 리스트가 비어있습니다 (results=None)")
+        logger.info("❌ [Analysis] 분석할 기사가 없습니다.")
         return
-    logger.info(f"🔥 [Analysis] 분석 대상 {len(results)}건 발견! DB 저장 시작")
 
-    processed_ids = []  # 성공한 문서 ID를 담을 바구니
+    processed_ids = []  # 성공한 문서 ID 바구니
 
-    # 2. DB 연결 및 개인화 처리
     try:
         with get_db() as session:
             for res in results:
-                # [STEP 1] 공통 시그널 DB 저장
+                # [STEP 1] MariaDB 저장
                 new_signal_no = save_analysis_result(session, res)
 
                 if new_signal_no:
-                    processed_ids.append(res.get('doc_id'))  # 성공 리스트에 추가
-                    logger.info(f"✅ [DB Success] 신규 시그널 저장 완료 (signal_no: {new_signal_no})")
+                    processed_ids.append(res.get('doc_id'))
+                    logger.info(f"✅ [DB Success] signal_no: {new_signal_no}")
                 else:
-                    # 만약 이 로그가 찍힌다면 utils.py의 return값이 문제인 겁니다!
-                    logger.error("❌ [DB Error] signal_no를 받지 못했습니다. utils.py를 확인하세요.")
-                    continue  # 번호가 없으면 다음 루프로 넘어가서 에러 방지
+                    logger.error(f"❌ [DB Error] {res.get('title')} 저장 실패")
+                    continue
 
-                # [STEP 2] 키워드 매칭 (이 기사의 키워드를 등록한 사용자 찾기)
+                # [STEP 2] 키워드 매칭
                 news_keywords = res.get('keywords', [])
                 if news_keywords:
-                    # 💡키워드가 리스트이므로 공백을 제거한 깔끔한 리스트로 변환
-                    clean_kw_list = [k.strip() for k in news_keywords if k.strip()]
-                    if clean_kw_list:
-                        # 사용자가 등록한 키워드와 기사 키워드가 정확히 일치하는지 조회
-                        match_sql = sqlalchemy.text("""
-                                SELECT DISTINCT mk.member_no 
-                                FROM member_keyword mk
-                                WHERE :prediction LIKE CONCAT('%', mk.keyword, '%')
-                                   OR :reason LIKE CONCAT('%', mk.keyword, '%')
-                            """)
-                        matched_users = session.execute(match_sql, {
-                            "prediction": res.get('pred', ''),
-                            "reason": res.get('reason', '')
-                        }).fetchall()
+                    match_sql = sqlalchemy.text("""
+                        SELECT DISTINCT m.member_no, m.email 
+                        FROM member_keyword mk
+                        JOIN member_info m ON mk.member_no = m.member_no
+                        WHERE :prediction LIKE CONCAT('%', mk.keyword, '%')
+                           OR :reason LIKE CONCAT('%', mk.keyword, '%')
+                    """)
 
-                        for user in matched_users:
-                            logger.info(f"🎯 매칭 성공! 사용자 번호: {user.member_no}, 키워드: {clean_kw_list}")
-                            # A. 사용자의 alarm_log에 저장 (모든 매칭 시그널은 signal.html에 띄움)
-                            alarm_sql = sqlalchemy.text("""
-                                                        INSERT INTO alarm_log (member_no, signal_no, alarm_time, alarm_view)
-                                                        VALUES (:m_no, :s_no, NOW(), 0)
-                                                        ON DUPLICATE KEY UPDATE alarm_time = NOW()
-                                                    """)
-                            session.execute(alarm_sql, {"m_no": user.member_no, "s_no": new_signal_no})
+                    matched_users = session.execute(match_sql, {
+                        "prediction": res.get('pred', ''),
+                        "reason": res.get('reason', '')
+                    }).fetchall()
 
-                        # B. '심각' 단계일 때만 비상 이메일 발송
-                        if res.get('level') == '심각' and hasattr(user, 'email'):
+                    # 💡 사용자별 처리 루프 시작
+                    for user in matched_users:
+                        logger.info(f"🎯 매칭 성공! 사용자: {user.member_no}")
+
+                        # A. alarm_log 저장
+                        alarm_sql = sqlalchemy.text("""
+                            INSERT INTO alarm_log (member_no, signal_no, alarm_time, alarm_view)
+                            VALUES (:m_no, :s_no, NOW(), 0)
+                            ON DUPLICATE KEY UPDATE alarm_time = NOW()
+                        """)
+                        session.execute(alarm_sql, {"m_no": user.member_no, "s_no": new_signal_no})
+
+                        # B. [위치 이동] '심각' 단계 이메일 발송 (매칭된 사용자에게 직접 발송)
+                        if res.get('level') == '심각':
                             try:
                                 notifier.send_emergency_email(
                                     to_email=user.email,
-                                    ai_report={
-                                        'prediction': res.get('pred'),
-                                        'reason': res.get('reason')
-                                    },
+                                    ai_report={'prediction': res.get('pred'), 'reason': res.get('reason')},
                                     news_url=res.get('url'),
                                     risk_level='심각',
                                     keywords_str=", ".join(news_keywords),
                                     title=res.get('title', '리스크 감지 알림')
                                 )
                             except Exception as mail_err:
-                                # 이메일 발송 실패가 전체 흐름을 방해하지 않도록 개별 예외 처리
                                 logger.error(f"📧 이메일 발송 실패 ({user.email}): {mail_err}")
 
-            # 3. 모든 루프가 정상적으로 끝나면 세션 확정
+            # [STEP 3] MariaDB 확정
             session.commit()
-            logger.info(f"✅ [Analysis] {len(results)}건 분석 및 개인화 알림 처리 완료")
+            logger.info(f"✅ [Analysis] {len(processed_ids)}건 DB 커밋 완료")
 
-        # [STEP 4] 보완: DB 저장이 성공한 것들만 골라서 ES 상태를 업데이트!
+        # [STEP 4] ES 상태 업데이트 (DB 커밋 성공 후에만 실행)
         if processed_ids:
             for doc_id in processed_ids:
-                # ml.py에 작성하신 업데이트 함수를 호출합니다.
                 await ml.update_es_status(doc_id, True)
-            logger.info(f"🚀 [Sync] {len(processed_ids)}건 ES 상태 업데이트(is_processed=True) 완료")
+            logger.info(f"🚀 [Sync] {len(processed_ids)}건 ES 업데이트 완료")
 
     except Exception as e:
-        logger.error(f"❌ [Analysis] 분석 결과 처리 중 오류 발생: {e}")
+        logger.error(f"❌ [Analysis] 처리 중 오류 발생: {e}")
 
 
+# main.py
 
 async def manage_ml_pipeline(scheduler: AsyncIOScheduler):
     """
-    BERT 모델 학습 여부를 체크하고, 완료되었다면 utils.run_analysis_and_save 주기적으로 실행함
+    ml.py에 로드된 모델을 사용하여 주기적으로 분석을 수행하도록 스케줄러에 등록합니다.
     """
-    if not os.path.exists(TRAIN_LOCK_FILE):
-        logger.info("📡 [Pipeline] 첫 실행: 기존 CSV 데이터를 이용한 모델 학습을 시작합니다.")
-        try:
-            logger.info("🧠 [Pipeline] BERT 모델 파인튜닝 가동 (subprocess)...")
-            # 가상환경 파이썬으로 train_model.py 실행
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                os.path.join(os.getcwd(), "train_model.py"),  # 절대 경로로 변경
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-
-            #  학습이 갓 끝난 직후 등록할 때
-            if process.returncode == 0:
-                logger.info("🎊 [Pipeline] 모델 학습 완료! 분석 모드로 전환합니다.")
-                # 학습이 끝났다는 '락 파일'을 생성
-                with open(TRAIN_LOCK_FILE, "w") as f:
-                    f.write(f"Finished at {os.path.getmtime('train_model.py')}")
-                # BERT 분석 작업 등록 (10분 주기로 실전 투입)
-                if not scheduler.get_job('ml_analysis'):
-                    scheduler.add_job(
-                        run_analysis_and_save,
-                        'interval',
-                        minutes=10,
-                        id='ml_analysis',
-                        max_instances=1,  # 작업 겹침 방지
-                        replace_existing=True  # 기존 작업 교체
-                    )
-            else:
-                logger.error(f"❌ [Pipeline] 학습 도중 에러 발생: {stderr.decode()}")
-        except Exception as e:
-            logger.error(f"❌ [Pipeline] 파이프라인 실행 중 예외 발생: {str(e)}")
-            logger.error(traceback.format_exc())
-    else:
-        # 이미 학습이 완료된 경우 바로 분석 작업 등록
+    try:
+        # 이미 등록된 분석 작업이 있는지 확인
         if not scheduler.get_job('ml_analysis'):
-            logger.info("🚀 [Pipeline] 기존 학습 모델 확인됨. 실시간 분석 모드로 가동합니다.")
-            # next_run_time=datetime.now()를 추가하여 즉시 1회 실행 후 10분 주기 시작
-            from datetime import datetime
+            logger.info("🚀 [Pipeline] 실시간 분석 모드 가동을 시작합니다.")
+
             scheduler.add_job(
-                run_analysis_and_save,
+                run_analysis,
                 'interval',
-                minutes=10,
+                minutes=10,  # 테스트용
                 id='ml_analysis',
-                max_instances=1,  # 추가
-                replace_existing=True,  # 추가
-
+                max_instances=1,
+                replace_existing=True,
+                next_run_time=datetime.now()  # 서버 시작 즉시 1회 실행
             )
+            logger.info("✅ [Pipeline] 분석 작업(10분 주기)이 정상적으로 스케줄러에 등록되었습니다.")
 
+    except Exception as e:
+        logger.error(f"❌ [Pipeline] 파이프라인 설정 중 오류 발생: {str(e)}")
 
 # ==========================================
 # 1. 서버 생애주기(Lifespan) 설정
@@ -750,44 +713,52 @@ def signal_log(id:str, db: Session = Depends(get_db)):
 
 
 # 네이게이션바 signal 알림 토글 요청
-@app.get("/noti/signal")
-def noti_signal(id:str):
-    """ 페이지 상단 네비게이션바 통합 알림 요청 """
-    # logger.info(f'----{id}----')
-    with get_db() as db:
-        sql = sqlalchemy.text("""
-            SELECT
-                t1.signal_no AS id
-                ,t1.risk_level
-                ,t1.prediction AS message
-                ,t1.signal_time AS time
-                ,t2.alarm_view AS is_read
-                -- 리스크 레벨에 따라 유형을 강제로 부여 (사진 디자인 매칭용)
-                ,CASE 
-                    WHEN t1.risk_level = '심각' THEN 'emergency'
-                    WHEN t1.risk_level = '주의' THEN 'keyword'
-                    ELSE 'system'
-                 END AS type
-            FROM signal_message t1 
-            JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
-            JOIN member_info t3 ON t2.member_no = t3.member_no
-            WHERE t3.id = :id 
-            -- AND t2.alarm_view = 0  <-- 읽은 알림도 목록에는 나와야 하므로 이 조건은 프론트에서 처리하거나 제거
-            ORDER BY t2.alarm_time DESC LIMIT 15
-        """)
-        res = db.execute(sql, {"id": id}).mappings().fetchall()
-        notis = []
-        for n in res:
-            notis.append({
-                "id": n["id"],
-                "type": n["type"],
-                "risk_level": n["risk_level"],
-                "title": f"{n['risk_level']} 위험 시그널" if n['type'] == 'emergency' else "키워드 알림",
-                "message": n["message"],
-                "is_read": n["is_read"],
-                "time": n["time"]
-            })
-    return {"noti": notis}
+@app.get("/signal_log")
+def signal_log(id: str, db: Session = Depends(get_db)): # 👈 여기서 이미 db를 받았습니다.
+    logger.info(f"📋 {id}님의 시그널 로그 조회 요청")
+
+    sql = sqlalchemy.text("""
+        SELECT 
+            sm.signal_no AS id,
+            sm.risk_level, 
+            sm.signal_time, 
+            sm.prediction, 
+            sm.prediction_reason,
+            sm.url,
+            al.alarm_view,
+            GROUP_CONCAT(DISTINCT mk.keyword SEPARATOR ', ') as matched_keywords
+        FROM alarm_log al
+        JOIN signal_message sm ON al.signal_no = sm.signal_no
+        JOIN member_info m ON al.member_no = m.member_no
+        LEFT JOIN member_keyword mk ON m.member_no = mk.member_no 
+            AND (sm.prediction LIKE CONCAT('%', mk.keyword, '%') 
+                 OR sm.prediction_reason LIKE CONCAT('%', mk.keyword, '%'))
+        WHERE m.id = :user_id
+        GROUP BY sm.signal_no
+        ORDER BY al.alarm_time DESC
+        LIMIT 50
+    """)
+    # 쿼리 실행 (이미 주입된 db 사용)
+    rows = db.execute(sql, {"user_id": id}).mappings().fetchall()
+
+    if not rows:
+        logger.warning(f"⚠️ {id}님의 알림 로그가 비어있습니다.")
+
+    doc_no = []
+    for r in rows:
+        kw_list = r["matched_keywords"].split(',') if r["matched_keywords"] else []
+        doc_no.append({
+            "id": r["id"],
+            "risk_level": r["risk_level"],
+            "signal_time": r["signal_time"].strftime("%Y-%m-%d %H:%M") if r["signal_time"] else "시간 미상",
+            "prediction": r["prediction"],
+            "prediction_reason": r["prediction_reason"],
+            "url": r["url"] if r["url"] else "#",
+            "is_read": r["alarm_view"],
+            "match_keyword": kw_list
+        })
+    logger.info(f"✅ {id} 리더님 매칭 문서 {len(doc_no)}건 반환 완료")
+    return {"data": doc_no}
 
 
 
