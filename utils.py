@@ -452,13 +452,13 @@ def save_analysis_result(session: Session, analysis_data: dict):
     return signal_no
 
 
-def is_noise_article(title, content, url):
+def is_noise_article(title, content, url, check_length=True):
     return (
         any(kw.lower() in title.lower() for kw in Config.SPORTS_KEYWORDS)
         or any(kw.lower() in title.lower() for kw in Config.ENTERTAINMENT_KEYWORDS)
         or any(kw.lower() in title.lower() for kw in Config.RECOMMENDATION_KEYWORDS)
         or any(kw.lower() in title.lower() for kw in Config.skip_keywords)
-        or len(content) < 100
+        or (check_length and len(content) < 100)
     )
 
 

@@ -54,7 +54,7 @@ def article_crawling(driver, p: int, keyword):
     es = get_es()  # 중복 체크용
 
     url = f'https://www.yna.co.kr/search/index?query={keyword}&ctype=A&page_no={p}'
-    logging.info(f'url = {url}')
+    # logging.info(f'url = {url}')
 
     try:
         # [수정 포인트] 기존 driver.get(url)과 time.sleep(2)를 이 블록으로 교체합니다.
@@ -111,7 +111,7 @@ def article_crawling(driver, p: int, keyword):
                 contents = driver.find_elements(By.CSS_SELECTOR, "article#articleWrap div.story-news.article p")
                 if contents:
                     content_text = " ".join([c.text for c in contents if c.text.strip()])
-                    if content_text and len(content_text.strip()) > 10:
+                    if content_text and len(content_text.strip()) < 10:
                         continue
 
                     if is_noise_article(article["title"], content_text, article["url"]):
