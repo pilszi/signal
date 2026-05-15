@@ -96,7 +96,7 @@ def bulk_search_naver_news():
                         already_exists += 1
                         continue
 
-                    if is_noise_article(clean_title, "", item['link']):
+                    if is_noise_article(clean_title, "", item['link'], check_length=False):
                         continue
 
                     # 중복이 아닌 기사만 작업 목록에 추가
