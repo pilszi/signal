@@ -131,7 +131,11 @@ def bulk_search_naver_news():
                     already_exists += 1
                     continue
 
-                tasks.append(item)
+                    if is_noise_article(clean_title, "", item['link'], check_length=False):
+                        continue
+
+                    # 중복이 아닌 기사만 작업 목록에 추가
+                    tasks.append(item)
 
             # API 과부하 방지를 위한 미세 대기
             time.sleep(0.1)

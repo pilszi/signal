@@ -1,8 +1,10 @@
 import json
 import sys
+import os
+import subprocess
 import asyncio
-import traceback
 from typing import Dict, Any
+import traceback
 import sqlalchemy
 import notifier
 from db import SessionLocal
@@ -28,6 +30,7 @@ from logger import get_logger
 from dataReqType.regist import RegistModel
 from db import get_db
 from hash import hash_password, verify_password
+from config import Config
 from utils import prepare_heatmap_data, save_analysis_result
 
 
@@ -542,26 +545,34 @@ def public_signals(date: str = Query(None)):
 @app.get("/main/country")
 def country(db: Session = Depends(get_db)):
     """ 히트맵 데이터 요청 """
-
     sql = sqlalchemy.text("""
             SELECT
                 t3.country_en_name as en_name,
                 COUNT(CASE WHEN t2.risk_level = '안정' THEN 1 END) AS 안정_count,
                 COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
-                COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
-                -- 바로 점수 계산
+                COUNT(CASE WHEN t2.risk_level = '심각' THEN 1 END) AS 심각_count,
                 SUM(CASE
                     WHEN t2.risk_level = '안정' THEN 10
                     WHEN t2.risk_level = '주의' THEN 30
-                    WHEN t2.risk_level = '위기' THEN 100
+                    WHEN t2.risk_level = '심각' THEN 100
                     ELSE 0
                 END) AS total_score
             FROM signal_country t1
-                JOIN signal_message t2 ON t1.signal_no = t2.signal_no
-                    JOIN country t3 ON t3.country_no = t1.country_no
-                    WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
-                        GROUP BY t1.country_no;
+            JOIN signal_message t2 ON t1.signal_no = t2.signal_no
+            JOIN country t3 ON t3.country_no = t1.country_no
+            WHERE 
+                t2.signal_time >= CASE 
+                    WHEN HOUR(NOW()) >= 12 THEN CURDATE()                       -- 오늘 오후라면 오늘 자정부터
+                    ELSE CURDATE() - INTERVAL 12 HOUR                           -- 오늘 오전이라면 어제 정오부터
+                END
+                AND 
+                t2.signal_time < CASE 
+                    WHEN HOUR(NOW()) >= 12 THEN CURDATE() + INTERVAL 12 HOUR    -- 오늘 오후라면 오늘 정오까지
+                    ELSE CURDATE()                                              -- 오늘 오전이라면 오늘 자정까지
+                END
+            GROUP BY t1.country_no, t3.country_en_name
         """)
+
     country_all = db.execute(sql).mappings().fetchall()
     signal_country = []
     for country in country_all:
@@ -633,7 +644,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
                         "bool": {
                             "should": [
                                 # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
-                                {"term": {"extracted_keywords": {"value": kw, "_name": kw}}}
+                                {"term": {"keywords": {"value": kw, "_name": kw}}}
                                 for kw in clean_keywords
                             ],
                             "minimum_should_match": 1  # terms 쿼리처럼 최소 하나는 매치되어야 함
@@ -685,7 +696,6 @@ def custom_news(id: str, db: Session = Depends(get_db)):
         "total_val": len(custom_news_list),
         "news": custom_news_list
     }
-
 
 
 
@@ -750,6 +760,7 @@ def signal_log(id:str, db: Session = Depends(get_db)):
 @app.get("/noti/signal")
 def noti_signal(id:str, db: Session = Depends(get_db)):
     """ 페이지 상단 네비게이션바 통합 알림 요청 """
+    # logger.info(f'----{id}----')
     logger.info(f"📋 {id}님의 시그널 로그 알림 요청")
     sql = sqlalchemy.text("""
         SELECT
@@ -758,18 +769,15 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
             ,t1.prediction AS message
             ,t1.signal_time AS time
             ,t2.alarm_view AS is_read
-            -- 리스크 레벨에 따라 유형을 강제로 부여 (사진 디자인 매칭용)
             ,CASE
                 WHEN t1.risk_level = '심각' THEN 'emergency'
-                WHEN t1.risk_level = '주의' THEN 'keyword'
-                ELSE 'system'
              END AS type
         FROM signal_message t1
         JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
         JOIN member_info t3 ON t2.member_no = t3.member_no
         WHERE t3.id = :id
-        -- AND t2.alarm_view = 0  <-- 읽은 알림도 목록에는 나와야 하므로 이 조건은 프론트에서 처리하거나 제거
-        ORDER BY t2.alarm_time DESC LIMIT 15
+        AND t2.alarm_view = 0 AND t1.risk_level = '심각'
+        ORDER BY t2.alarm_time DESC LIMIT 10
     """)
     res = db.execute(sql, {"id": id}).mappings().fetchall()
     notis = []
@@ -975,7 +983,7 @@ def user_list(db: Session = Depends(get_db)):
 
 
     sql = sqlalchemy.text("""SELECT
-                                mi.id, mi.email, mi.create_at, mi.phone_number, ml.status, mk.keywords
+                                mi.id, mi.email, mi.create_at, mi.phone_number, ml.status, mk.keywords, mi.user_name
                             FROM member_info mi
                             LEFT JOIN (
                                 SELECT t1.member_no, t1.status
@@ -1075,7 +1083,7 @@ def save_admin_log(
 
        Parameters
        ----------
-       conn : MariaDB connection
+       db : MariaDB connection
        log_type : 로그 타입 (create/update/delete/login ...)
        title : 로그 제목
        target_id : 변경 대상 user id

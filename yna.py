@@ -70,7 +70,7 @@ def article_crawling(driver, p: int, keyword):
     es = get_es()  # 중복 체크용
 
     url = f'https://www.yna.co.kr/search/index?query={keyword}&ctype=A&page_no={p}'
-    logging.info(f'url = {url}')
+    # logging.info(f'url = {url}')
 
     try:
         # [수정 포인트] 기존 driver.get(url)과 time.sleep(2)를 이 블록으로 교체합니다.
@@ -191,6 +191,7 @@ def article_save(news_list):
 
 def article_process(keywords, total_pages):
     logging.info("----- 연합뉴스 수집 시작 -----")
+    final_stats = {"success": 0, "failed": 0, "skipped": 0}
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     driver.set_page_load_timeout(30)  # 페이지 로딩 30초 제한
@@ -201,12 +202,17 @@ def article_process(keywords, total_pages):
             for p in range(1, total_pages + 1):
                 articles = article_crawling(driver, p, key)
                 if articles:
-                    article_save(articles)
+                    # article_save가 리턴하는 {success, failed, skipped}를 받음
+                    res = article_save(articles)
+
+                    final_stats["success"] += res.get("success", 0)
+                    final_stats["failed"] += res.get("failed", 0)
+                    final_stats["skipped"] += res.get("skipped", 0)
                 time.sleep(1)  # 키워드 간 짧은 휴식
     finally:
         driver.quit()
         logging.info("----- 연합뉴스 수집 종료 -----")
-
+    return final_stats
 
 # 키워드를 하나로 합치고 랜덤으로 8~10개를 뽑는 보조 함수
 def get_random_strategic_keywords():
