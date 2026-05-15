@@ -398,6 +398,10 @@
         const SIGNALS_PER_PAGE = 10;
         let currentPage = 1;
         let countryMap ={};
+        const infoBox = document.getElementById('selected-country-info');
+        const trigger = document.getElementById('notifTrigger');
+        const dropdown = document.getElementById('notifDropdown');
+        const list = document.getElementById('notifList');
 
 
         let dateFilter = "";
@@ -528,16 +532,25 @@
             // 태그가 없을 시 함수 종료(에러방지)
             // console.log(authContainer);
             if (!authContainer){return};
-            const userNameSpan = document.getElementById('user_name');
             const userGreeting = document.getElementById('user-greeting');
-            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
                 // 1. 인사말 영역 처리
-                if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
-                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
+                // 관리자 계정일 경우
+                if (savedUserId === 'admin') {
+                    userGreeting.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                                반갑습니다
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
 
                 // 2. 로그아웃 버튼 표시
@@ -562,9 +575,6 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        const trigger = document.getElementById('notifTrigger');
-        const dropdown = document.getElementById('notifDropdown');
-        const list = document.getElementById('notifList');
 
         // 토글 이벤트
         trigger.addEventListener('click', (e) => {
@@ -933,12 +943,29 @@
             searchQuery = '';
             startDate = null;
             endDate = null;
-            selectedCountry = null;
-
+            
             // UI 요소들도 초기값으로 변경
             document.getElementById('search-input').value = '';
             document.getElementById('date-display').innerText = "날짜를 선택해주세요";
+            
+            document.getElementById('country-name').innerText = '';
+            document.getElementById('country-score').innerText = '';
 
+            if (selectedCountry) {
+                myChart.dispatchAction({
+                    type: 'downplay',
+                    seriesIndex: 0,
+                    name: selectedCountry
+                });
+                myChart.dispatchAction({
+                    type: 'unselect',
+                    seriesIndex: 0,
+                    name: selectedCountry
+                });
+            }
+            
+            infoBox.classList.add('hidden');
+            selectedCountry = null;
             applyFilters(); // 다시 전체 렌더링
         }
 
@@ -946,19 +973,12 @@
         // 국가 선택 핸들러
         function selectCountry(name, score) {
             selectedCountry = name;
-            const infoBox = document.getElementById('selected-country-info');
             document.getElementById('country-name').innerText = countryMap[name] || name;
             document.getElementById('country-score').innerText = `${score}점`;
             infoBox.classList.remove('hidden');
             applyFilters();
         }
 
-        function resetCountryFilter() {
-            selectedCountry = null;
-            document.getElementById('selected-country-info').classList.add('hidden');
-            myChart.dispatchAction({ type: 'unSelect', seriesIndex: 0 });
-            applyFilters();
-        }
 
         function handleSearch() {
             searchQuery = document.getElementById('search-input').value;
@@ -982,7 +1002,7 @@
             // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
             container.innerHTML = currencies.map(c => `
                 <div class="flex items-center justify-between">
-                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p><p class="text-lg font-bold">${c.val.toLocaleString()}원</p></div>
+                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p><p class="text-lg font-bold">${c.val.toLocaleString('ko-KR', {minimumFractionDigits: 1,maximumFractionDigits: 1})}원</p></div>
                     <div class="text-blue-500"><i data-lucide="trending-up" class="w-4 h-4"></i></div>
                 </div>
             `).join('');
@@ -1301,7 +1321,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
+            const currentPath = window.location.pathname.split("/").pop() || "main.html";
             const navItems = document.querySelectorAll('.nav-item');
 
             navItems.forEach(item => {

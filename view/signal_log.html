@@ -199,7 +199,7 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
+                        <div id="user-greeting"></div>
                         <div class="notif-container" id="notifContainer">
                             <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
                                 <i data-lucide="bell" class="w-5 h-5"></i>
@@ -226,9 +226,9 @@
             <div id="filter-container" class="flex items-center gap-3 mb-6 flex-wrap">
                 <i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>
                 <button onclick="filterLevel('전체')" class="px-4 py-2 rounded-lg bg-gray-600 text-white">전체</button>
-                <button onclick="filterLevel('3단계(심각)')" class="px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">3단계 (심각)</button>
-                <button onclick="filterLevel('2단계(주의)')" class="px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100">2단계 (주의)</button>
-                <button onclick="filterLevel('1단계(안정)')" class="px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100">1단계 (안정)</button>
+                <button onclick="filterLevel('심각')" class="px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">3단계 (심각)</button>
+                <button onclick="filterLevel('주의')" class="px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100">2단계 (주의)</button>
+                <button onclick="filterLevel('안정')" class="px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100">1단계 (안정)</button>
             </div>
 
             <div class="grid lg:grid-cols-4 gap-8">
@@ -260,6 +260,8 @@
         let selectedLevel = null;
         let savedUserId = sessionStorage.getItem("savedUserId");
         let noti = [];            // 실시간 사이드바 및 알림용
+        const trigger = document.getElementById('notifTrigger');
+        const dropdown = document.getElementById('notifDropdown');
 
         // 시그널 컬러 테마
         const levelStyles = {
@@ -275,9 +277,10 @@
                     axios.get('/signal_log?id=' + savedUserId),
                     axios.get("/noti/signal?id=" + savedUserId)
                 ]);
-
+                console.log(signalsRes, notiRes);
                 allSignals = signalsRes.data.data;
-                noti = notiRes.data.data;
+                noti = notiRes.data.noti;
+                console.log(allSignals, noti);
 
                 applyFilterAndRender(); // 메인 리스트 렌더링
                 updateNotifUI_Static(); // 알림 배지 및 사이드바 렌더링
@@ -342,7 +345,7 @@
                         </div>
                     </div>
 
-                    <h3 class="text-xl font-bold ${style.text} mb-6 underline decoration-current/20 underline-offset-8">
+                    <h3 class="text-xl font-bold ${style.text} mb-6 decoration-current/20">
                         ${signal.prediction}
                     </h3>
 
@@ -374,27 +377,27 @@
         if (window.lucide) lucide.createIcons();
     }
 
-        // 6. 실시간 사이드바 렌더링
-        function renderSignalLogs() {
-            const logs = noti.filter(n => n.risk_level === "심각" || n.risk_level === "주의");
-            const container = document.getElementById('signal-log-container');
-            if (!container) return;
+        // // 6. 실시간 사이드바 렌더링
+        // function renderSignalLogs() {
+        //     const logs = noti.filter(n => n.risk_level === "심각" || n.risk_level === "주의");
+        //     const container = document.getElementById('signal-log-container');
+        //     if (!container) return;
 
-            if (logs.length === 0) {
-                container.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">안정적인 상태입니다.</p>';
-                return;
-            }
+        //     if (logs.length === 0) {
+        //         container.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">안정적인 상태입니다.</p>';
+        //         return;
+        //     }
 
-            container.innerHTML = logs.slice(0, 5).map(log => `
-                <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
-                        <span class="text-[9px] text-gray-400">${timeAgo(log.signal_time)}</span>
-                    </div>
-                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.prediction}</p>
-                </div>
-            `).join('');
-        }
+        //     container.innerHTML = logs.slice(0, 5).map(log => `
+        //         <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
+        //             <div class="flex items-center gap-2 mb-1">
+        //                 <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
+        //                 <span class="text-[9px] text-gray-400">${timeAgo(log.time)}</span>
+        //             </div>
+        //             <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.message}</p>
+        //         </div>
+        //     `).join('');
+        // }
 
         // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
         function updateNotifUI_Static() {
@@ -409,7 +412,7 @@
             }
             document.getElementById('notifCountText').innerText = `${unreads.length}개의 새 알림`;
             renderList(document.getElementById('notifList'), noti);
-            renderSignalLogs();
+            // renderSignalLogs();
             if (window.lucide) lucide.createIcons();
         }
 
@@ -417,6 +420,7 @@
         function filterLevel(level) {
             // 1. 전역 상태 업데이트 (전체일 경우 null 처리)
             selectedLevel = (level === '전체') ? null : level;
+            console.log(selectedLevel);
             currentPage = 1;
 
             // 2. 필터 버튼 시각적 피드백 (Tailwind 클래스 직접 조작)
@@ -493,9 +497,9 @@
                         ${n.risk_level} 단계 알림
                     </div>
 
-                    <div class="text-sm text-gray-800 mb-1 pr-6">${n.prediction}</div>
+                    <div class="text-sm text-gray-800 mb-1 pr-6">${n.title}</div>
 
-                    <div class="text-[10px] text-gray-400">${timeAgo(n.signal_time)}</div>
+                    <div class="text-[10px] text-gray-400">${timeAgo(n.time)}</div>
                     <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
                         <i data-lucide="x" class="w-4 h-4"></i>
                     </button>
@@ -506,16 +510,53 @@
                 </div>`;
         }
 
-        // 스크립트 아무 곳에나 추가
+        // Navbar 상태 업데이트
         function updateNavbar() {
-            const savedUserId = sessionStorage.getItem("savedUserId");
-            const userNameElement = document.getElementById('user_name');
+            const authContainer = document.getElementById('authContainer');
+            // 태그가 없을 시 함수 종료(에러방지)
+            // console.log(authContainer);
+            if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
-            if (savedUserId && userNameElement) {
-                userNameElement.innerText = savedUserId;
-                userGreeting.classList.remove('hidden');
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+                // 1. 인사말 영역 처리
+                // 관리자 계정일 경우
+                if (savedUserId === 'admin') {
+                    userGreeting.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                                반갑습니다
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
+                }
+
+                // 2. 로그아웃 버튼 표시
+                authContainer.innerHTML = `
+                    <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG OUT
+                    </button>
+                `;
+            } else {
+                // 로그아웃 상태일 때
+                if (userGreeting) {
+                    userGreeting.classList.add('hidden'); // 인사말 숨김
+                }
+
+                authContainer.innerHTML = `
+                    <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG IN
+                    </a>
+                `;
             }
+            
+            if (window.lucide) lucide.createIcons();
         }
 
         // 12. 초기 실행 및 실시간 폴링
@@ -525,35 +566,51 @@
 
             await refreshAllData();
 
-            setInterval(async () => {
-                console.log("🔄 시그널 로그 실시간 동기화 중...");
-                await refreshAllData();
-            }, 30000);
+            // setInterval(async () => {
+            //     console.log("🔄 시그널 로그 실시간 동기화 중...");
+            //     await refreshAllData();
+            // }, 30000);
 
-            // 네비바 하이라이트
-            const currentPath = window.location.pathname.split("/").pop() || "signal_log.html";
-            document.querySelectorAll('.nav-item').forEach(item => {
-                if (item.getAttribute('href').split("/").pop() === currentPath) {
-                    item.classList.add('bg-blue-50', 'text-blue-600');
-                }
-            });
-
-            // 드롭다운 토글 제어
-            const trigger = document.getElementById('notifTrigger');
-            const dropdown = document.getElementById('notifDropdown');
-            if (trigger && dropdown) {
-                trigger.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    dropdown.classList.toggle('hidden');
-                });
-                document.addEventListener('click', (e) => {
-                    if (!document.getElementById('notifContainer').contains(e.target)) {
-                        dropdown.classList.add('hidden');
-                    }
-                });
-            }
             // 6. 아이콘 최종 렌더링
             if (window.lucide) lucide.createIcons();
+        });
+
+        // 드롭다운 토글 제어
+        if (trigger && dropdown) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdown.classList.toggle('hidden');
+            });
+            document.addEventListener('click', (e) => {
+                if (!document.getElementById('notifContainer').contains(e.target)) {
+                    dropdown.classList.add('hidden');
+                }
+            });
+        }
+
+
+        // 네비바 하이라이트
+        document.addEventListener('DOMContentLoaded', () => {
+        // 현재 브라우저의 파일명만 추출
+        const currentPath = window.location.pathname.split("/").pop() || "signal.html";
+        const navItems = document.querySelectorAll('.nav-item');
+
+        navItems.forEach(item => {
+            // href 속성값에서 파일명만 가져와서 비교
+            const itemHref = item.getAttribute('href').split("/").pop();
+
+            if (currentPath === itemHref) {
+                if (item.querySelector('i')) {
+                    item.classList.replace('text-gray-600', 'text-blue-600');
+                    item.classList.add('bg-blue-50');
+                } else {
+                    item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                    item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
+                }
+            }
+        });
+
+        if (window.lucide) lucide.createIcons();
         });
     </script>
 </html>
