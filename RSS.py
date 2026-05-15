@@ -32,6 +32,7 @@ from newspaper import Article, Config as NewsConfig
 from elasticsearch import Elasticsearch
 from apscheduler.schedulers.blocking import BlockingScheduler
 from bs4 import BeautifulSoup
+from utils import get_real_url
 
 # --- 1. 초기 설정 및 최적화된 소스 ---
 
@@ -224,7 +225,7 @@ def fetch_and_save(data):
             'content_en': content,
             'press_name': press_name,
             'published_date': final_pub_date,
-            'main_image': main_image,
+            'main_image': get_real_url(main_image),
             'url': clean_url,
             'is_translated': False,
         }

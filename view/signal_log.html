@@ -491,7 +491,7 @@
                     <div class="text-xs font-bold ${n.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} mb-1">${n.risk_level} 단계 알림</div>
                     <div class="text-sm text-gray-800 mb-1 pr-6">${n.prediction}</div>
                     <div class="text-[10px] text-gray-400">${timeAgo(n.signal_time)}</div>
-                    <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                    <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
                         <i data-lucide="x" class="w-4 h-4"></i>
                     </button>
                 </div>

@@ -460,3 +460,14 @@ def is_noise_article(title, content, url):
         or any(kw.lower() in title.lower() for kw in Config.skip_keywords)
         or len(content) < 100
     )
+
+
+def get_real_url(url):
+    if not url: return ""
+
+    # https:// 또는 http:// 가 중복되는지 체크
+    for protocol in ["https://", "http://"]:
+        if url.count(protocol) > 1:
+            return protocol + url.split(protocol)[-1]
+
+    return url

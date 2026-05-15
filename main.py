@@ -52,8 +52,8 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-# es = Elasticsearch(["http://100.123.232.79:9200"])
-es = Elasticsearch(['http://localhost:9200'])
+es = Elasticsearch(["http://100.123.232.79:9200"])
+# es = Elasticsearch(['http://localhost:9200'])
 
 
 
@@ -225,6 +225,7 @@ app = FastAPI(lifespan=lifespan)
 # 세션 유지 시간 30분으로 연장
 app.add_middleware(SessionMiddleware, secret_key="secret", max_age=1800)
 app.mount("/view", StaticFiles(directory="view"), name="view")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ==========================================
@@ -360,15 +361,15 @@ def update_profile(info: Dict[str, Any]):
             db.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
 
         # 키워드 갱신
-        bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": user["member_no"]}).mappings().fetchall()
+        bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": member_no}).mappings().fetchall()
         bef_keyword = []
         for k in bef_key:
             bef_keyword.append(k["keyword"])
-        db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": user["member_no"]})
+        db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": member_no})
         key_insert = 0
         for key in info.get("keyword", []):
             ins_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES(:member_no, :keyword)")
-            res = db.execute(ins_sql, {"member_no": user["member_no"], "keyword": key})
+            res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
             key_insert += res.rowcount
 
     return {"updated_keywords": key_insert}
@@ -498,12 +499,12 @@ def country():
                     t3.country_en_name as en_name,
                     COUNT(CASE WHEN t2.risk_level = '안정' THEN 1 END) AS 안정_count,
                     COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
-                    COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
+                    COUNT(CASE WHEN t2.risk_level = '심각' THEN 1 END) AS 심각_count,
                     -- 바로 점수 계산
                     SUM(CASE
                         WHEN t2.risk_level = '안정' THEN 10
                         WHEN t2.risk_level = '주의' THEN 30
-                        WHEN t2.risk_level = '위기' THEN 100
+                        WHEN t2.risk_level = '심각' THEN 100
                         ELSE 0
                     END) AS total_score
                 FROM signal_country t1
@@ -583,7 +584,7 @@ def custom_news(id: str):
                             "bool": {
                                 "should": [
                                     # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
-                                    {"term": {"extracted_keywords": {"value": kw, "_name": kw}}}
+                                    {"term": {"keywords": {"value": kw, "_name": kw}}}
                                     for kw in clean_keywords
                                 ],
                                 "minimum_should_match": 1  # terms 쿼리처럼 최소 하나는 매치되어야 함
@@ -708,7 +709,7 @@ def noti_signal(id:str):
             JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
             JOIN member_info t3 ON t2.member_no = t3.member_no
             WHERE t3.id = :id
-            -- AND t2.alarm_view = 0  <-- 읽은 알림도 목록에는 나와야 하므로 이 조건은 프론트에서 처리하거나 제거
+            AND t2.alarm_view = 0
             ORDER BY t2.alarm_time DESC LIMIT 15
         """)
         res = db.execute(sql, {"id": id}).mappings().fetchall()

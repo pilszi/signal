@@ -19,6 +19,7 @@
     </script> 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
     <title>맞춤형 뉴스</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -251,10 +252,47 @@
         let currentPage = 1;
 
 
+        function getCleanImageUrl(url) {
+            const defaultImg = '/static/img/signal_image.png'; 
+
+            if (!url || typeof url !== 'string' || url.trim() === '') return defaultImg;
+            let finalUrl = url.trim();
+
+            // 1. [핵심] 유명 뉴스/이미지 도메인은 확장자 체크 없이 즉시 통과
+            // yimg(야후), mktw(마켓워치), pstatic/naver(네이버), cloudfront(CDN) 등
+            const trustedDomains = /yimg\.com|mktw\.net|pstatic\.net|naver\.net|newsimg|cloudfront\.net|api\/res/i;
+            
+            if (trustedDomains.test(finalUrl)) {
+                return finalUrl;
+            }
+
+            // 2. 중복 프로토콜 수정 (https://https://... 방지)
+            const protocol = 'https://';
+            if (finalUrl.split(protocol).length > 2) {
+                finalUrl = protocol + finalUrl.split(protocol).pop();
+            }
+
+            // 3. 일반적인 이미지 확장자 체크 (.jpg, .png 등)
+            const isImage = /\.(jpg|jpeg|png|gif|webp|bmp)($|\?)/i.test(finalUrl);
+            
+            if (isImage) {
+                return finalUrl;
+            }
+
+            // 위 조건에 모두 해당하지 않으면 기본 이미지 반환
+            return defaultImg;
+        }
+
         async function fetchMainData() {
             let {data} = await axios.get("/custom_news?id="+savedUserId);
             console.log(data);
-            allSignals = data.news;
+
+            // 2. map 안에서 함수만 호출하면 끝!
+            allSignals = data.news.map(item => ({
+                ...item,
+                main_image: getCleanImageUrl(item.main_image)
+            }));
+
             keyword = data.keyword;
         }
 
@@ -417,18 +455,18 @@
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item ${n.is_read ? '' : 'unread'}" 
-                        onclick="readItem(${n.signal_no})" 
+                        onclick="readItem(${n.id})" 
                         style="cursor: pointer;">
                         <div class="notif-icon">
                             ${iconTag}
                         </div>
                         <div class="notif-content">
                             <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
-                            <div class="notif-message">${n.prediction}</div>
-                            <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
+                            <div class="notif-message">${n.title}</div>
+                            <div class="notif-time">${timeAgo(n.time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
                         </div>
-                        <div class="notif-delete" 
-                            onclick="deleteItem(event, ${n.signal_no})" 
+                        <div class="notif-delete"   
+                            onclick="deleteItem(event, ${n.id})" 
                             style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
                             <i data-lucide="x" style="width: 16px; height: 16px;"></i>
                         </div>
@@ -463,17 +501,22 @@
 
         // 아이템 삭제
         async function deleteItem(e, id) {
-            e.stopPropagation();
-            noti = noti.map(n => {
+            e.stopPropagation(); // 1. 부모 클릭 이벤트(읽음 처리) 방지
+            noti = noti.map(n =>{
                 if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, is_read: 1 };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
+                    return { ...n, is_read:1 };
+                }else{
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"id":id, "user_id": savedUserId});
+            updateNotifUI();
+        }
+
+        // 모두 읽음
+        async function allRead() {
+            noti = noti.map(n => ({...n, is_read: 1}));
+            await axios.get("/noti/read_all?id="+savedUserId);
             updateNotifUI();
         }
 
@@ -501,7 +544,10 @@
             return `
                 <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
                     <a href=${news.url} target="_blank">
-                        <img src="${news.main_image}" alt="news" class="w-full h-48 object-cover">
+                    <img src="${news.main_image}" 
+                        onerror="this.onerror=null; this.src='/static/img/signal_image.png';" 
+                        alt="news" 
+                        class="w-full h-48 object-cover">
                     </a>
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-2">
