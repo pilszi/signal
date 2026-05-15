@@ -181,9 +181,7 @@
 
                     <div class="flex items-center gap-3">
                         <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <span id="user-greeting" class="hidden text-sm text-gray-600">
-                            <span id="user_name"></span>님 반갑습니다
-                        </span>
+                        <div id="user-greeting"></div>
                         <!-- 알림 컴포넌트 -->
                         <div class="notif-container" id="notifContainer">
                             <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
@@ -387,16 +385,25 @@
             // 태그가 없을 시 함수 종료(에러방지)
             // console.log(authContainer);
             if (!authContainer){return};
-            const userNameSpan = document.getElementById('user_name');
-            const loggedInId = sessionStorage.getItem('savedUserId');
             const userGreeting = document.getElementById('user-greeting');
-            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-            if (loggedInId && loggedInId !== 'guest' && loggedInId !== 'null') {
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
                 // 1. 인사말 영역 처리
-                if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = loggedInId; // 아이디 텍스트 삽입
-                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
+                // 관리자 계정일 경우
+                if (savedUserId === 'admin') {
+                    userGreeting.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                                반갑습니다
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
 
                 // 2. 로그아웃 버튼 표시
@@ -500,9 +507,20 @@
         function renderList(container, noti) {
             if (noti.length === 0) {
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
+                // 스크롤바 설정
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
                 return;
             }
-            
+            // signal noti 스크롤바 설정(noti가 5개 이상일 때만 생성)
+            if (noti.length >= 5) {
+                container.style.maxHeight = '450px'; // 5개 정도가 보일 적당한 높이
+                container.style.overflowY = 'auto';
+            } else {
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
+            }
+
             container.innerHTML = noti.map(n => {
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
@@ -513,9 +531,7 @@
 
                 if (n.type === 'emergency') {
                     icon = "alert-triangle"; iconColor = "text-red-500"; bgColor = "bg-red-50";
-                } else if (n.type === 'keyword') {
-                    icon = "tag"; iconColor = "text-blue-500"; bgColor = "bg-blue-50";
-                } else if (n.type === 'system') {
+                } else {
                     icon = "user"; iconColor = "text-gray-600"; bgColor = "bg-gray-200";
                 }
 
@@ -574,22 +590,17 @@
 
         // 아이템 삭제
         async function deleteItem(e, id) {
-            e.stopPropagation(); // 1. 부모 클릭 이벤트(읽음 처리) 방지
-            noti = noti.map(n =>{
+            e.stopPropagation();
+            noti = noti.map(n => {
                 if (n.id === id) {
-                    return { ...n, is_read:1 };
-                }else{
+                    // ID가 일치하면 읽음 처리된 복사본 반환
+                    return { ...n, is_read: 1 };
+                } else {
+                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id":id, "user_id": savedUserId});
-            updateNotifUI();
-        }
-
-        // 모두 읽음
-        async function allRead() {
-            noti = noti.map(n => ({...n, is_read: 1}));
-            await axios.get("/noti/read_all?id="+savedUserId);
+            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
             updateNotifUI();
         }
 
