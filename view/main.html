@@ -175,9 +175,7 @@
 
                     <div class="flex items-center gap-3">
                         <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <span id="user-greeting" class="hidden text-sm text-gray-600">
-                            <span id="user_name"></span>님 반갑습니다
-                        </span>
+                        <div id="user-greeting"></div>
                         <!-- 알림 컴포넌트 -->
                         <div class="notif-container" id="notifContainer">
                             <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
@@ -399,6 +397,7 @@
         let noti = [];
         const SIGNALS_PER_PAGE = 10;
         let currentPage = 1;
+        let countryMap ={};
 
 
         let dateFilter = "";
@@ -469,6 +468,7 @@
             renderNews();
             renderPagination();
             updateStation();
+            country_map();
         });
 
         async function fetchMainData(date = null) {
@@ -476,12 +476,12 @@
                 let newsUrl = "/public_signals" + (date ? `?date=${date}` : "");
 
                 // 4개의 API를 호출하므로 4개의 변수로 받습니다.
-                const [newsRes, indicatorRes, heatmapStatsRes, countryRes] = await Promise.all([
+                const [newsRes, indicatorRes, countryRes] = await Promise.all([
                     axios.get(newsUrl),
                     axios.get('/api/market-indicators'),
-                    axios.get('/stats/heatmap'),
                     axios.get('/main/country')
                 ]);
+                console.log(newsRes, indicatorRes, countryRes);
 
                 // 1. 뉴스 데이터 설정 (변수명 통일: newsRes)
                 allSignals = newsRes.data.msg || [];
@@ -603,7 +603,6 @@
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
-            const savedUserId = localStorage.getItem("id"); // localStorage에서 다시 가져오기
 
             // 비로그인 상태
             if (
@@ -646,31 +645,31 @@
 
             countText.innerText = `${unreads.length}개의 새 알림`;
         }
-<!--            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음-->
-<!--            if (!savedUserId || savedUserId === "guest") {-->
-<!--                badge.style.display = 'none'; // 배지 숨김-->
-<!--                countText.innerText = '0개의 새 알림';-->
-<!--                list.innerHTML = `-->
-<!--                    <div style="padding: 40px; text-align: center;">-->
-<!--                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>-->
-<!--                    </div>`;-->
-<!--                return;-->
-<!--            }-->
+// <!--            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음-->
+// <!--            if (!savedUserId || savedUserId === "guest") {-->
+// <!--                badge.style.display = 'none'; // 배지 숨김-->
+// <!--                countText.innerText = '0개의 새 알림';-->
+// <!--                list.innerHTML = `-->
+// <!--                    <div style="padding: 40px; text-align: center;">-->
+// <!--                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>-->
+// <!--                    </div>`;-->
+// <!--                return;-->
+// <!--            }-->
 
-<!--            const unreads = noti.filter(n => !n.is_read);-->
+// <!--            const unreads = noti.filter(n => !n.is_read);-->
 
-<!--            // 새 알림이 있을 때만 배지 표시-->
-<!--            if (unreads.length > 0) {-->
-<!--                badge.innerText = unreads.length;-->
-<!--                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시-->
-<!--            } else {-->
-<!--                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김-->
-<!--            }-->
+// <!--            // 새 알림이 있을 때만 배지 표시-->
+// <!--            if (unreads.length > 0) {-->
+// <!--                badge.innerText = unreads.length;-->
+// <!--                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시-->
+// <!--            } else {-->
+// <!--                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김-->
+// <!--            }-->
 
-<!--            // 드롭다운 내부 문구 업데이트-->
-<!--            countText.innerText = `${unreads.length}개의 새 알림`;-->
+// <!--            // 드롭다운 내부 문구 업데이트-->
+// <!--            countText.innerText = `${unreads.length}개의 새 알림`;-->
 
-<!--        }-->
+// <!--        }-->
 
         function renderList(container, noti) {
 
@@ -686,15 +685,15 @@
                  // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item ${n.is_read ? '' : 'unread'}"
-                        onclick="readItem(${n.signal_no})"
+                        onclick="readItem(${n.id})"
                         style="cursor: pointer;">
                         <div class="notif-icon">
                             ${iconTag}
                         </div>
                         <div class="notif-content">
                             <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
-                            <div class="notif-message">${n.prediction}</div>
-                            <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
+                            <div class="notif-message">${n.title}</div>
+                            <div class="notif-time">${timeAgo(n.time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
                         </div>
                         <div class="notif-delete"
                             onclick="deleteItem(event, ${n.signal_no})"
@@ -849,7 +848,7 @@
 
                 list.innerHTML = sorted.map((item, index) => {
 
-                    const displayScore = Math.round(item.total_score);
+                    const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
 
                     const isSerious =
                         item.level === "심각" ||
@@ -874,7 +873,7 @@
                                 </span>
 
                                 <span class="font-bold text-sm text-white flex items-center gap-1">
-                                    ${countryNamesKOR[item.name] || item.name}
+                                    ${countryMap[item.name] || item.name}
                                     <span class="text-[10px]">${badgeIcon}</span>
                                 </span>
                             </div>
@@ -944,7 +943,7 @@
         function selectCountry(name, score) {
             selectedCountry = name;
             const infoBox = document.getElementById('selected-country-info');
-            document.getElementById('country-name').innerText = countryNamesKOR[name] || name;
+            document.getElementById('country-name').innerText = countryMap[name] || name;
             document.getElementById('country-score').innerText = `${score}점`;
             infoBox.classList.remove('hidden');
             applyFilters();
@@ -1013,11 +1012,8 @@
             // 정렬
             const sorted = uniqueSignals.sort((a, b) => {
 
-                const scoreA = Math.round(Math.abs(a.risk_score || 0) * 100);
-                const scoreB = Math.round(Math.abs(b.risk_score || 0) * 100);
-
-                if (scoreA !== scoreB) {
-                    return scoreA - scoreB;
+                if (a.risk_score !== b.risk_score) {
+                    return a.risk_score - b.risk_score;
                 }
 
                 return new Date(b.published_date) - new Date(a.published_date);
@@ -1046,11 +1042,11 @@
             grid.innerHTML = currentSignals.map(news => {
 
                 const country = normalizeCountry(news.country_name);
-                console.log(news);
-                console.log("LABEL TEST:", news.news_labeling, news.news_origin);
+                // console.log(news);
+                // console.log("LABEL TEST:", news.news_labeling, news.news_origin);
 
                 const displayScore =
-                    Math.round(Math.abs(news.risk_score || 0) * 100);
+                    100-Math.round(Math.abs((news.risk_score || 0) * 100));
 
                 const displayDate =
                     news.published_date
@@ -1063,6 +1059,7 @@
                         : "https://via.placeholder.com/400x320?text=Signal+News";
 
                 return `
+                <a href="${news.url}" target="_blank">
                     <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative"
                          onclick="logNewsClick('${news.url}')">
 
@@ -1104,12 +1101,11 @@
                                     ${news.press_name}
                                 </span>
 
-                                <i data-lucide="external-link"
-                                   class="w-3 h-3 text-gray-300"></i>
                             </div>
 
                         </div>
                     </div>
+                </a>
                 `;
             }).join('');
 
@@ -1346,6 +1342,22 @@
                 dropdown.classList.add('hidden');
             }
         });
+
+        async function country_map() {
+            let {data} = await axios.get("/main/countryMap");
+            console.log(data.res);
+
+            data.res.forEach(country => {
+                // 한글 → 영문
+                countryMap[country.country_kr_name] = country.country_en_name;
+
+                // 영문 → 한글
+                countryMap[country.country_en_name] = country.country_kr_name;
+            });
+
+            console.log(countryMap);
+            
+        }
 
     </script>
 </html>
