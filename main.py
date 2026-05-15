@@ -360,15 +360,15 @@ def update_profile(info: Dict[str, Any]):
             db.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
 
         # 키워드 갱신
-        bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": user["member_no"]}).mappings().fetchall()
+        bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": member_no}).mappings().fetchall()
         bef_keyword = []
         for k in bef_key:
             bef_keyword.append(k["keyword"])
-        db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": user["member_no"]})
+        db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": member_no})
         key_insert = 0
         for key in info.get("keyword", []):
             ins_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES(:member_no, :keyword)")
-            res = db.execute(ins_sql, {"member_no": user["member_no"], "keyword": key})
+            res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
             key_insert += res.rowcount
 
     return {"updated_keywords": key_insert}
@@ -489,6 +489,7 @@ def public_signals(date: str = Query(None)):
         logger.info(f"❌ 검색 중 오류 발생: {e}")
         return {"msg": [], "error": str(e)}
 
+
 @app.get("/main/country")
 def country():
     """ 히트맵 데이터 요청 """
@@ -498,20 +499,29 @@ def country():
                     t3.country_en_name as en_name,
                     COUNT(CASE WHEN t2.risk_level = '안정' THEN 1 END) AS 안정_count,
                     COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
-                    COUNT(CASE WHEN t2.risk_level = '위기' THEN 1 END) AS 위기_count,
-                    -- 바로 점수 계산
+                    COUNT(CASE WHEN t2.risk_level = '심각' THEN 1 END) AS 심각_count,
                     SUM(CASE
                         WHEN t2.risk_level = '안정' THEN 10
                         WHEN t2.risk_level = '주의' THEN 30
-                        WHEN t2.risk_level = '위기' THEN 100
+                        WHEN t2.risk_level = '심각' THEN 100
                         ELSE 0
                     END) AS total_score
                 FROM signal_country t1
-                    JOIN signal_message t2 ON t1.signal_no = t2.signal_no
-                        JOIN country t3 ON t3.country_no = t1.country_no
-                        WHERE t2.signal_time >= (NOW() - INTERVAL 12 HOUR)
-                            GROUP BY t1.country_no;
+                JOIN signal_message t2 ON t1.signal_no = t2.signal_no
+                JOIN country t3 ON t3.country_no = t1.country_no
+                WHERE 
+                    t2.signal_time >= CASE 
+                        WHEN HOUR(NOW()) >= 12 THEN CURDATE()                       -- 오늘 오후라면 오늘 자정부터
+                        ELSE CURDATE() - INTERVAL 12 HOUR                           -- 오늘 오전이라면 어제 정오부터
+                    END
+                    AND 
+                    t2.signal_time < CASE 
+                        WHEN HOUR(NOW()) >= 12 THEN CURDATE() + INTERVAL 12 HOUR    -- 오늘 오후라면 오늘 정오까지
+                        ELSE CURDATE()                                              -- 오늘 오전이라면 오늘 자정까지
+                    END
+                GROUP BY t1.country_no, t3.country_en_name
             """)
+
         country_all = db.execute(sql).mappings().fetchall()
         signal_country = []
         for country in country_all:
@@ -656,7 +666,7 @@ def signal_log(id:str):
                 sm.signal_time, 
                 sm.prediction, 
                 sm.prediction_reason,
-                sm.url,
+                sm.news_url,
                 al.alarm_view,
                 GROUP_CONCAT(DISTINCT mk.keyword SEPARATOR ', ') as matched_keywords
             FROM alarm_log al
@@ -698,18 +708,15 @@ def noti_signal(id:str):
                 ,t1.prediction AS message
                 ,t1.signal_time AS time
                 ,t2.alarm_view AS is_read
-                -- 리스크 레벨에 따라 유형을 강제로 부여 (사진 디자인 매칭용)
                 ,CASE
                     WHEN t1.risk_level = '심각' THEN 'emergency'
-                    WHEN t1.risk_level = '주의' THEN 'keyword'
-                    ELSE 'system'
                  END AS type
             FROM signal_message t1
             JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
             JOIN member_info t3 ON t2.member_no = t3.member_no
             WHERE t3.id = :id
-            -- AND t2.alarm_view = 0  <-- 읽은 알림도 목록에는 나와야 하므로 이 조건은 프론트에서 처리하거나 제거
-            ORDER BY t2.alarm_time DESC LIMIT 15
+            AND t2.alarm_view = 0 AND t1.risk_level = '심각'
+            ORDER BY t2.alarm_time DESC LIMIT 10
         """)
         res = db.execute(sql, {"id": id}).mappings().fetchall()
         notis = []
@@ -999,11 +1006,10 @@ def alarm_log():
 
 # 관리자 열람 로그 함수
 def save_admin_log(
-    conn,
+    db,
     log_type: str,
     title: str,
     target_id: str = None,
-    admin_id: str = None,
     content: str = None,
     before_data: dict = None,
     after_data: dict = None,
@@ -1013,11 +1019,10 @@ def save_admin_log(
 
        Parameters
        ----------
-       conn : MariaDB connection
+       db : MariaDB connection
        log_type : 로그 타입 (create/update/delete/login ...)
        title : 로그 제목
        target_id : 변경 대상 user id
-       admin_id : 작업한 관리자 id
        content : 추가 설명
        before_data : 변경 전 데이터(dict)
        after_data : 변경 후 데이터(dict)

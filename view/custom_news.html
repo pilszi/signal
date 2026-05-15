@@ -179,9 +179,7 @@
 
                     <div class="flex items-center gap-3">
                         <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <span id="user-greeting" class="hidden text-sm text-gray-600">
-                            <span id="user_name"></span>님 반갑습니다
-                        </span>
+                        <div id="user-greeting"></div>
                         <!-- 알림 컴포넌트 -->
                         <div class="notif-container" id="notifContainer">
                             <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
@@ -294,15 +292,25 @@
             // 태그가 없을 시 함수 종료(에러방지)
             // console.log(authContainer);
             if (!authContainer){return};
-            const userNameSpan = document.getElementById('user_name');
             const userGreeting = document.getElementById('user-greeting');
-            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
                 // 1. 인사말 영역 처리
-                if (userGreeting && userNameSpan) {
-                    userNameSpan.textContent = savedUserId; // 아이디 텍스트 삽입
-                    userGreeting.classList.remove('hidden'); // 'hidden' 클래스 제거하여 노출
+                // 관리자 계정일 경우 
+                if (savedUserId === 'admin') {
+                    userGreeting.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a> 
+                                반갑습니다 
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
 
                 // 2. 로그아웃 버튼 표시
@@ -407,36 +415,63 @@
         function renderList(container, noti) {
             if (noti.length === 0) {
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
+                // 스크롤바 설정
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
                 return;
             }
-            
+            // signal noti 스크롤바 설정(noti가 5개 이상일 때만 생성)
+            if (noti.length >= 5) {
+                container.style.maxHeight = '450px'; // 5개 정도가 보일 적당한 높이
+                container.style.overflowY = 'auto';
+            } else {
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
+            }
+
             container.innerHTML = noti.map(n => {
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                // 🔥  유형별 아이콘 및 스타일 설정
+                let icon = "bell";
+                let iconColor = "text-gray-400";
+                let bgColor = "bg-gray-100";
+
+                if (n.type === 'emergency') {
+                    icon = "alert-triangle"; iconColor = "text-red-500"; bgColor = "bg-red-50";
+                } else {
+                    icon = "user"; iconColor = "text-gray-600"; bgColor = "bg-gray-200";
+                }
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
-                    <div class="notif-item ${n.is_read ? '' : 'unread'}" 
-                        onclick="readItem(${n.signal_no})" 
-                        style="cursor: pointer;">
-                        <div class="notif-icon">
-                            ${iconTag}
+                    <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
+                         onclick="readItem(${n.id})">
+                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0">
+                            <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
-                        <div class="notif-content">
-                            <div class="notif-title">3단계 signal ${n.risk_level} 알림</div>
-                            <div class="notif-message">${n.prediction}</div>
-                            <div class="notif-time">${timeAgo(n.signal_time)} ${n.is_read ? '' : '<span class="unread-dot"></span>'}</div>
+
+                        <div class="flex-1 pr-6">
+                            <div class="text-sm font-bold text-gray-900 mb-0.5">${n.title}</div>
+                            <div class="text-xs text-gray-600 line-clamp-2">${n.message}</div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <span class="text-[10px] text-gray-400">${timeAgo(n.time)}</span>
+                                ${n.is_read ? '' : '<span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>'}
+                            </div>
                         </div>
-                        <div class="notif-delete" 
-                            onclick="deleteItem(event, ${n.signal_no})" 
-                            style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; padding: 5px;">
-                            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-                        </div>
+
+                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
                     </div>
-                    `;               
-            }).join('')+`<div class="hover:cursor-pointer" style="padding: 5px; text-align: center; color: #9ca3af;" onclick=allRead()>
-                            모두읽음
-                        </div>`;
+                `;
+            }).join('') + `
+                <div class="p-3 text-center bg-gray-50 rounded-b-xl">
+                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline">
+                        모두 읽음으로 표시
+                    </button>
+                </div>`;
+
             lucide.createIcons();
         }
 
@@ -492,7 +527,7 @@
                 "심각": "bg-red-100 text-red-700"
             };
             // console.log(news);
-            const displayScore = Math.round(Math.abs(100-(news.risk_score || 0) * 100));
+            const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
             let newBadge = '';
             if (!news.is_read) {
                 newBadge = '<div class="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>';
