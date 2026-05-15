@@ -698,10 +698,9 @@ def custom_news(id: str, db: Session = Depends(get_db)):
     }
 
 
-
 # 시그널로그 페이지
 @app.get("/signal_log")
-def signal_log(id:str, db: Session = Depends(get_db)):
+def signal_log(id: str, db: Session = Depends(get_db)):
     """ 로그인한 사용자의 관심 키워드 기반 시그널만 조회
     (ES 검색 대신, 분석 시점에 미리 매칭된 alarm_log 테이블 활용)
     """
