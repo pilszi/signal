@@ -649,7 +649,6 @@ def custom_news(id: str):
 
 
 
-
 # 시그널로그 페이지
 @app.get("/signal_log")
 def signal_log(id:str):
@@ -920,7 +919,7 @@ def user_list():
 
     with get_db() as db:
         sql = sqlalchemy.text("""SELECT
-                                    mi.id, mi.email, mi.create_at, mi.phone_number, ml.status, mk.keywords
+                                    mi.id, mi.email, mi.create_at, mi.phone_number, ml.status, mk.keywords, mi.user_name
                                 FROM member_info mi
                                 LEFT JOIN (
                                     SELECT t1.member_no, t1.status
