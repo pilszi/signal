@@ -95,6 +95,7 @@
         // DOM 요소들
         const stepDescription = document.getElementById('stepDescription');
         const footerLinks = document.getElementById('footerLinks');
+        const alertModal = document.getElementById('alertModal');
         
         const forms = {
             verify: document.getElementById('verifyForm'),
@@ -109,39 +110,43 @@
             const userId = document.getElementById('userIdInput').value;
             const email = document.getElementById('emailInput').value;
 
-            let {data} = await axios.post("/request_code", { userId, email });
-            console.log(data);
-            // 여기서는 리액트 코드와 동일한 데모 로직을 사용합니다.
-            if (data.res) {
-                // generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
-                generatedCode = "111111";
-                currentUserId = userId; // 나중에 비밀번호 변경 시 필요할 수 있음
-                
-                showAlert(`인증코드가 발송되었습니다. (데모: 111111)`);
-                
-                // 화면 전환
-                showStep("code");
-                document.getElementById('emailTargetInfo').textContent = `${email}로 발송된 인증코드를 입력해주세요.`;
-            } else {
-                showAlert("입력하신 정보와 일치하는 계정을 찾을 수 없습니다.");
-                document.getElementById('verifyForm').reset();
+            try {
+                let {data} = await axios.post("/find_pw/request", { userId, email });
+		        console.log(data);
+                if (data.res) {
+                    currentUserId = userId;
+                    showAlert("이메일로 인증코드가 발송되었습니다.");
+                    // 화면 전환
+                    showStep("code");
+                    document.getElementById('emailTargetInfo').textContent = `${email}로 전송된 인증번호 6자리를 입력하세요.`;
+                } else {
+                    showAlert("입력하신 정보와 일치하는 계정을 찾을 수 없습니다.");
+                    forms.verify.reset();
+                }
+            } catch(error) {
+                showAlert("서버 통신 오류가 발생했습니다.");
             }
         });
 
-        // 2단계: 코드 확인
-        forms.code.addEventListener('submit', function(e) {
+        // 2단계: 세션 데이터 매핑 검증
+        forms.code.addEventListener('submit', async function(e) {
             e.preventDefault();
             const inputCode = document.getElementById('codeInput').value;
 
-            if (inputCode === generatedCode) {
-                showStep("reset");
-            } else {
-                showAlert("인증코드가 일치하지 않습니다.");
-                document.getElementById('codeForm').reset();
+            try {
+                let {data} = await axios.post("/find_pw/verify", { code: inputCode });
+                if (data.res) {
+                    showStep("reset");
+                } else {
+                    showAlert(data.msg || "인증코드가 일치하지 않습니다.");
+                    forms.code.reset();
+                }
+            } catch (error) {
+                showAlert("코드 검증 중 오류 발생");
             }
         });
 
-        // 3단계: 비밀번호 재설정
+        // 3단계: 비밀번호 최종 인젝션 및 반영
         forms.reset.addEventListener('submit', async function(e) {
             e.preventDefault();
             const newPw = document.getElementById('newPasswordInput').value;
@@ -151,21 +156,20 @@
                 showAlert("비밀번호는 8자 이상이어야 합니다.");
                 return;
             }
-            // if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(newPw)) {
-            //     showAlert("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.");
-            //     return;
-            // }
             if (newPw !== confirmPw) {
                 showAlert("비밀번호가 일치하지 않습니다.");
                 return;
             }
 
-            let {data} = await axios.post("/reset_pw", { userId: currentUserId, password: newPw });
-            console.log(data);
-            if (data.res && data.res > 0) {
-                showStep("complete");
-            } else {
-                showAlert("비밀번호 변경에 문제가 생겼습니다.");
+            try {
+                let {data} = await axios.post("/find_pw/reset", { userId: currentUserId, password: newPw });
+                if (data.res && data.res > 0) {
+                    showStep("complete");
+                } else {
+                    showAlert(data.msg || "비밀번호 변경 처리에 실패했습니다.");
+                }
+            } catch (error) {
+                showAlert("비밀번호 재설정 중 통신 오류 발생");
             }
         });
 
@@ -184,7 +188,6 @@
                 complete: "비밀번호가 성공적으로 변경되었습니다"
             };
             stepDescription.textContent = descriptions[stepName];
-
             // 완료 단계에서는 하단 링크 숨기기
             if (stepName === "complete") footerLinks.classList.add('hidden');
         }

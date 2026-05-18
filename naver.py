@@ -31,6 +31,8 @@ def get_detailed_news(url):
         headers = {"User-Agent": random.choice(user_agents)}
 
         res = requests.get(url, headers=headers, timeout=10)  # 타임아웃 단축
+        if "captcha" in res.text.lower():
+            print("🚨 [위기] 네이버 봇 탐지에 걸렸습니다! 잠시 쉬어야 합니다.")
         res.raise_for_status()  # 응답 에러 시 바로 except로 이동
         soup = BeautifulSoup(res.text, "html.parser")
 

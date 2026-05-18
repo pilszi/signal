@@ -222,25 +222,44 @@
             }
             lucide.createIcons();
         }
-
-        function sendVerificationCode() {
+        // 메일 전송 함수
+        async function sendVerificationCode() {
             const email = document.getElementById('email').value.trim();
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showModal("올바른 이메일 형식을 입력해주세요."); return; }
-            document.getElementById('verification-area').classList.remove('hidden');
-            showModal('인증 코드가 발송되었습니다. (데모: 1111)');
-        }
 
-        function verifyCode() {
-            const inputCode = document.getElementById('verificationCode').value;
-            if (inputCode === '1111') {
-                emailVerified = true;
-                document.getElementById('verification-area').classList.add('hidden');
-                document.getElementById('send-code-btn').classList.add('hidden');
-                document.getElementById('email').disabled = true;
-                document.getElementById('email-msg').classList.remove('hidden');
-                document.getElementById('email-msg').classList.add('flex');
-                showModal("이메일 인증이 완료되었습니다.");
-            } else { showModal("인증 코드가 일치하지 않습니다."); }
+            try {
+                let {data} = await axios.post("/regist/request_code", { email });
+                if (data.res) {
+                    document.getElementById('verification-area').classList.remove('hidden');
+                    showModal('인증 코드가 입력하신 이메일로 발송되었습니다.');
+                } else {
+                    showModal(data.msg || "인증 코드 발송에 실패했습니다.");
+                }
+            } catch (error) {
+                showModal("서버 통신 중 오류가 발생했습니다.");
+            }
+        }
+        // 백엔드 세션과 교차 매핑하여 검증하는 함수
+        async function verifyCode() {
+            const inputCode = document.getElementById('verificationCode').value.trim();
+            if (!inputCode) { showModal("인증코드를 입력해주세요."); return; }
+
+            try {
+                let {data} = await axios.post("/regist/verify_code", { code: inputCode });
+                if (data.res) {
+                    emailVerified = true;
+                    document.getElementById('verification-area').classList.add('hidden');
+                    document.getElementById('send-code-btn').classList.add('hidden');
+                    document.getElementById('email').disabled = true;
+                    document.getElementById('email-msg').classList.remove('hidden');
+                    document.getElementById('email-msg').classList.add('flex');
+                    showModal("이메일 인증이 완료되었습니다.");
+                } else {
+                    showModal(data.msg || "인증 코드가 일치하지 않습니다.");
+                }
+            } catch (error) {
+                showModal("코드 인증 처리 중 오류가 발생했습니다.");
+            }
         }
 
         function addKeywordInput(event) {

@@ -206,7 +206,10 @@
                                 <span class="notif-badge" id="notifBadge" style="display: none;"></span>
                             </button>
                             <div class="notif-dropdown hidden" id="notifDropdown">
-                                <div class="notif-header p-4 border-b"><span id="notifCountText" class="text-sm text-gray-500"></span></div>
+                                <div class="notif-header">
+                                    <span class="header-title">실시간 위기 감지</span>
+                                    <span class="header-count" id="notifCountText">0개의 새 알림</span>
+                                </div>
                                 <div id="notifList"></div>
                             </div>
                         </div>
@@ -226,9 +229,9 @@
             <div id="filter-container" class="flex items-center gap-3 mb-6 flex-wrap">
                 <i data-lucide="filter" class="w-5 h-5 text-gray-400"></i>
                 <button onclick="filterLevel('전체')" class="px-4 py-2 rounded-lg bg-gray-600 text-white">전체</button>
-                <button onclick="filterLevel('3단계(심각)')" class="px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">3단계 (심각)</button>
-                <button onclick="filterLevel('2단계(주의)')" class="px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100">2단계 (주의)</button>
-                <button onclick="filterLevel('1단계(안정)')" class="px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100">1단계 (안정)</button>
+                <button onclick="filterLevel('심각')" class="px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">3단계 (심각)</button>
+                <button onclick="filterLevel('주의')" class="px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100">2단계 (주의)</button>
+                <button onclick="filterLevel('안정')" class="px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100">1단계 (안정)</button>
             </div>
 
             <div class="grid lg:grid-cols-4 gap-8">
@@ -276,8 +279,10 @@
                     axios.get("/noti/signal?id=" + savedUserId)
                 ]);
 
-                allSignals = signalsRes.data.data;
-                noti = notiRes.data.data;
+                allSignals = (signalsRes.data && signalsRes.data.data) ? signalsRes.data.data : [];
+
+                // 💡 백엔드 응답 키인 .noti를 정확히 명시하고 안전장치(|| [])를 장착합니다.
+                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : [];
 
                 applyFilterAndRender(); // 메인 리스트 렌더링
                 updateNotifUI_Static(); // 알림 배지 및 사이드바 렌더링
@@ -328,50 +333,50 @@
             }
 
             listContainer.innerHTML = currentSignals.map(signal => {
-            // 컬러 테마 적용
-            const style = levelStyles[signal.risk_level] || levelStyles["안정"];
+                // 컬러 테마 적용
+                const style = levelStyles[signal.risk_level] || levelStyles["안정"];
 
-            return `
-                <div class="${style.bg} border-2 ${style.border} rounded-2xl p-8 mb-6 shadow-sm transition-all hover:shadow-md">
-                    <div class="flex justify-between items-start mb-4">
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm font-bold text-gray-500">${signal.signal_time.replace('T', ' ')}</span>
-                            <span class="${style.badge} text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">
-                                ${signal.risk_level}
-                            </span>
+                return `
+                    <div id="signal-${signal.signal_no}" class="${style.bg} border-2 ${style.border} rounded-2xl p-8 mb-6 shadow-sm transition-all hover:shadow-md">
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="flex items-center gap-3">
+                                <span class="text-sm font-bold text-gray-500">${signal.signal_time.replace('T', ' ')}</span>
+                                <span class="${style.badge} text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">
+                                    ${signal.risk_level}
+                                </span>
+                            </div>
+                        </div>
+
+                        <h3 class="text-xl font-bold ${style.text} mb-6">
+                            ${signal.prediction}
+                        </h3>
+
+                        <div class="space-y-5 text-sm">
+                            <div>
+                                <p class="text-gray-500 font-bold mb-1 text-xs uppercase tracking-tight">예측 근거</p>
+                                <p class="text-gray-800 font-medium leading-relaxed">${signal.prediction_reason}</p>
+                            </div>
+                            <div class="pt-3 border-t border-current/10">
+                                <p class="text-gray-500 font-bold mb-1 text-xs uppercase tracking-tight">예측</p>
+                                <p class="text-gray-800 font-medium leading-relaxed">${signal.prediction}</p>
+                            </div>
+                        </div>
+
+                        <div class="mt-8 flex justify-between items-center">
+                            <a href="${signal.url}" target="_blank" class="text-blue-600 text-xs font-bold flex items-center gap-1 hover:underline">
+                                기사 원문 보기 <i data-lucide="external-link" class="w-3 h-3"></i>
+                            </a>
+                            <div class="flex gap-1">
+                                ${(signal.match_keyword || []).map(kw => `
+                                    <span class="text-[10px] bg-white/60 px-2 py-0.5 rounded border border-gray-200 text-gray-500 font-medium">#${kw}</span>
+                                `).join('')}
+                            </div>
                         </div>
                     </div>
+                `;
+            }).join('');
 
-                    <h3 class="text-xl font-bold ${style.text} mb-6 underline decoration-current/20 underline-offset-8">
-                        ${signal.prediction}
-                    </h3>
-
-                    <div class="space-y-5 text-sm">
-                        <div>
-                            <p class="text-gray-500 font-bold mb-1 text-xs uppercase tracking-tight">예측 근거</p>
-                            <p class="text-gray-800 font-medium leading-relaxed">${signal.prediction_reason}</p>
-                        </div>
-                        <div class="pt-3 border-t border-current/10">
-                            <p class="text-gray-500 font-bold mb-1 text-xs uppercase tracking-tight">예측</p>
-                            <p class="text-gray-800 font-medium leading-relaxed">${signal.prediction}</p>
-                        </div>
-                    </div>
-
-                    <div class="mt-8 flex justify-between items-center">
-                        <a href="${signal.url}" target="_blank" class="text-blue-600 text-xs font-bold flex items-center gap-1 hover:underline">
-                            기사 원문 보기 <i data-lucide="external-link" class="w-3 h-3"></i>
-                        </a>
-                        <div class="flex gap-1">
-                            ${(signal.match_keyword || []).map(kw => `
-                                <span class="text-[10px] bg-white/60 px-2 py-0.5 rounded border border-gray-200 text-gray-500 font-medium">#${kw}</span>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        if (window.lucide) lucide.createIcons();
+            if (window.lucide) lucide.createIcons();
     }
 
         // 6. 실시간 사이드바 렌더링
@@ -389,25 +394,39 @@
                 <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
                     <div class="flex items-center gap-2 mb-1">
                         <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
-                        <span class="text-[9px] text-gray-400">${timeAgo(log.signal_time)}</span>
+                        <span class="text-[9px] text-gray-400">${timeAgo(log.time)}</span>
                     </div>
-                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.prediction}</p>
+                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.message || '리스크 감지'}</p>
                 </div>
             `).join('');
         }
 
         // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
         function updateNotifUI_Static() {
+            // 🛠️ [초정밀 방어선] 데이터가 가동되기 전 루프가 빗겨 맞더라도 에러 튕김을 원천 차단합니다.
+            if (!noti || !Array.isArray(noti)) {
+                noti = [];
+            }
+
             const badge = document.getElementById('notifBadge');
+
+            // 이제 noti가 무조건 배열임이 보장되므로 .filter()가 절대 죽지 않습니다.
             const unreads = noti.filter(n => !n.is_read);
 
             if (unreads.length > 0) {
-                badge.innerText = unreads.length;
-                badge.style.display = 'flex';
+                if (badge) {
+                    badge.innerText = unreads.length;
+                    badge.style.display = 'flex';
+                }
             } else {
-                badge.style.display = 'none';
+                if (badge) badge.style.display = 'none';
             }
-            document.getElementById('notifCountText').innerText = `${unreads.length}개의 새 알림`;
+
+            const countText = document.getElementById('notifCountText');
+            if (countText) {
+                countText.innerText = `${unreads.length}개의 새 알림`;
+            }
+
             renderList(document.getElementById('notifList'), noti);
             renderSignalLogs();
             if (window.lucide) lucide.createIcons();
@@ -449,11 +468,17 @@
 
         // 10. 유틸리티 및 페이지네이션
         function timeAgo(dateString) {
+            // 🛠️ [방어 코드] 데이터가 유실되거나 비어있을 때 .split 엔진이 크래시 나는 것을 원천 차단
+            if (!dateString || typeof dateString !== 'string') {
+                return '방금 전';
+            }
+
             const diff = Math.floor((new Date() - new Date(dateString)) / 1000);
             if (diff < 60) return '방금 전';
             if (diff < 3600) return `${Math.floor(diff/60)}분 전`;
             if (diff < 86400) return `${Math.floor(diff/3600)}시간 전`;
-            return dateString.split('T')[0];
+
+            return dateString.includes(' ') ? dateString.split(' ')[0] : dateString;
         }
 
 
@@ -506,16 +531,46 @@
                 </div>`;
         }
 
-        // 스크립트 아무 곳에나 추가
+
         function updateNavbar() {
             const savedUserId = sessionStorage.getItem("savedUserId");
-            const userNameElement = document.getElementById('user_name');
             const userGreeting = document.getElementById('user-greeting');
 
-            if (savedUserId && userNameElement) {
-                userNameElement.innerText = savedUserId;
-                userGreeting.classList.remove('hidden');
+            // 🛠️ [버그 패치] 기존 코드에 누락되었던 엘리먼트 선언 선행 장착!
+            const authContainer = document.getElementById('authContainer');
+            if (!authContainer) return;
+
+            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null' && savedUserId !== 'undefined') {
+                // 1. [로그인 상태] 인사말 텍스트 세팅 및 노출 (강제 인젝션 구조로 변경)
+                if (userGreeting) {
+                    userGreeting.innerHTML = `
+                        <span class="text-sm text-gray-600 font-medium">
+                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
+                        </span>
+                    `;
+                    userGreeting.classList.remove('hidden');
+                }
+
+                // 2. [로그인 상태] authContainer 영역에 로그아웃 버튼 인젝션
+                authContainer.innerHTML = `
+                    <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG OUT
+                    </button>
+                `;
+            } else {
+                // 3. [로그아웃 상태] 인사말 숨김 처리
+                if (userGreeting) userGreeting.classList.add('hidden');
+
+                // 4. [로그아웃 상태] authContainer 영역에 로그인 링크 인젝션
+                authContainer.innerHTML = `
+                    <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
+                        LOG IN
+                    </a>
+                `;
             }
+
+            // 아이콘 리렌더링 안정화
+            if (window.lucide) lucide.createIcons();
         }
 
         // 12. 초기 실행 및 실시간 폴링
@@ -554,6 +609,237 @@
             }
             // 6. 아이콘 최종 렌더링
             if (window.lucide) lucide.createIcons();
+        });
+
+        // 1. 알림 UI 및 배지 수량 실시간 갱신
+        async function updateNotifUI() {
+            const badge = document.getElementById('notifBadge');
+            const listContainer = document.getElementById('notifList');
+            const countText = document.getElementById('notifCountText');
+
+            // 비회원 및 게스트 유저 예외 방어 처리
+            if (!savedUserId || savedUserId === "null" || savedUserId === "undefined" || savedUserId === "guest") {
+                if (badge) badge.style.display = 'none';
+                if (countText) countText.innerText = '0개의 새 알림';
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div style="padding: 40px; text-align: center;">
+                            <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
+                        </div>`;
+                }
+                return;
+            }
+
+            try {
+                // 백엔드 통합 알림 API 호출
+                const { data } = await axios.get(`/noti/signal?id=${savedUserId}`);
+                noti = data.noti || [];
+
+                // 드롭다운 내부에 알림 카드 카드 출력
+                renderList(listContainer, noti);
+
+                // 안 읽은 알림(alarm_view = 0)만 카운팅하여 빨간색 배지 노출
+                const unreads = noti.filter(n => !n.is_read);
+                if (countText) countText.innerText = `${unreads.length}개의 새 알림`;
+
+                if (unreads.length > 0) {
+                    if (badge) {
+                        badge.innerText = unreads.length;
+                        badge.style.display = 'flex';
+                    }
+                } else {
+                    if (badge) badge.style.display = 'none';
+                }
+            } catch (error) {
+                console.error("알림 UI 로드 실패:", error);
+            }
+        }
+
+        // 2. 알림 드롭다운 카드 내부 디자인 렌더링
+        function renderList(container, notiList) {
+            if (!container) return;
+
+            if (notiList.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
+                return;
+            }
+
+            // 알림이 5개 이상 쌓일 때만 내부 스크롤바 활성화하여 레이아웃 붕괴 방지
+            if (notiList.length >= 5) {
+                container.style.maxHeight = '420px';
+                container.style.overflowY = 'auto';
+            } else {
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
+            }
+
+            container.innerHTML = notiList.map(n => {
+                let icon = "bell";
+                let iconColor = "text-gray-400";
+                let bgColor = "bg-gray-100";
+
+                // 위험 수위가 '심각'인 비상용 시그널 처리
+                if (n.type === 'emergency') {
+                    icon = "alert-triangle";
+                    iconColor = "text-red-500";
+                    bgColor = "bg-red-50";
+                }
+
+                return `
+                    <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
+                         onclick="readItem(${n.signal_no})">
+                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
+                            <i data-lucide="${icon}" class="w-5 h-5"></i>
+                        </div>
+
+                        <div class="flex-1 pr-6">
+                            <div class="text-sm font-bold text-gray-900 mb-0.5 line-clamp-1">${n.title}</div>
+                            <div class="text-xs text-gray-600 line-clamp-2 leading-relaxed">${n.message}</div>
+                            <div class="flex items-center gap-2 mt-1.5">
+                                <span class="text-[10px] text-gray-400">${timeAgo(n.time)}</span>
+                                ${n.is_read ? '' : '<span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>'}
+                            </div>
+                        </div>
+
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('') + `
+                <div class="p-3 text-center bg-gray-50 rounded-b-xl border-t">
+                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline transition-all">
+                        모두 읽음으로 표시
+                    </button>
+                </div>`;
+
+            if (window.lucide) lucide.createIcons();
+        }
+
+        // 3. 특정 알림 클릭 시 읽음 업데이트 및 조준경 타겟 페이지 이동
+        // 알림 클릭 시 읽음 처리 후 목적지 카드로 고유 해시(#)를 들고 이동하는 함수
+        async function readItem(id) {
+            try {
+                // 1. 서버에 읽음 상태 반영 (POST 규격)
+                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+
+                const targetUrl = `signal_log.html#signal-${id}`;
+
+                // 2. 만약 이미 시그널로그 페이지에 머물고 있다면 화면 갱신 없이 바로 스크롤 구동
+                if (window.location.pathname.endsWith('signal_log.html')) {
+                    window.location.hash = `signal-${id}`;
+                    executeScrollToCard(); // 아래 2번에서 만들 함수 호출
+                    updateNotifUI();       // 알림창 개수 갱신
+                } else {
+                    // 3. 다른 페이지(main, custom)에 있다면 해시를 품고 시그널 로그 페이지로 강제 이동
+                    window.location.href = targetUrl;
+                }
+            } catch (err) {
+                console.error("알림 확인 통신 오류:", err);
+            }
+        }
+
+        // [세 페이지 공통] 타입 미스매치 버그가 완벽 해결된 실시간 삭제 카운터 함수
+        async function deleteItem(e, id) {
+            // 1. 부모 박스 클릭 이벤트 전파 차단
+            e.stopPropagation();
+
+            // 2. 화면에서 카드 레이아웃 즉시 파기
+            const targetItem = e.target.closest('.notif-item');
+            if (targetItem) {
+                targetItem.remove();
+            }
+
+            // 🎯 3. [핵심 패치] String()을 감싸 문자열이든 숫자든 강제로 일치시켜 배열에서 확실히 빼버립니다.
+            noti = noti.filter(n => String(n.id) !== String(id) && String(n.signal_no) !== String(id));
+
+            // 4. 안 읽은 알림 수 재계산
+            const unreads = noti.filter(n => !n.is_read);
+
+            // 5. 알림창 드롭다운 헤더 텍스트 실시간 동기화 ("X개의 새 알림")
+            const countText = document.getElementById('notifCountText');
+            if (countText) {
+                countText.innerText = `${unreads.length}개의 새 알림`;
+            }
+
+            // 6. 종 모양 배지 숫자 실시간 동기화
+            const badge = document.getElementById('notifBadge');
+            if (badge) {
+                if (unreads.length > 0) {
+                    badge.innerText = unreads.length;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none'; // 0개가 되면 빨간 배지 숨김
+                }
+            }
+
+            // 7. 알림판에 더 이상 남은 기사가 없을 때 안내 텍스트 출력
+            const listContainer = document.getElementById('notifList');
+            if (listContainer) {
+                const remainingItems = listContainer.querySelectorAll('.notif-item');
+                if (remainingItems.length === 0) {
+                    listContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
+                    listContainer.style.maxHeight = 'none';
+                    listContainer.style.overflowY = 'visible';
+                }
+            }
+
+            // 8. 시그널 로그 페이지용 실시간 사이드바 연동 방어선
+            if (typeof renderSignalLogs === 'function') {
+                renderSignalLogs();
+            }
+
+            // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
+            try {
+                await axios.post("/noti/delete", { "id": id, "user_id": savedUserId });
+            } catch (err) {
+                console.error("알림 숨김 처리 서버 통신 에러:", err);
+            }
+        }
+
+        // 5. 하단 모두 읽음 버튼 클릭 시: 비동기 POST 일괄 확인 완료 처리
+        async function allRead() {
+            try {
+                let { data } = await axios.post("/noti/read_all", { "user_id": savedUserId });
+                if (data.res) {
+                    updateNotifUI();
+                }
+            } catch (err) {
+                console.error("전체 알림 읽음 처리 통신 오류:", err);
+            }
+        }
+        // 주소창 뒤의 #signal-번호를 역추적해서 해당 카드로 부드럽게 스크롤하고 반짝임 효과를 주는 함수
+        function executeScrollToCard() {
+            const hash = window.location.hash;
+            if (hash && hash.startsWith('#signal-')) {
+                setTimeout(() => {
+                    const targetCard = document.querySelector(hash);
+                    if (targetCard) {
+                        // 1. 해당 카드가 브라우저 정중앙에 오도록 부드럽게 스크롤 무빙
+                        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                        // 2. 테두리에 파란색 강렬한 네온 링 이펙트 일시 주입 (Tailwind)
+                        targetCard.classList.add('ring-4', 'ring-blue-500', 'transition-all', 'duration-500');
+
+                        // 3. 2초간 유지 후 이펙트 자연스럽게 소멸 청소
+                        setTimeout(() => {
+                            targetCard.classList.remove('ring-4', 'ring-blue-500');
+                        }, 2000);
+                    }
+                }, 600); // 리스트 도면 엘리먼트들이 확실히 그려질 때까지 대기하는 안정 마진 시간
+            }
+        }
+
+        // 💡 [참고] 기존 DOMContentLoaded 이벤트 리스너의 맨 아래에 넣어주세요!
+        document.addEventListener('DOMContentLoaded', async () => {
+            updateNavbar();
+            axios.get("/session_out");
+            await refreshAllData();
+
+            // 🎯 페이지 로드 시 해시가 있으면 추적 스크롤 가동!
+            executeScrollToCard();
         });
     </script>
 </html>
