@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import subprocess
+import math
 import random
 import asyncio
 from typing import Dict, Any
@@ -51,8 +52,8 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-# es = Elasticsearch(["http://100.123.232.79:9200"])
-es = Elasticsearch(['http://localhost:9200'])
+es = Elasticsearch(["http://100.123.232.79:9200"])
+# es = Elasticsearch(['http://localhost:9200'])
 
 
 
@@ -526,29 +527,28 @@ def delete_member(info: Dict[str, str], db: Session = Depends(get_db)):
 
 # main 페이지 오늘의 뉴스 조회
 @app.get("/public_signals")
-def public_signals(date: str = Query(None)):
+def public_signals():
     """ 메인 페이지 기사 요청 및 필터링 """
-    # [1] 검색 조건 설정 (날짜가 있으면 해당 날짜, 없으면 최근 30일치)
-    if date:
-        date_filter = {
-            "range": {
-                "published_date": {
-                    "gte": f"{date}T00:00:00",
-                    "lte": f"{date}T23:59:59",
-                    "time_zone": "+09:00"  # 한국 시간 기준
-                }
+    # [1] 검색 조건 설정 (날짜가 있으면 해당 날짜, 없으면 최근 7일치)
+    date_filter = {
+        "range": {
+            "published_date": {
+                "gte": "now-7d",
+                "lte": "now",
+                "time_zone": "+09:00"  # 한국 시간 기준
             }
         }
-    else:
-        date_filter = {
-            "range": {
-                "published_date": {
-                    "gte": "now-30d",
-                    "lte": "now",
-                    "time_zone": "+09:00"
-                }
-            }
-        }
+    }
+    #
+    #     date_filter = {
+    #         "range": {
+    #             "published_date": {
+    #                 "gte": "now-15d",
+    #                 "lte": "now",
+    #                 "time_zone": "+09:00"
+    #             }
+    #         }
+    #     }
 
     # [2] 최종 Elasticsearch 쿼리 바디
     search_body = {
@@ -562,7 +562,7 @@ def public_signals(date: str = Query(None)):
     }
     try:
         res = es.search(index="news_labeling", body=search_body)
-        logger.info(f"가져온 기사 갯수 = {res['hits']['total']['value']}")
+        logger.info(f"👉가져온 기사 갯수 = {res['hits']['total']['value']}")
 
         public_news = []
         seen = set()
@@ -614,37 +614,62 @@ def country(db: Session = Depends(get_db)):
                 t3.country_en_name as en_name,
                 COUNT(CASE WHEN t2.risk_level = '안정' THEN 1 END) AS 안정_count,
                 COUNT(CASE WHEN t2.risk_level = '주의' THEN 1 END) AS 주의_count,
-                COUNT(CASE WHEN t2.risk_level = '심각' THEN 1 END) AS 심각_count,
-                SUM(CASE
-                    WHEN t2.risk_level = '안정' THEN 10
-                    WHEN t2.risk_level = '주의' THEN 30
-                    WHEN t2.risk_level = '심각' THEN 100
-                    ELSE 0
-                END) AS total_score
+                COUNT(CASE WHEN t2.risk_level = '심각' THEN 1 END) AS 심각_count
             FROM signal_country t1
             JOIN signal_message t2 ON t1.signal_no = t2.signal_no
             JOIN country t3 ON t3.country_no = t1.country_no
             WHERE 
                 t2.signal_time >= CASE 
-                    WHEN HOUR(NOW()) >= 12 THEN CURDATE()                       -- 오늘 오후라면 오늘 자정부터
-                    ELSE CURDATE() - INTERVAL 12 HOUR                           -- 오늘 오전이라면 어제 정오부터
+                    WHEN HOUR(NOW()) >= 24 THEN CURDATE()                       -- 오늘 오후라면 오늘 자정부터
+                    ELSE CURDATE() - INTERVAL 24 HOUR                           -- 오늘 오전이라면 어제 정오부터
                 END
                 AND 
                 t2.signal_time < CASE 
-                    WHEN HOUR(NOW()) >= 12 THEN CURDATE() + INTERVAL 12 HOUR    -- 오늘 오후라면 오늘 정오까지
+                    WHEN HOUR(NOW()) >= 24 THEN CURDATE() + INTERVAL 24 HOUR    -- 오늘 오후라면 오늘 정오까지
                     ELSE CURDATE()                                              -- 오늘 오전이라면 오늘 자정까지
                 END
             GROUP BY t1.country_no, t3.country_en_name
         """)
 
     country_all = db.execute(sql).mappings().fetchall()
+    logger.info(f'🔍 country_all = {country_all}')
+
     signal_country = []
-    for country in country_all:
-        con = {
-            "en_name": country["en_name"],
-            "total_score": country["total_score"]
-        }
-        signal_country.append(con)
+    for c in country_all:
+        severe = c["심각_count"]
+        caution = c["주의_count"]
+        stable = c["안정_count"]
+
+        # -----------------------------------------------------------------
+        # [STEP 1] 최고 위험 단계를 기준으로 기본 베이스라인 점수 획득 (보안 구멍 차단)
+        # -----------------------------------------------------------------
+        if severe >= 3:
+            base_score = 300  # 심각 기사가 3개 이상 쌓이면 무조건 '심각(Red)' 등급 진입
+        elif severe > 0:
+            base_score = 200  # 🚨 단 1개의 심각 기사만 있어도 무조건 최소 '주의(Yellow)' 등급 보장!
+        elif caution >= 5:
+            base_score = 200  # 심각은 없지만 주의 단계 기사가 5개 이상 뭉치면 경계 등급 격상
+        elif caution > 0:
+            base_score = 100  # 주의 기사가 소수 존재할 때
+        else:
+            base_score = 50  # 오직 안정 기사만 존재할 때
+
+        # -----------------------------------------------------------------
+        # [STEP 2] 개수(Volume) 증가에 따른 로그 감쇠 가중치 합산 (점수 독점 방지)
+        # 💡 math.log1p(x)는 ln(x+1)을 의미하며, 기사 수가 무한히 늘어나도 점수 상승폭이 완만해집니다.
+        # -----------------------------------------------------------------
+        severe_bonus = math.log1p(severe) * 25
+        caution_bonus = math.log1p(caution) * 12
+        stable_bonus = math.log1p(stable) * 2
+
+        # 최종 가중치 스코어 합산 후 정밀 정수형 변환 (프론트엔드 호환용)
+        final_score = int(base_score + severe_bonus + caution_bonus + stable_bonus)
+
+        signal_country.append({
+            "en_name": c["en_name"],
+            "total_score": final_score
+        })
+    logger.info(f'📊 [정규화 완료] 최적화된 signal_country 점수: {signal_country}')
     return {"country_signal": signal_country}
 
 
@@ -720,12 +745,13 @@ def custom_news(id: str, db: Session = Depends(get_db)):
                     {
                         "range": {
                             "published_date": {
-                                "gte": "now-30d",
+                                "gte": "now-30d",  # 57건을 보려면 범위를 넉넉히 잡으세요
                                 "lte": "now"
                             }
                         }
                     }
                 ]
+
             }
         },
         "sort": [{"published_date": "desc"}],
@@ -734,6 +760,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
 
     # 4. ES 검색 실행
     res = es.search(index="news_labeling", body=body)
+    logger.info(f'es에서 가져왔는지 확인: {res['hits']['total']['value']}')
 
     custom_news_list = []
     for hit in res['hits']['hits']:
@@ -822,43 +849,46 @@ def signal_log(id: str, db: Session = Depends(get_db)):
 @app.get("/noti/signal")
 def noti_signal(id:str, db: Session = Depends(get_db)):
     """ 페이지 상단 네비게이션바 통합 알림 요청 """
-    logger.info(f"📋 {id}님의 시그널 로그 알림 요청")
+    try:
+        logger.info(f"📋 {id}님의 시그널 로그 알림 요청")
 
-    sql = sqlalchemy.text("""
+        sql = sqlalchemy.text("""
             SELECT
-                t1.signal_no AS signal_no
-                ,t1.risk_level
-                ,t1.prediction AS message
-                ,t1.signal_time AS time
-                ,t2.alarm_view AS is_read
-                ,CASE
-                    WHEN t1.risk_level = '심각' THEN 'emergency'
-                    ELSE 'keyword'
-                 END AS type
+                t1.signal_no,
+                t1.risk_level,
+                t1.prediction AS message,
+                t1.signal_time AS time,
+                t2.alarm_view AS is_read
             FROM signal_message t1
             JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
             JOIN member_info t3 ON t2.member_no = t3.member_no
             WHERE t3.id = :id
-            AND t2.alarm_view = 0 AND t1.risk_level = '심각'
-            ORDER BY t2.alarm_time DESC LIMIT 10
-        """)
-    res = db.execute(sql, {"id": id}).mappings().fetchall()
+            AND t2.alarm_view = 0 
+            AND t1.risk_level = '심각'
+            ORDER BY t2.alarm_time DESC 
+            """)
+        res = db.execute(sql, {"id": id}).mappings().fetchall()
+        # logger.info(f'에러나는지 확인 : {res}')
 
-    notis = []
-    for n in res:
-        # DB의 datetime 객체를 프론트엔드가 다루기 좋게 문자열로 포맷팅
-        time_str = n["time"].strftime("%Y-%m-%d %H:%M") if n["time"] else ""
-        notis.append({
-            "id": n["signal_no"], # 구형 프론트엔드 호환용
-            "signal_no": n["signal_no"], # 신형 스크립트 매핑용 (moveToSignalLog 사용)
-            "type": n["type"],
-            "risk_level": n["risk_level"],
-            "title": f"{n['risk_level']} 위험 시그널",
-            "message": n["message"],
-            "is_read": n["is_read"],
-            "time": time_str
-        })
-    return {"noti": notis}
+        notis = []
+        for n in res:
+            # DB의 datetime 객체를 프론트엔드가 다루기 좋게 문자열로 포맷팅
+            time_str = n["time"].strftime("%Y-%m-%d %H:%M") if n.get("time") else ""
+            notis.append({
+                "id": n["signal_no"], # 구형 프론트엔드 호환용
+                "signal_no": n["signal_no"], # 신형 스크립트 매핑용 (moveToSignalLog 사용)
+                "type": "emergency",
+                "risk_level": n.get("risk_level", "심각"),
+                "title": f"{n.get('risk_level', '심각')} 위험 시그널",
+                "message": n.get("message", "리스크 감지"),
+                "is_read": n.get("is_read", 0),
+                "time": time_str
+            })
+        return {"noti": notis}
+    except Exception as e:
+        # 💡 터미널에 찍히는 진짜 에러 내용을 여기서 확실히 보여줍니다.
+        logger.error(f"❌ 알림 API 오류 발생: {traceback.format_exc()}")
+        return {"noti": [], "error": str(e)}
 
 
 # 알림토글 읽음 요청

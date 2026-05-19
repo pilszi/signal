@@ -189,10 +189,9 @@
                             <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
                                 <div class="notif-header">
-                                    <span class="header-title">실시간 위기 감지</span>
-                                    <span class="header-count" id="notifCountText">0개의 새 알림</span>
+                                    <span class="header-count" id="notifCountText"></span>
                                 </div>
-                                <div id="notifList"></div>
+                                 <div id="notifList"></div>
                             </div>
                         </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
@@ -399,56 +398,38 @@
         const SIGNALS_PER_PAGE = 10;
         let currentPage = 1;
         let countryMap ={};
+        const infoBox = document.getElementById('selected-country-info');
+        const trigger = document.getElementById('notifTrigger');
+        const dropdown = document.getElementById('notifDropdown');
+        const list = document.getElementById('notifList');
 
 
         let dateFilter = "";
 
         // 히트맵 데이터를 분석하여 지도에 색상을 입히는 함수
-        function updateHeatmap() {
-            if (!heatmapData || Object.keys(heatmapData).length === 0) return;
+        function updateHeatmap(data) {
+            // 💡 혹시 리더님의 차트 인스턴스 변수명이 'myChart'가 아니라 'chart'나 'mapChart'인지 꼭 확인해 보세요!
+            if (typeof myChart === "undefined" || !myChart) {
+                console.error("❌ [디버그] ECharts 인스턴스(myChart)를 찾을 수 없습니다. 변수명을 확인해주세요.");
+                return;
+            }
 
-            let chartDataMap = {}; // 최종적으로 지도에 그릴 데이터를 담는 객체
+            // 💡 글로벌 변수 heatmapData가 안전하게 존재하는지 한 번 더 검증
+            if (!heatmapData || heatmapData.length === 0) {
+                console.warn("⚠️ [디버그] 차트에 주입할 heatmapData 배열이 비어있습니다.");
+                return;
+            }
 
-            heatmapData.forEach((info) => {
-                // 1. 한글명을 영문명으로 변환
-                const engName = info.name;
-
-                // 2. 시각화 등급 계산 (1:안정, 2:주의, 3:심각)
-                let visualValue = 1;
-                const level = info.level;
-                if (level === "심각" || level === "Serious" || level === "Critical") {
-                    visualValue = 3;
-                } else if (level === "주의" || level === "Caution" || level === "Warning") {
-                    visualValue = 2;
-                }
-
-                const dataPoint = {
-                    value: visualValue,
-                    realScore: info.total_score || info.score,
-                    riskLevel: level
-                };
-
-                // // 3. 지역 키워드 체크 (예: Middle East인 경우 사전 정의된 15개국에 모두 데이터 할당)
-                // if (REGION_TO_COUNTRIES[engName]) {
-                //     REGION_TO_COUNTRIES[engName].forEach(country => {
-                //         chartDataMap[country] = { ...dataPoint, name: country };
-                //     });
-                // } else {
-                //     // 개별 국가인 경우 그대로 할당
-                //     chartDataMap[engName] = { ...dataPoint, name: engName };
-                // }
-            });
-
-            // 4. 객체를 배열로 변환하여 ECharts에 적용
-            const finalChartData = Object.values(chartDataMap);
-
+            // 🎯 ECharts의 첫 번째 시리즈(index: 0)인 지도 레이어에 데이터를 명시적으로 동기화합니다.
             myChart.setOption({
                 series: [{
-                    data: finalChartData
+                    type: 'map', // 👈 이 문구를 적어주어야 기존 지도 레이어와 정확하게 병합됩니다.
+                    data: data
                 }]
             });
-        }
 
+            console.log("🎯 [디버그] ECharts 엔진에 맞춤형 점수 주입 완료!", data);
+        }
         const searchInput = document.getElementById('search-input');
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
@@ -461,7 +442,12 @@
         document.addEventListener('DOMContentLoaded', async() => {
             axios.get("/session_out");
             updateNavbar();
+            // 1️⃣ [순서 보장] 인터넷에서 지도 도면을 다운로드하여 ECharts에 등록하는 걸 눈으로 확인한 후,
+            await initMap();
+
+            // 2️⃣ [순서 보장] 백엔드에서 50~400점대 황금 밸런스 점수를 가져와 지도를 안전하게 칠합니다!
             await fetchMainData();
+
             renderExchangeRates();
             initCalendar();
             lucide.createIcons();
@@ -469,7 +455,7 @@
             renderNews();
             renderPagination();
             updateStation();
-            country_map();
+            loadCountryMap();
             updateRefreshTime();
             scheduleNextUpdate();
         });
@@ -492,18 +478,15 @@
                 // 2. 히트맵 데이터 가공 (MariaDB 데이터 우선 사용)
                 if (countryRes.data && countryRes.data.country_signal) {
                     heatmapData = countryRes.data.country_signal.map(item => {
-                        let visualValue = 1;
-                        if (item.total_score >= 300) visualValue = 3;
-                        else if (item.total_score >= 200) visualValue = 2;
 
                         return {
                             name: item.en_name,
-                            value: visualValue,
+                            value: item.total_score,
                             total_score: item.total_score,
-                            level: visualValue === 3 ? "심각" : (visualValue === 2 ? "주의" : "안정")
+                            level: item.total_score >= 300 ? "심각" : (item.total_score >= 200 ? "주의" : "안정")
                         };
                     });
-                    updateHeatmap(); // 히트맵 갱신
+                    updateHeatmap(heatmapData); // 히트맵 갱신
                 }
 
                 // 3. 환율 데이터 렌더링
@@ -527,16 +510,27 @@
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
             // 태그가 없을 시 함수 종료(에러방지)
+            // console.log(authContainer);
             if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
-            // console.log(`${loggedInId} / ${userNameSpan} / ${userGreeting}`);
 
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null' && savedUserId !== 'undefined') {
-
-                // 1. [수정] 인사말 영역 처리 (innerHTML로 통째로 구워버려서 태그 미달 버그 원천 차단)
-                if (userGreeting) {
-                    userGreeting.innerHTML = `<span class="text-sm text-gray-600 font-medium"><span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다</span>`;
-                    userGreeting.classList.remove('hidden'); // hidden 클래스 완벽 제거
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+                // 1. 인사말 영역 처리
+                // 관리자 계정일 경우
+                if (savedUserId === 'admin') {
+                    userGreeting.innerHTML = `
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                                반갑습니다
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
 
                 // 2. 로그아웃 버튼 표시
@@ -561,9 +555,6 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        const trigger = document.getElementById('notifTrigger');
-        const dropdown = document.getElementById('notifDropdown');
-        const list = document.getElementById('notifList');
 
         // 토글 이벤트
         trigger.addEventListener('click', (e) => {
@@ -648,16 +639,16 @@
         }
 
 
-        function renderList(container, noti) {
-            if (noti.length === 0) {
-                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
-                // 스크롤바 설정
+        function renderList(container, notiList) {
+            if (!container) return;
+            if (!notiList || notiList.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
                 container.style.maxHeight = 'none';
                 container.style.overflowY = 'visible';
                 return;
             }
             // signal noti 스크롤바 설정(noti가 5개 이상일 때만 생성)
-            if (noti.length >= 5) {
+            if (notiList.length >= 5) {
                 container.style.maxHeight = '450px'; // 5개 정도가 보일 적당한 높이
                 container.style.overflowY = 'auto';
             } else {
@@ -665,7 +656,7 @@
                 container.style.overflowY = 'visible';
             }
 
-            container.innerHTML = noti.map(n => {
+            container.innerHTML = notiList.map(n => {
                 // 1. 아이콘을 담을 변수 선언
                 let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
                 // 🔥  유형별 아이콘 및 스타일 설정
@@ -680,35 +671,35 @@
                 }
 
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
-                return `
+               return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id})">
-                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0">
+                         onclick="readItem(${n.id}, ${n.signal_no})">
+                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
 
                         <div class="flex-1 pr-6">
-                            <div class="text-sm font-bold text-gray-900 mb-0.5">${n.title}</div>
-                            <div class="text-xs text-gray-600 line-clamp-2">${n.message}</div>
-                            <div class="flex items-center gap-2 mt-1">
+                            <div class="text-sm font-bold text-gray-900 mb-0.5 line-clamp-1">${n.title}</div>
+                            <div class="text-xs text-gray-600 line-clamp-2 leading-relaxed">${n.message}</div>
+                            <div class="flex items-center gap-2 mt-1.5">
                                 <span class="text-[10px] text-gray-400">${timeAgo(n.time)}</span>
                                 ${n.is_read ? '' : '<span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>'}
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
                 `;
             }).join('') + `
-                <div class="p-3 text-center bg-gray-50 rounded-b-xl">
-                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline">
+                <div class="p-3 text-center bg-gray-50 rounded-b-xl border-t">
+                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline transition-all">
                         모두 읽음으로 표시
                     </button>
                 </div>`;
 
-            lucide.createIcons();
+            if (window.lucide) lucide.createIcons();
         }
 
         // 아이콘 매칭 함수
@@ -716,10 +707,53 @@
             return 'user';
         }
 
+
         // 아이템 클릭 (읽음 처리 및 이동)
-        async function readItem(id) {
+        // 🎯 main.html 내의 readItem 함수 최종 교체
+        async function readItem(id, signalNo) {
+            try {
+                // 1. 백엔드 데이터베이스에는 알림창 고유 일련번호(id)를 실어서 정상 읽음 마감 요청
+                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
+
+                // 2. 실시간 로컬 배지 카운팅 동기화 반영
+                if (typeof noti !== 'undefined' && Array.isArray(noti)) {
+                    noti = noti.map(n => String(n.id) === String(id) ? { ...n, is_read: 1 } : n);
+                }
+
+                // 3. 목적지인 시그널로그 주소 뒤에는 실제 기사 로그 번호(signalNo)를 품고 점프!
+                window.location.href = `signal_log.html#signal-${signalNo}`;
+            } catch (err) {
+                console.error("알림 확인 통신 오류:", err);
+            }
+        }
+        // 주소창 뒤의 #signal-번호를 역추적해서 해당 카드로 부드럽게 스크롤하고 반짝임 효과를 주는 함수 (오류 파괴 버전)
+        function executeScrollToCard() {
+            const hash = window.location.hash;
+            if (!hash || !hash.startsWith('#signal-')) return;
+
+            // 🎯 [핵심 패치] querySelector 대신 브라우저 엔진이 가장 좋아하는 getElementById로 다이렉트 서칭!
+            const targetCard = document.getElementById(hash.substring(1));
+
+            if (targetCard) {
+                setTimeout(() => {
+                    // 1. 해당 카드가 브라우저 정중앙에 오도록 부드럽게 스크롤 무빙
+                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    // 2. 테두리에 파란색 강렬한 네온 링과 글로우 이펙트 주입
+                    targetCard.classList.add('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]', 'transition-all', 'duration-500');
+
+                    // 3. 2초간 시선 집중을 시킨 뒤, 자연스럽게 원래 상태로 소멸 청소
+                    setTimeout(() => {
+                        targetCard.classList.remove('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]');
+                    }, 2000);
+                }, 300); // 렌더링 안정 마진 시간 0.3초
+            }
+        }
+        // 아이템 삭제
+        async function deleteItem(e, id) {
+            e.stopPropagation();
             noti = noti.map(n => {
-                if (n.signal_no === id) {
+                if (n.id === id) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -729,10 +763,7 @@
             });
             await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
             updateNotifUI();
-            location.href = 'signal_log.html';
         }
-
-
 
         // 모두 읽음
         async function allRead() {
@@ -743,65 +774,65 @@
 
 
         // 세계 지도 데이터를 불러온 뒤 차트
-        fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json')
-            .then(response => response.json())
-            .then(worldJson => {
+        async function initMap() {
+            try {
+                const response = await fetch('https://raw.githubusercontent.com/apache/echarts/master/test/data/map/json/world.json');
+                const worldJson = await response.json();
                 echarts.registerMap('world', worldJson);
 
                 var option = {
-                    tooltip: { trigger: 'item', formatter: '{b}<br/>위기단계: {c}단계' },
-                    // 위험단계별 컬러 설정 (기획안 반영)
+                    tooltip: {
+                        trigger: 'item',
+                        formatter: function(params) {
+                            const score = params.data ? params.data.value : 0;
+                            let level = '안정';
+                            if (score >= 300) level = '심각';
+                            else if (score >= 200) level = '주의';
+                            return `${params.name}<br/>리스크 점수: ${score}점 (${level})`;
+                        }
+                    },
                     visualMap: {
                         type: 'piecewise',
                         pieces: [
-                            {value: 1, label: '1단계 (안정)', color: '#2ECC71'},
-                            {value: 2, label: '2단계 (주의)', color: '#FFD400'},
-                            {value: 3, label: '3단계 (심각)', color: '#FF4B4B'}
+                            {min: 300, label: '3단계 (심각)', color: '#FF4B4B'},
+                            {min: 200, max: 299, label: '2단계 (주의)', color: '#FFD400'},
+                            {max: 199, label: '1단계 (안정)', color: '#2ECC71'}
                         ],
                         left: 'left'
                     },
                     series: [{
                         type: 'map',
-                        map: 'world',// 지도가 박스 안에 꽉 차도록 설정
-                        top: '10%',    // 상단 여백
-                        bottom: '10%', // 하단 여백
-                        left: '5%',    // 좌측 여백
-                        right: '5%',   // 우측 여백
-                        layoutCenter: ['50%', '50%'], // 지도를 정중앙에 배치
+                        map: 'world',
+                        top: '10%',
+                        bottom: '10%',
+                        left: '5%',
+                        right: '5%',
+                        layoutCenter: ['50%', '50%'],
                         layoutSize: '120%',
-                        data: heatmapData, // ES_3에서 가져온 1~3단계 데이터
+                        data: heatmapData,
                         roam: true,
-
-                        // [추가] 마우스 오버(Hover) 시 스타일
                         emphasis: {
                             label: { show: true },
-                            itemStyle: {
-                                areaColor: '#eee' // 마우스 올렸을 때는 연한 회색
-                            }
+                            itemStyle: { areaColor: '#eee' }
                         },
-                        // [핵심 추가] 클릭해서 '선택(Select)'되었을 때 스타일
-                        selectedMode: 'single', // 한 번에 하나의 국가만 선택 가능
+                        selectedMode: 'single',
                         select: {
-                            itemStyle: {
-                                areaColor: '#995EFF', // [추가] 선택된 국가를 진한 회색으로 고정!
-                                borderColor: '#fff', // 테두리를 흰색으로 강조
-                                borderWidth: 2
-                            },
-                            label: {
-                                show: true,
-                                color: '#fff' // 글자색도 흰색으로 변경
-                            }
+                            itemStyle: { areaColor: '#995EFF', borderColor: '#fff', borderWidth: 2 },
+                            label: { show: true, color: '#fff' }
                         }
                     }]
                 };
+
                 window.addEventListener('resize', function() {
                     myChart.resize();
                 });
-                // console.log(option);
+
                 myChart.setOption(option);
-
-            });
-
+                console.log("🗺️ [디버그] 1단계: 세계 지도 도면 등록 완료");
+            } catch (err) {
+                console.error("❌ 지도 도면 로드 실패:", err);
+            }
+        }
         myChart.on('click', function (params) {
             // params.name에 클릭한 국가 이름이 들어있습니다.
             // console.log(params.name + "의 뉴스를 불러옵니다.");
@@ -832,27 +863,21 @@
 
                 // total_score 기준 정렬
                 const sorted = [...heatmapData]
-                    .sort((a, b) => b.total_score - a.total_score)
+                    .filter(item => item.name && item.name.toLowerCase() !== 'global') // 💡 Global 완벽 차단
+                    .sort((a, b) => b.total_score - a.total_score)                    // 💡 높은 점수 순 정렬
                     .slice(0, 3);
 
                 list.innerHTML = sorted.map((item, index) => {
 
-                    const displayScore = 100-Math.round(Math.abs((item.risk_score || 0) * 100));
+                    const displayScore = item.total_score;
 
-                    const isSerious =
-                        item.level === "심각" ||
-                        item.level === "Serious" ||
-                        displayScore >= 300;
+                    // 새로운 300점 기준선에 맞춰 위기 아이콘 스위칭
+                    const isSerious = item.level === "심각" || displayScore >= 300;
+                    const scoreColor = isSerious ? "text-red-300" : "text-yellow-200";
+                    const badgeIcon = isSerious ? "🔥" : "⚠️";
 
-                    const scoreColor =
-                        isSerious
-                            ? "text-red-300"
-                            : "text-yellow-200";
-
-                    const badgeIcon =
-                        isSerious
-                            ? "🔥"
-                            : "⚠️";
+                    // 국가 한글/영문 딕셔너리 매핑 안전장치
+                    const countryDisplayName = countryMap[item.name] || item.name;
 
                     return `
                         <div class="flex items-center justify-between border-b border-blue-500/30 pb-3 last:border-0">
@@ -862,7 +887,7 @@
                                 </span>
 
                                 <span class="font-bold text-sm text-white flex items-center gap-1">
-                                    ${countryMap[item.name] || item.name}
+                                    ${countryDisplayName}
                                     <span class="text-[10px]">${badgeIcon}</span>
                                 </span>
                             </div>
@@ -918,12 +943,29 @@
             searchQuery = '';
             startDate = null;
             endDate = null;
-            selectedCountry = null;
 
             // UI 요소들도 초기값으로 변경
             document.getElementById('search-input').value = '';
             document.getElementById('date-display').innerText = "날짜를 선택해주세요";
 
+            document.getElementById('country-name').innerText = '';
+            document.getElementById('country-score').innerText = '';
+
+            if (selectedCountry) {
+                myChart.dispatchAction({
+                    type: 'downplay',
+                    seriesIndex: 0,
+                    name: selectedCountry
+                });
+                myChart.dispatchAction({
+                    type: 'unselect',
+                    seriesIndex: 0,
+                    name: selectedCountry
+                });
+            }
+
+            infoBox.classList.add('hidden');
+            selectedCountry = null;
             applyFilters(); // 다시 전체 렌더링
         }
 
@@ -931,19 +973,12 @@
         // 국가 선택 핸들러
         function selectCountry(name, score) {
             selectedCountry = name;
-            const infoBox = document.getElementById('selected-country-info');
             document.getElementById('country-name').innerText = countryMap[name] || name;
             document.getElementById('country-score').innerText = `${score}점`;
             infoBox.classList.remove('hidden');
             applyFilters();
         }
 
-        function resetCountryFilter() {
-            selectedCountry = null;
-            document.getElementById('selected-country-info').classList.add('hidden');
-            myChart.dispatchAction({ type: 'unSelect', seriesIndex: 0 });
-            applyFilters();
-        }
 
         function handleSearch() {
             searchQuery = document.getElementById('search-input').value;
@@ -967,7 +1002,7 @@
             // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
             container.innerHTML = currencies.map(c => `
                 <div class="flex items-center justify-between">
-                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p><p class="text-lg font-bold">${c.val.toLocaleString()}원</p></div>
+                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p><p class="text-lg font-bold">${c.val.toLocaleString('ko-KR', {minimumFractionDigits: 1,maximumFractionDigits: 1})}원</p></div>
                     <div class="text-blue-500"><i data-lucide="trending-up" class="w-4 h-4"></i></div>
                 </div>
             `).join('');
@@ -1286,7 +1321,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
+            const currentPath = window.location.pathname.split("/").pop() || "main.html";
             const navItems = document.querySelectorAll('.nav-item');
 
             navItems.forEach(item => {
@@ -1332,7 +1367,7 @@
             }
         });
 
-        async function country_map() {
+        async function loadCountryMap() {
             let {data} = await axios.get("/main/countryMap");
             console.log(data.res);
 
@@ -1345,7 +1380,7 @@
             });
 
             console.log(countryMap);
-            
+
         }
 
         // 히트맵 갱신 시간 함수 - 매일 자정 / 정오 시간으로 갱신
@@ -1354,13 +1389,13 @@
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const date = String(now.getDate()).padStart(2, '0');
-            
+
             // 현재 시간이 12시 이전이면 '00:00', 12시 이후면 '12:00'로 표기
             const hours = now.getHours() >= 12 ? '12:00' : '00:00';
-            
+
             // YYYY-MM-DD HH:mm 갱신 형태로 포맷팅
             const formattedTime = `${year}-${month}-${date} ${hours} 갱신`;
-            
+
             // DOM에 반영
             const timeTag = document.getElementById('update-time-tag');
             if (timeTag) {
@@ -1371,7 +1406,7 @@
         function scheduleNextUpdate() {
             const now = new Date();
             const nextUpdate = new Date();
-            
+
             // 다음 정오(12시) 또는 자정(24시=다음날 00시) 계산
             if (now.getHours() < 12) {
                 // 현재 오전이면 -> 오늘 정오(12시)가 다음 갱신 타겟
@@ -1381,217 +1416,17 @@
                 nextUpdate.setDate(now.getDate() + 1);
                 nextUpdate.setHours(0, 0, 0, 0);
             }
-            
+
             // 다음 갱신 시점까지 남은 밀리초(ms) 계산
             const timeUntilNextUpdate = nextUpdate - now;
-            
+
             // 첫 번째 타이머: 정확히 자정/정오가 되는 순간 실행
             setTimeout(() => {
                 updateRefreshTime(); // 텍스트 갱신
-                
+
                 // 두 번째 타이머: 그 이후부터는 정확히 12시간(43,200,000ms)마다 반복 실행
                 setInterval(updateRefreshTime, 12 * 60 * 60 * 1000);
             }, timeUntilNextUpdate);
-        }
-
-        // 1. 알림 UI 및 배지 수량 실시간 갱신
-        async function updateNotifUI() {
-            const badge = document.getElementById('notifBadge');
-            const listContainer = document.getElementById('notifList');
-            const countText = document.getElementById('notifCountText');
-
-            // 비회원 및 게스트 유저 예외 방어 처리
-            if (!savedUserId || savedUserId === "null" || savedUserId === "undefined" || savedUserId === "guest") {
-                if (badge) badge.style.display = 'none';
-                if (countText) countText.innerText = '0개의 새 알림';
-                if (listContainer) {
-                    listContainer.innerHTML = `
-                        <div style="padding: 40px; text-align: center;">
-                            <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                        </div>`;
-                }
-                return;
-            }
-
-            try {
-                // 백엔드 통합 알림 API 호출
-                const { data } = await axios.get(`/noti/signal?id=${savedUserId}`);
-                noti = data.noti || [];
-
-                // 드롭다운 내부에 알림 카드 카드 출력
-                renderList(listContainer, noti);
-
-                // 안 읽은 알림(alarm_view = 0)만 카운팅하여 빨간색 배지 노출
-                const unreads = noti.filter(n => !n.is_read);
-                if (countText) countText.innerText = `${unreads.length}개의 새 알림`;
-
-                if (unreads.length > 0) {
-                    if (badge) {
-                        badge.innerText = unreads.length;
-                        badge.style.display = 'flex';
-                    }
-                } else {
-                    if (badge) badge.style.display = 'none';
-                }
-            } catch (error) {
-                console.error("알림 UI 로드 실패:", error);
-            }
-        }
-
-        // 2. 알림 드롭다운 카드 내부 디자인 렌더링
-        function renderList(container, notiList) {
-            if (!container) return;
-
-            if (notiList.length === 0) {
-                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
-                container.style.maxHeight = 'none';
-                container.style.overflowY = 'visible';
-                return;
-            }
-
-            // 알림이 5개 이상 쌓일 때만 내부 스크롤바 활성화하여 레이아웃 붕괴 방지
-            if (notiList.length >= 5) {
-                container.style.maxHeight = '420px';
-                container.style.overflowY = 'auto';
-            } else {
-                container.style.maxHeight = 'none';
-                container.style.overflowY = 'visible';
-            }
-
-            container.innerHTML = notiList.map(n => {
-                let icon = "bell";
-                let iconColor = "text-gray-400";
-                let bgColor = "bg-gray-100";
-
-                // 위험 수위가 '심각'인 비상용 시그널 처리
-                if (n.type === 'emergency') {
-                    icon = "alert-triangle";
-                    iconColor = "text-red-500";
-                    bgColor = "bg-red-50";
-                }
-
-                return `
-                    <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.signal_no})">
-                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
-                            <i data-lucide="${icon}" class="w-5 h-5"></i>
-                        </div>
-
-                        <div class="flex-1 pr-6">
-                            <div class="text-sm font-bold text-gray-900 mb-0.5 line-clamp-1">${n.title}</div>
-                            <div class="text-xs text-gray-600 line-clamp-2 leading-relaxed">${n.message}</div>
-                            <div class="flex items-center gap-2 mt-1.5">
-                                <span class="text-[10px] text-gray-400">${timeAgo(n.time)}</span>
-                                ${n.is_read ? '' : '<span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>'}
-                            </div>
-                        </div>
-
-                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
-                            <i data-lucide="x" class="w-4 h-4"></i>
-                        </button>
-                    </div>
-                `;
-            }).join('') + `
-                <div class="p-3 text-center bg-gray-50 rounded-b-xl border-t">
-                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline transition-all">
-                        모두 읽음으로 표시
-                    </button>
-                </div>`;
-
-            if (window.lucide) lucide.createIcons();
-        }
-
-        // 3. 특정 알림 클릭 시 읽음 업데이트 및 조준경 타겟 페이지 이동
-        // 알림 클릭 시 읽음 처리 후 목적지 카드로 고유 해시(#)를 들고 이동하는 함수
-        async function readItem(id) {
-            try {
-                // 1. 서버에 읽음 상태 반영 (POST 규격)
-                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
-
-                const targetUrl = `signal_log.html#signal-${id}`;
-
-                // 2. 만약 이미 시그널로그 페이지에 머물고 있다면 화면 갱신 없이 바로 스크롤 구동
-                if (window.location.pathname.endsWith('signal_log.html')) {
-                    window.location.hash = `signal-${id}`;
-                    executeScrollToCard(); // 아래 2번에서 만들 함수 호출
-                    updateNotifUI();       // 알림창 개수 갱신
-                } else {
-                    // 3. 다른 페이지(main, custom)에 있다면 해시를 품고 시그널 로그 페이지로 강제 이동
-                    window.location.href = targetUrl;
-                }
-            } catch (err) {
-                console.error("알림 확인 통신 오류:", err);
-            }
-        }
-
-        // [세 페이지 공통] 타입 미스매치 버그가 완벽 해결된 실시간 삭제 카운터 함수
-        async function deleteItem(e, id) {
-            // 1. 부모 박스 클릭 이벤트 전파 차단
-            e.stopPropagation();
-
-            // 2. 화면에서 카드 레이아웃 즉시 파기
-            const targetItem = e.target.closest('.notif-item');
-            if (targetItem) {
-                targetItem.remove();
-            }
-
-            // 🎯 3. [핵심 패치] String()을 감싸 문자열이든 숫자든 강제로 일치시켜 배열에서 확실히 빼버립니다.
-            noti = noti.filter(n => String(n.id) !== String(id) && String(n.signal_no) !== String(id));
-
-            // 4. 안 읽은 알림 수 재계산
-            const unreads = noti.filter(n => !n.is_read);
-
-            // 5. 알림창 드롭다운 헤더 텍스트 실시간 동기화 ("X개의 새 알림")
-            const countText = document.getElementById('notifCountText');
-            if (countText) {
-                countText.innerText = `${unreads.length}개의 새 알림`;
-            }
-
-            // 6. 종 모양 배지 숫자 실시간 동기화
-            const badge = document.getElementById('notifBadge');
-            if (badge) {
-                if (unreads.length > 0) {
-                    badge.innerText = unreads.length;
-                    badge.style.display = 'flex';
-                } else {
-                    badge.style.display = 'none'; // 0개가 되면 빨간 배지 숨김
-                }
-            }
-
-            // 7. 알림판에 더 이상 남은 기사가 없을 때 안내 텍스트 출력
-            const listContainer = document.getElementById('notifList');
-            if (listContainer) {
-                const remainingItems = listContainer.querySelectorAll('.notif-item');
-                if (remainingItems.length === 0) {
-                    listContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
-                    listContainer.style.maxHeight = 'none';
-                    listContainer.style.overflowY = 'visible';
-                }
-            }
-
-            // 8. 시그널 로그 페이지용 실시간 사이드바 연동 방어선
-            if (typeof renderSignalLogs === 'function') {
-                renderSignalLogs();
-            }
-
-            // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
-            try {
-                await axios.post("/noti/delete", { "id": id, "user_id": savedUserId });
-            } catch (err) {
-                console.error("알림 숨김 처리 서버 통신 에러:", err);
-            }
-        }
-
-        // 5. 하단 모두 읽음 버튼 클릭 시: 비동기 POST 일괄 확인 완료 처리
-        async function allRead() {
-            try {
-                let { data } = await axios.post("/noti/read_all", { "user_id": savedUserId });
-                if (data.res) {
-                    updateNotifUI();
-                }
-            } catch (err) {
-                console.error("전체 알림 읽음 처리 통신 오류:", err);
-            }
         }
 
     </script>
