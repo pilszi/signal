@@ -620,12 +620,12 @@ def country(db: Session = Depends(get_db)):
             JOIN country t3 ON t3.country_no = t1.country_no
             WHERE 
                 t2.signal_time >= CASE 
-                    WHEN HOUR(NOW()) >= 24 THEN CURDATE()                       -- 오늘 오후라면 오늘 자정부터
-                    ELSE CURDATE() - INTERVAL 24 HOUR                           -- 오늘 오전이라면 어제 정오부터
+                    WHEN HOUR(NOW()) >= 12 THEN CURDATE()                       -- 오늘 오후라면 오늘 자정부터
+                    ELSE CURDATE() - INTERVAL 12 HOUR                           -- 오늘 오전이라면 어제 정오부터
                 END
                 AND 
                 t2.signal_time < CASE 
-                    WHEN HOUR(NOW()) >= 24 THEN CURDATE() + INTERVAL 24 HOUR    -- 오늘 오후라면 오늘 정오까지
+                    WHEN HOUR(NOW()) >= 12 THEN CURDATE() + INTERVAL 12 HOUR    -- 오늘 오후라면 오늘 정오까지
                     ELSE CURDATE()                                              -- 오늘 오전이라면 오늘 자정까지
                 END
             GROUP BY t1.country_no, t3.country_en_name

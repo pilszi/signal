@@ -26,14 +26,15 @@ def get_cny_rate_with_rotation():
             data = response.json()
             if data.get('result') == 'success':
                 rate = data['conversion_rate']
-                # print(f"✅ [API #{cny_key_index + 1}] 위안화: {rate}")
+                logger.info(f"✅ [위안화 API] 키 인덱스 {cny_key_index} 사용 | 결과: {rate}")
                 return rate
-            elif data.get('result') == 'error':
-                cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
+            else:
+                logger.warning(f"⚠️ [위안화 API] 실패: {data.get('error-type')}")
                 continue
         except Exception as e:
-            cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
-            continue
+            logger.error(f"❌ [위안화 API] 통신 에러: {e}")
+        cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
+
     return None
 
 # 환율/원자재 라벨링 1: 지표 실시간 수치 가져와서 db에 저장 -> 그 다음 main
@@ -62,20 +63,32 @@ def collect_market_data_job():
                     price = None
 
                     if t == "CNY=X":
-                        price = get_cny_rate_with_rotation()
+                        # 1. USD/KRW (달러당 원화) 가져오기
+                        data_krw = yf.download("USDKRW=X", period="1d", interval="1m", progress=False)
+                        # 2. USD/CNY (달러당 위안화) 가져오기
+                        data_cny = yf.download("USDCNY=X", period="1d", interval="1m", progress=False)
 
-                        if price is None:
-                            data = yf.download(
-                                "CNYKRW=X",
-                                period="1d",
-                                interval="1m",
-                                progress=False
-                            )
+                        if not data_krw.empty and not data_cny.empty:
+                            # iloc[-1]만으로는 Series가 나올 수 있으므로, .item()을 사용하거나
+                            # 값을 확실하게 추출합니다.
+                            try:
+                                # .values[0]을 쓰면 확실하게 숫자만 뽑아낼 수 있습니다.
+                                usd_krw = float(data_krw['Close'].iloc[-1].values[0])
+                                usd_cny = float(data_cny['Close'].iloc[-1].values[0])
 
-                            if not data.empty:
-                                price = data['Close'].iloc[-1]
+                                price = usd_krw / usd_cny
+                                logger.info(f"💾 [직접 계산] 위안화 환율: {price:.4f}")
+                            except Exception as inner_e:
+                                # 혹시 iloc[-1]이 이미 숫자라면 .values[0]에서 에러가 날 수 있으므로 예외 처리
+                                usd_krw = float(data_krw['Close'].iloc[-1])
+                                usd_cny = float(data_cny['Close'].iloc[-1])
+                                price = usd_krw / usd_cny
+                                logger.info(f"💾 [직접 계산 - 백업방식] 위안화 환율: {price:.4f}")
+                        else:
+                            logger.info(f"  ⚠️ [데이터없음] 위안화 계산을 위한 데이터 부족")
 
                     else:
+                        # 나머지 지표들은 기존 로직대로 yfinance 다운로드
                         data = yf.download(
                             t,
                             period="1d",

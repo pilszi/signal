@@ -299,8 +299,9 @@
 
                         <!-- 환율 카드 -->
                         <div class="bg-white border rounded-xl p-6 shadow-sm">
-                            <h3 class="mb-6 font-bold text-gray-800 flex items-center gap-2">
-                                <i data-lucide="refresh-cw" class="w-4 h-4 text-blue-500"></i> 실시간 환율
+                            <h3 class="mb-6 font-bold text-gray-800 flex items-center gap-3">
+                                <i data-lucide="landmark" class="w-6 h-6 text-blue-500"></i>
+                                <span class="text-lg">실시간 환율</span>
                             </h3>
                             <div id="exchange-rates" class="space-y-5">
                                 <!-- 데이터 연동 영역 -->
@@ -976,6 +977,8 @@
         }
         // 환율/원자재 라벨링 4[위에 함수에서 데이터 가져와서 환율 가격 보여줌]
         // 5. 환율 및 뉴스 렌더링
+        let prevRates = JSON.parse(sessionStorage.getItem('prevRates')) || {};
+
         function renderExchangeRates(rates) {
             const container = document.getElementById('exchange-rates');
             if (!rates) return;
@@ -990,12 +993,36 @@
 
             // 2. 원자재 데이터 구성 (main.py에서 보낸 raw_material_score 참고)
             // 이 데이터는 allSignals[0].final_total_score.raw_material_score에 있습니다.
-            container.innerHTML = currencies.map(c => `
-                <div class="flex items-center justify-between">
-                    <div><p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p><p class="text-lg font-bold">${c.val.toLocaleString('ko-KR', {minimumFractionDigits: 1,maximumFractionDigits: 1})}원</p></div>
-                    <div class="text-blue-500"><i data-lucide="trending-up" class="w-4 h-4"></i></div>
-                </div>
-            `).join('');
+            container.innerHTML = currencies.map(c => {
+                // 1. 이전 값과 비교 (저장된 값이 없으면 현재 값으로 초기화)
+                const prevVal = prevRates[c.key]; // 💡 1. 이전 값이 있는지 확인
+                const isUp = prevVal && c.val > prevVal;
+                const isDown = prevVal && c.val < prevVal;
+
+
+                // 2. 아이콘과 색상 결정
+                let icon = isUp ? "trending-up" : (isDown ? "trending-down" : "minus");
+                let color = isUp ? "text-red-500" : (isDown ? "text-blue-500" : "text-gray-400");
+
+
+
+                return `
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-[10px] font-bold text-gray-400 uppercase">${c.key}/KRW</p>
+                            <p class="text-lg font-bold">${c.val.toLocaleString('ko-KR', {minimumFractionDigits: 1, maximumFractionDigits: 1})}원</p>
+                        </div>
+                        <div class="${color}">
+                            <i data-lucide="${icon}" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // 3. 현재 값을 prevRates에 업데이트 후 저장
+            currencies.forEach(c => prevRates[c.key] = c.val);
+            sessionStorage.setItem('prevRates', JSON.stringify(prevRates));
+
             lucide.createIcons();
         }
 
