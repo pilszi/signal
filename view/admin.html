@@ -254,8 +254,11 @@
                                        </div>
 
                                         <div>
-                                           <div class="text-gray-500">해당 회원번호</div>
-                                           <div id="user_no" class="font-medium"></div>
+                                            <div class="text-gray-500">해당 회원번호</div>
+                                            <div>
+                                                    <span id="user_no" class="font-medium"></span>
+                                                    <button id="more_btn" style="display: none; margin-left: 5px; cursor: pointer; color: blue;">[더보기]</button>
+                                            </div>
                                        </div>
                                         
                                         <div>
@@ -447,7 +450,7 @@
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a> 
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a> 
                                 반갑습니다 
                         </div>
                         `
@@ -788,6 +791,12 @@
                 log.before_data,
                 log.after_data
             );
+            // 1. JSON 문자열을 객체로 변환
+            const befObj = JSON.parse(diff.before); 
+            const aftObj = JSON.parse(diff.after);
+
+            // 2. 객체를 [Key, Value] 배열로 쪼갠 뒤, 문장으로 합치기
+            document.getElementById("detail_before").textContent = 
             
             document.getElementById("detail_id").textContent =
                 log.target_id || "-";
@@ -801,11 +810,15 @@
             document.getElementById("detail_created_at").textContent =
                 log.created_at || "-";   
 
-            document.getElementById("detail_before").textContent =
-                formatJson(diff.before);
-
+            document.getElementById("detail_before").textContent = 
+                Object.entries(befObj).map(([key, value]) => 
+                    `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
+                    ).join("\n");            
+       
             document.getElementById("detail_after").textContent =
-                formatJson(diff.after);
+                Object.entries(aftObj).map(([key, value]) => 
+                    `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
+                    ).join("\n");   
 
             document
                 .getElementById("logDetailModal")
@@ -874,12 +887,27 @@
         // signal 알림 상세보기 함수
         function signalDetail(signal) {
             const log = warnningLog.find(x => x.signal_no === signal)
-            
+            const userNoEl = document.getElementById("user_no");
+            const moreBtnEl = document.getElementById("more_btn");
+
             document.getElementById("signal_id").textContent =
                 log.signal_no || "-";
 
-            document.getElementById("user_no").innerHTML =
-                log.member_list.split(",").join("<br>");
+            if (log.member_list > 5) {
+                userNoEl.innerHTML = memberList.slice(0, 5).join(", ");
+                moreBtnEl.style.display = "inline-block";
+                // 더보기 버튼 클릭 이벤트 리스너 등록
+                moreBtnEl.onclick = function() {
+                    // 전체 리스트를 화면에 다 보여주기
+                    userNoEl.textContent = memberList.join(", ");
+                    // 전부 다 보여줬으니 더보기 버튼은 다시 숨기기
+                    moreBtnEl.style.display = "none";
+                };
+            }else {
+                userNoEl.innerHTML =
+                    log.member_list.split(",").join(", ");
+                    moreBtnEl.style.display = "none";
+            }
 
             document.getElementById("signal_level").textContent =
                 log.risk_level || "-";

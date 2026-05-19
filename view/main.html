@@ -466,6 +466,7 @@
             axios.get("/session_out");
             updateNavbar();
             await fetchMainData();
+            
             renderExchangeRates();
             initCalendar();
             lucide.createIcons();
@@ -473,6 +474,7 @@
             renderNews();
             renderPagination();
             updateStation();
+
             country_map();
             updateRefreshTime();
             scheduleNextUpdate();
@@ -515,13 +517,6 @@
                     renderExchangeRates(indicatorRes.data.data);
                 }
 
-                // 4. UI 갱신
-                if (date) currentPage = 1;
-                renderNews();
-                renderPagination();
-                updateStation();
-                updateNotifUI();
-
             } catch (error) {
                 console.error("데이터 통합 로드 실패:", error);
             }
@@ -540,7 +535,7 @@
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
                                 반갑습니다
                         </div>
                         `
@@ -862,12 +857,12 @@
 
                 list.innerHTML = sorted.map((item, index) => {
 
-                    const displayScore = 100-Math.round(Math.abs((item.risk_score || 0) * 100));
+                    // const displayScore = 100-Math.round(Math.abs((item.total_score || 0) * 100));
 
                     const isSerious =
                         item.level === "심각" ||
                         item.level === "Serious" ||
-                        displayScore >= 300;
+                        item.total_score >= 300;
 
                     const scoreColor =
                         isSerious
@@ -894,7 +889,7 @@
 
                             <div class="text-right">
                                 <span class="block font-bold text-lg ${scoreColor}">
-                                    ${displayScore}점
+                                    ${item.total_score}점
                                 </span>
 
                                 <span class="text-[8px] uppercase opacity-70 text-white font-medium">
@@ -1369,7 +1364,7 @@
 
         async function country_map() {
             let {data} = await axios.get("/main/countryMap");
-            console.log(data.res);
+            // console.log(data.res);
 
             data.res.forEach(country => {
                 // 한글 → 영문
@@ -1379,7 +1374,7 @@
                 countryMap[country.country_en_name] = country.country_kr_name;
             });
 
-            console.log(countryMap);
+            // console.log(countryMap);
             
         }
 

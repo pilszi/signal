@@ -51,10 +51,7 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-# es = Elasticsearch(["http://100.123.232.79:9200"])
-es = Elasticsearch(['http://localhost:9200'])
-
-
+es = Elasticsearch(["http://100.123.232.79:9200"])
 
 # ==========================================
 # 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
@@ -368,6 +365,7 @@ def regist_request_code(info: Dict[str, str], req: Request):
         keywords_str=None,
         title="회원가입 이메일 인증번호"
     )
+    logger.info(f'메일 발송 성공 여부 ={success}')
     return {"res": success, "msg": "인증코드가 발송되었습니다." if success else "메일 발송에 실패했습니다."}
 
 
@@ -390,44 +388,72 @@ def regist_verify_code(info: Dict[str, str], req: Request):
 @app.post('/login')
 def login(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
     """로그인 처리 및 로그 기록"""
-    sql = sqlalchemy.text("SELECT member_no, pw, user_name FROM member_info WHERE id = :id")
+    try:
+        # 1. 회원 정보 조회
+        sql = sqlalchemy.text("SELECT member_no, pw, user_name FROM member_info WHERE id = :id")
+        result = db.execute(sql, {"id": info["id"]}).mappings().fetchone()
 
-    result = db.execute(sql, {"id": info["id"]}).mappings().fetchone()
-    if result and verify_password(info["input_pw"], result.pw):
+        # 비밀번호 검증 실패 시 예외 처리
+        if not result or not verify_password(info["input_pw"], result.pw):
+            return {"msg": False}
+
         client_ip = req.client.host
-        log_sql = sqlalchemy.text(
-            "INSERT INTO member_login_log (member_no, login_ip, status) VALUES(:member_no, :login_ip, 1)")
+
+        # 2. 기존 미종료 세션 정리 (UPDATE)
+        update_sql = sqlalchemy.text("""
+            UPDATE member_login_log 
+            SET logout_time = NOW(), status = 0 
+            WHERE member_no = :member_no AND status = 1
+        """)
+        db.execute(update_sql, {"member_no": result["member_no"]})
+
+        # 3. 새로운 로그인 로그 기록 (INSERT)
+        log_sql = sqlalchemy.text("""
+            INSERT INTO member_login_log (member_no, login_ip, status) 
+            VALUES (:member_no, :login_ip, 1)
+        """)
         db.execute(log_sql, {
             "member_no": result.member_no,
             "login_ip": client_ip
         })
 
-        # 세션 저장
+        # 4. 세션 저장 및 커밋
         req.session['login_id'] = info["id"]
         req.session['user_name'] = result.user_name
         req.session["member_no"] = result.member_no
+
         db.commit()
         return {"msg": True}
-    else:
+
+    except Exception as e:
+        db.rollback()  # 에러 발생 시 안전하게 롤백
+        logger.error(f'로그인 처리 오류 : {e}')  # 정보성은 error 레벨 권장
         return {"msg": False}
+
+
 
 
 @app.get("/logout")
 def logout(req: Request, db: Session = Depends(get_db)):
     """로그아웃 및 로그 엔드타임 갱신"""
     member_no = req.session.get("member_no")
+    logger.info(f'로그아웃 계정 = {member_no}')
     if member_no:
-        db.execute(
-            sqlalchemy.text("""
-                    UPDATE member_login_log
-                    SET logout_time = NOW(),
-                        status = 0
-                    WHERE member_no = :member_no
-                    AND status = 1
-                """),
-            {"member_no": member_no}
-        )
-
+        try:
+            db.execute(
+                sqlalchemy.text("""
+                        UPDATE member_login_log
+                        SET logout_time = NOW(),
+                            status = 0
+                        WHERE member_no = :member_no
+                        AND status = 1
+                    """),
+                {"member_no": member_no}
+            )
+            db.commit()
+        except Exception as e:
+            logger.info(f'로그아웃 처리 오류 : {e}')
+            db.rollback()
     req.session.clear()
     return
 
@@ -436,12 +462,16 @@ def logout(req: Request, db: Session = Depends(get_db)):
 def session_out(db: Session = Depends(get_db)):
     count = 0
 
-    logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
-    result = db.execute(logout_sql)
-    count = result.rowcount
-
-    logger.info(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
+    try:
+        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
+                                    WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
+        result = db.execute(logout_sql)
+        db.commit()
+        count = result.rowcount
+        logger.info(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
+    except Exception as e:
+        logger.info(f'세션만료 오류 : {e}')
+        db.rollback()
     return
 
 @app.get("/profile")
@@ -479,11 +509,21 @@ def update_profile(info: Dict[str, Any], db: Session = Depends(get_db)):
         new_pw = hash_password(info["pw"])
         sql = sqlalchemy.text(
             "UPDATE member_info SET email=:email, phone_number=:phone_number, pw=:pw WHERE id=:id")
-        db.execute(sql,
+        try:
+            db.execute(sql,
                    {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"], "pw": new_pw})
+            db.commit()
+        except Exception as e:
+            logger.info(f'회원 정보 수정 오류 : {e}')
+            db.rollback()
     else:
         sql = sqlalchemy.text("UPDATE member_info SET email=:email, phone_number=:phone_number WHERE id=:id")
-        db.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
+        try:
+            db.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
+            db.commit()
+        except Exception as e:
+            logger.info(f'회원 정보 수정 오류 : {e}')
+            db.rollback()
 
     # 키워드 갱신
     bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": member_no}).mappings().fetchall()
@@ -700,7 +740,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
     # 공백 제거 및 중복 제거
     clean_keywords = list(set(k.strip() for k in user_keywords if k.strip()))
 
-    # 3. Elasticsearch 쿼리 구성 (💡 term 쿼리를 대소문자/공백 방어형 match 쿼리로 업그레이드)
+    # 3. Elasticsearch 쿼리 구성
     body = {
         "query": {
             "bool": {
@@ -708,8 +748,8 @@ def custom_news(id: str, db: Session = Depends(get_db)):
                     {
                         "bool": {
                             "should": [
-                                # match 쿼리로 바꾸어도 _name 속성을 통해 matched_queries 추출이 가능합니다!
-                                {"match": {"keywords": {"query": kw, "_name": kw}}}
+                                # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
+                                {"term": {"keywords": {"value": kw, "_name": kw}}}
                                 for kw in clean_keywords
                             ],
                             "minimum_should_match": 1
@@ -808,7 +848,7 @@ def signal_log(id: str, db: Session = Depends(get_db)):
             "signal_time": r["signal_time"].strftime("%Y-%m-%d %H:%M") if r["signal_time"] else "시간 미상",
             "prediction": r["prediction"],
             "prediction_reason": r["prediction_reason"],
-            "url": r["url"] or "#",
+            "url": r["news_url"] or "#",
             "is_read": r["alarm_view"],
             "match_keyword": kw_list
         })
@@ -877,22 +917,6 @@ def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
     return {"res": True}
 
 
-# X 버튼 클릭 시: 알림판에서만 제외 (DB 데이터는 보존)
-@app.post("/noti/delete")
-def noti_delete(info: Dict[str, Any], db: Session = Depends(get_db)):
-    """ 사용자가 X 버튼을 눌러 알림판에서 숨김 처리 (Hard Delete ➔ Soft Hide) """
-
-    # alarm_view 상태만 1로 바꿉니다.
-    sql = sqlalchemy.text("""
-        UPDATE alarm_log t1 
-        JOIN member_info t2 ON t1.member_no = t2.member_no
-        SET t1.alarm_view = 1 
-        WHERE t1.signal_no = :signal_no AND t2.id = :id
-    """)
-    res = db.execute(sql, {"signal_no": info.get("id"), "id": info.get("user_id")})
-    logger.info(f"👀 알림 숨김(읽음) 처리 완료 = {res.rowcount}개")
-    db.commit()
-    return {"res": True}
 
 
 # 모든 알림토글 읽음 요청
@@ -1014,67 +1038,16 @@ def country_map(db: Session = Depends(get_db)):
 # ===============================
 #        find ID / PW
 # ===============================
-# 아이디 찾기 1단계: 인증코드 요청
-@app.post("/find_id/request")
-def find_id_request(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
-    name = info.get("name")
-    email = info.get("email")
+# 아이디 찾기
+@app.post("/find_id")
+def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
+    logger.info(f'id 찾기 info = {info}')
 
-    # 가입된 유저가 있는지 먼저 확인
-    sql = sqlalchemy.text("SELECT 1 FROM member_info WHERE user_name = :name AND email = :email")
-    user_exists = db.execute(sql, {"name": name, "email": email}).scalar()
-
-    if not user_exists:
-        return {"res": False, "msg": "일치하는 회원 정보가 없습니다."}
-
-    # 정보가 일치하여 이메일로 인증번호를 쏘기 직전에 요청 기록 적재
-    save_admin_log(
-        db=db,
-        log_type='find',
-        title='아이디 찾기 요청',
-        content=f'아이디 찾기 인증코드 요청 : {name}'
-    )
-    # 6자리 인증코드 생성 및 세션 저장
-    auth_code = str(random.randint(100000, 999999))
-    req.session["find_id_auth"] = {"email": email, "name": name, "code": auth_code}
-
-    # 만능 알림 함수 호출 (AUTH 모드)
-    notifier.send_emergency_email(
-        to_email=email,
-        ai_report={'prediction': auth_code},
-        news_url=None,
-        risk_level="AUTH",
-        keywords_str=None,
-        title="아이디 찾기 인증번호"
-    )
-    return {"res": True}
-
-
-# 아이디 찾기 2단계: 코드 검증 및 아이디 반환
-@app.post("/find_id/verify")
-def find_id_verify(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
-    input_code = info.get("code")
-    session_data = req.session.get("find_id_auth")
-
-    if not session_data or session_data["code"] != input_code:
-        return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
-
-    # 인증 성공 시 아이디 조회 후 반환
-    sql = sqlalchemy.text("SELECT id, create_at FROM member_info WHERE user_name = :name AND email = :email")
-    res = db.execute(sql, {"name": session_data["name"], "email": session_data["email"]}).mappings().fetchall()
-    # 🎯 [버그 수정 완료] info["name"] 대신 안전한 session_data["name"]을 사용하여 최종 성공 로그 적재
-    save_admin_log(
-        db=db,
-        log_type='find',
-        title='아이디 찾기 완료',
-        content=f'아이디 찾기 최종 성공 : {session_data["name"]}'
-    )
-    # 사용 완료된 세션 파기
-    req.session.pop("find_id_auth", None)
-
-    # 데이터 가공하여 전달
-    result_list = [{"id": r["id"], "create_at": r["create_at"].strftime("%Y-%m-%d")} for r in res]
-    return {"res": True, "data": result_list}
+    sql = sqlalchemy.text("""SELECT id, create_at FROM member_info WHERE user_name = :name AND email = :email""")
+    res = db.execute(sql, {"name": info["name"], "email": info["email"]}).mappings().fetchall()
+    # logger.info(f'id 찾기 결과 = {res}')
+    save_admin_log(db=db, log_type='find', title='아이디 요청', content=f'아이디 찾기 요청 : {info["name"]}')
+    return {"res": res}
 
 
 # 비밀번호 찾기 1단계: 인증코드 요청
@@ -1148,23 +1121,25 @@ async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends
     # 세션 검증 보안 장치 (인증코드, 코드검증 단계를 정상적으로 거쳤는지 확인)
     if not session_data or session_data["userId"] != user_id:
         return {"res": 0, "msg": "잘못된 접근입니다."}
+    try:
+        sql = sqlalchemy.text("UPDATE member_info SET pw = :pw WHERE id = :id")
+        res = db.execute(sql, {"id": user_id, "pw": new_pw})
+        if res.rowcount > 0:
+            # 단순히 요청한 것뿐만 아니라, 진짜로 '비밀번호 변경이 최종 성공 완료'된 시점도 기록
+            save_admin_log(
+                db=db,
+                log_type='find',
+                title='비밀번호 변경 완료',
+                content=f'비밀번호 재설정 최종 성공 : {user_id}',
+                target_id=user_id
+            )
 
-    sql = sqlalchemy.text("UPDATE member_info SET pw = :pw WHERE id = :id")
-    res = db.execute(sql, {"id": user_id, "pw": new_pw})
-
-    if res.rowcount > 0:
-        # 단순히 요청한 것뿐만 아니라, 진짜로 '비밀번호 변경이 최종 성공 완료'된 시점도 기록
-        save_admin_log(
-            db=db,
-            log_type='find',
-            title='비밀번호 변경 완료',
-            content=f'비밀번호 재설정 최종 성공 : {user_id}',
-            target_id=user_id
-        )
-
-    # 재설정 완료 시 세션 파기
-    req.session.pop("find_pw_auth", None)
-    db.commit()
+        # 재설정 완료 시 세션 파기
+        req.session.pop("find_pw_auth", None)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.info(f'비밀번호 변경 오류 : {e}')
     return {"res": res.rowcount}
 
 
@@ -1240,8 +1215,8 @@ def login_log(id:str, db: Session = Depends(get_db)):
 
 @app.get("/admin/admin_log")
 def admin_log(db: Session = Depends(get_db)):
-
-    sql = sqlalchemy.text("""SELECT * FROM admin_logs WHERE created_at >= NOW() - INTERVAL 30 DAY ORDER BY created_at DESC""")
+    """ 최근 7일간의 신규 회원 생성 및 탈퇴, 정보 수정 내역 알림 로그 """
+    sql = sqlalchemy.text("""SELECT * FROM admin_logs WHERE created_at >= NOW() - INTERVAL 7 DAY ORDER BY created_at DESC""")
     res = db.execute(sql).mappings().fetchall()
     logger.info(res)
     return {"res": res}
@@ -1249,8 +1224,8 @@ def admin_log(db: Session = Depends(get_db)):
 
 @app.get("/admin/alarm_log")
 def alarm_log(db: Session = Depends(get_db)):
-
-    sql = sqlalchemy.text("""SELECT t1.signal_no, t1.risk_level, t1.prediction, t1.news_url,
+    """ 최근 1시간 이내에 3단계(심각) 분류 알림 로그 """
+    sql = sqlalchemy.text("""SELECT t1.signal_no, t1.risk_level, t1.prediction, t1.url,
                                 MAX(t2.alarm_time) AS alarm_time,
                                 GROUP_CONCAT(t2.member_no SEPARATOR ',') AS member_list
                             FROM signal_message t1
@@ -1310,10 +1285,11 @@ def save_admin_log(
             ),
             "target_id": target_id,
         })
-
+        db.commit()
         if res.rowcount and res.rowcount > 0:
             logger.info(f"{target_id} 의 {log_type} admin_log 저장 완료")
     except Exception as e:
+        db.rollback()
         logger.info(f'{e} 발생으로 admin_log 저장 실패')
 
 

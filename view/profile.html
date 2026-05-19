@@ -393,7 +393,7 @@
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
                                 반갑습니다
                         </div>
                         `
@@ -786,6 +786,7 @@
                 showModal("최소 하나 이상의 키워드를 입력해주세요.", "error");
                 return;
             }
+            
 
             // 데이터 업데이트
             userData.email = email;
@@ -799,7 +800,12 @@
                 "keyword": keywords,
             };
             if(pw != ''){
-                param.pw = pw;
+                if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pw)) {
+                    showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.");
+                    return;
+                }else{
+                    param.pw = pw;
+                }
             }
             let {data} = await axios.post("/update_profile", param);
             console.log(data);

@@ -229,6 +229,7 @@
 
             try {
                 let {data} = await axios.post("/regist/request_code", { email });
+                console.log(data);
                 if (data.res) {
                     document.getElementById('verification-area').classList.remove('hidden');
                     showModal('인증 코드가 입력하신 이메일로 발송되었습니다.');
