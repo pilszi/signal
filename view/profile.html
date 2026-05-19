@@ -791,13 +791,12 @@
             const keywordInputs = document.querySelectorAll('.keyword-input');
             const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
             const hasDuplicates = new Set(keywords).size !== keywords.length;
-            console.log(hasDuplicates);
+            // console.log(hasDuplicates);
             if (keywords.length === 0 || hasDuplicates) {
                 showModal("중복된 키워드가 존재하거나, 키워드를 입력하지 않았습니다. 확인 후 수정해 주세요!", "error");
                 return;
             }
             
-
             // 🔥 2. 이메일 형식 검사 (추가)
             // 일반적인 이메일 양식(example@domain.com)인지 정규식으로 검사합니다.
             const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;

@@ -437,18 +437,21 @@ def logout(req: Request, db: Session = Depends(get_db)):
     """로그아웃 및 로그 엔드타임 갱신"""
     member_no = req.session.get("member_no")
     if member_no:
-        db.execute(
-            sqlalchemy.text("""
-                    UPDATE member_login_log
-                    SET logout_time = NOW(),
-                        status = 0
-                    WHERE member_no = :member_no
-                    AND status = 1
-                """),
-            {"member_no": member_no}
-        )
-
-    req.session.clear()
+        try:
+            db.execute(
+                sqlalchemy.text("""
+                        UPDATE member_login_log
+                        SET logout_time = NOW(),
+                            status = 0
+                        WHERE member_no = :member_no
+                        AND status = 1
+                    """),
+                {"member_no": member_no}
+            )
+            db.commit()
+            req.session.clear()
+        except Exception as e:
+            logger.info(f'로그아웃 처리 오류 : {e}')
     return
 
 # session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
