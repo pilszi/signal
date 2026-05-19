@@ -263,7 +263,8 @@
         let selectedLevel = null;
         let savedUserId = sessionStorage.getItem("savedUserId");
         let noti = [];            // 실시간 사이드바 및 알림용
-        let isInitialScrollDone = false;
+        const trigger = document.getElementById('notifTrigger');
+        const dropdown = document.getElementById('notifDropdown');
 
         // 시그널 컬러 테마
         const levelStyles = {
@@ -274,12 +275,6 @@
 
         // 2. 데이터 가져오기 통합 (상세 로그 + 알림 데이터)
         async function refreshAllData() {
-            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
-            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
-                console.log("로그인되지 않음, 데이터 동기화 생략");
-                return;
-            }
-
             try {
                 // [병렬 호출로 속도 최적화]
                 const [signalsRes, notiRes] = await Promise.all([
@@ -518,35 +513,43 @@
 
 
         function updateNavbar() {
-            const savedUserId = sessionStorage.getItem("savedUserId");
+            const authContainer = document.getElementById('authContainer');
+            // 태그가 없을 시 함수 종료(에러방지)
+            // console.log(authContainer);
+            if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
-            // 🛠️ [버그 패치] 기존 코드에 누락되었던 엘리먼트 선언 선행 장착!
-            const authContainer = document.getElementById('authContainer');
-            if (!authContainer) return;
-
-            if (savedUserId && savedUserId !== 'guest' && savedUserId !== 'null' && savedUserId !== 'undefined') {
-                // 1. [로그인 상태] 인사말 텍스트 세팅 및 노출 (강제 인젝션 구조로 변경)
-                if (userGreeting) {
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
+                // 1. 인사말 영역 처리
+                // 관리자 계정일 경우
+                if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
-                        <span class="text-sm text-gray-600 font-medium">
-                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
-                        </span>
-                    `;
-                    userGreeting.classList.remove('hidden');
+                        <div class="text-sm text-gray-600">
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                                반갑습니다
+                        </div>
+                        `
+                // 회원 계정일 경우
+                } else {
+                    userGreeting.innerHTML = `
+                        <a class="font-bold text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
 
-                // 2. [로그인 상태] authContainer 영역에 로그아웃 버튼 인젝션
+                // 2. 로그아웃 버튼 표시
                 authContainer.innerHTML = `
                     <button onclick="handleLogout()" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
                         LOG OUT
                     </button>
                 `;
             } else {
-                // 3. [로그아웃 상태] 인사말 숨김 처리
-                if (userGreeting) userGreeting.classList.add('hidden');
+                // 로그아웃 상태일 때
+                if (userGreeting) {
+                    userGreeting.classList.add('hidden'); // 인사말 숨김
+                }
 
-                // 4. [로그아웃 상태] authContainer 영역에 로그인 링크 인젝션
                 authContainer.innerHTML = `
                     <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
                         LOG IN
@@ -558,57 +561,6 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 12. 초기 실행 및 실시간 폴링
-        document.addEventListener('DOMContentLoaded', async () => {
-            console.log("🚨 DOM 로딩 완료");
-            console.log("현재 hash:", window.location.hash);
-
-            updateNavbar();
-            axios.get("/session_out");
-
-            await refreshAllData();
-
-            // 데이터 렌더링 끝난 뒤 실행
-            executeScrollToCard();
-
-            let isRefreshing = false;
-
-            setInterval(async () => {
-                if (isRefreshing) return;
-
-                isRefreshing = true;
-
-                try {
-                    await refreshAllData();
-                } finally {
-                    isRefreshing = false;
-                }
-            }, 30000);
-            // 네비바 하이라이트
-            const currentPath = window.location.pathname.split("/").pop() || "signal_log.html";
-            document.querySelectorAll('.nav-item').forEach(item => {
-                if (item.getAttribute('href').split("/").pop() === currentPath) {
-                    item.classList.add('bg-blue-50', 'text-blue-600');
-                }
-            });
-
-            // 드롭다운 토글 제어
-            const trigger = document.getElementById('notifTrigger');
-            const dropdown = document.getElementById('notifDropdown');
-            if (trigger && dropdown) {
-                trigger.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    dropdown.classList.toggle('hidden');
-                });
-                document.addEventListener('click', (e) => {
-                    if (!document.getElementById('notifContainer').contains(e.target)) {
-                        dropdown.classList.add('hidden');
-                    }
-                });
-            }
-            // 6. 아이콘 최종 렌더링
-            if (window.lucide) lucide.createIcons();
-        });
 
         // 1. 알림 UI 및 배지 수량 실시간 갱신
         async function updateNotifUI() {
@@ -930,5 +882,48 @@
                 }
             }
         }
+        // 💡 [참고] 기존 DOMContentLoaded 이벤트 리스너의 맨 아래에 넣어주세요!
+        document.addEventListener('DOMContentLoaded', async () => {
+            const currentPath = window.location.pathname.split("/").pop() || "signal.html";
+            const navItems = document.querySelectorAll('.nav-item');
+
+            updateNavbar();
+            axios.get("/session_out");
+            await refreshAllData();
+
+            navItems.forEach(item => {
+                // href 속성값에서 파일명만 가져와서 비교
+                const itemHref = item.getAttribute('href').split("/").pop();
+
+                if (currentPath === itemHref) {
+                    if (item.querySelector('i')) {
+                        item.classList.replace('text-gray-600', 'text-blue-600');
+                        item.classList.add('bg-blue-50');
+                    } else {
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
+                    }
+                }
+            });
+            // 6. 아이콘 최종 렌더링
+            if (window.lucide) lucide.createIcons();
+
+            // 🎯 페이지 로드 시 해시가 있으면 추적 스크롤 가동!
+            executeScrollToCard();
+        });
+
+        // 드롭다운 토글 제어
+        if (trigger && dropdown) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdown.classList.toggle('hidden');
+            });
+            document.addEventListener('click', (e) => {
+                if (!document.getElementById('notifContainer').contains(e.target)) {
+                    dropdown.classList.add('hidden');
+                }
+            });
+        }
+
     </script>
 </html>

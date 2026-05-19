@@ -507,13 +507,6 @@
                     renderExchangeRates(indicatorRes.data.data);
                 }
 
-                // 4. UI 갱신
-                if (date) currentPage = 1;
-                renderNews();
-                renderPagination();
-                updateStation();
-                updateNotifUI();
-
             } catch (error) {
                 console.error("데이터 통합 로드 실패:", error);
             }
@@ -523,7 +516,6 @@
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
             // 태그가 없을 시 함수 종료(에러방지)
-            // console.log(authContainer);
             if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
@@ -533,15 +525,15 @@
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
                                 반갑습니다
                         </div>
                         `
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <a class="text-sm text-gray-600">
-                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
+                        <a class="font-bold text-sm text-gray-600">
+                            <span class="text-gray-800">${savedUserId}</span>님 반갑습니다
                         </a>
                         `
                 }
@@ -1387,7 +1379,7 @@
 
         async function loadCountryMap() {
             let {data} = await axios.get("/main/countryMap");
-            console.log(data.res);
+            // console.log(data.res);
 
             data.res.forEach(country => {
                 // 한글 → 영문
@@ -1441,7 +1433,7 @@
             // 첫 번째 타이머: 정확히 자정/정오가 되는 순간 실행
             setTimeout(() => {
                 updateRefreshTime(); // 텍스트 갱신
-
+                
                 // 두 번째 타이머: 그 이후부터는 정확히 12시간(43,200,000ms)마다 반복 실행
                 setInterval(updateRefreshTime, 12 * 60 * 60 * 1000);
             }, timeUntilNextUpdate);

@@ -393,15 +393,15 @@
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
                                 반갑습니다
                         </div>
                         `
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <a class="text-sm text-gray-600">
-                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
+                        <a class="font-bold text-sm text-gray-600">
+                            <span class="text-gray-800">${savedUserId}</span>님 반갑습니다
                         </a>
                         `
                 }
@@ -762,28 +762,41 @@
                 updateButtons();
             }
         }
-        // 폼 제출 (가장 확실한 태그 매칭 버전)
+
+        function updateButtons() {
+            const rows = document.querySelectorAll('.keyword-row');
+            rows.forEach((row, idx) => {
+                const plusBtn = row.querySelector('button[onclick*="addKeywordField"]');
+                plusBtn.style.display = (idx === rows.length - 1) ? 'block' : 'none';
+            });
+        }
+
+        let param = {};
+        // 폼 제출
         async function handleSubmit(e) {
             e.preventDefault();
 
             const email = document.getElementById('form-email').value.trim();
             const phone = document.getElementById('form-phone').value.replaceAll('-', '').trim();
-            
+
             // 🚨 버튼을 누른 순간 화면에서 직접 id로 값을 가져옵니다.
             const pw = document.getElementById('password').value;
-            
+
             // 혹시 HTML에 id가 다르게 되어있을 수 있으니 화면을 꼭 확인하세요!
-            const pwConfirmInput = document.getElementById('password-confirm');           
-            
+            const pwConfirmInput = document.getElementById('password-confirm');
+
             const pwConfirm = pwConfirmInput ? pwConfirmInput.value : '';
-            
+
+            // 관심키워드 입력 검사 - 중복 키워드, 빈 키워드
             const keywordInputs = document.querySelectorAll('.keyword-input');
             const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
-
-            if (keywords.length === 0) {
-                showModal("최소 하나 이상의 키워드를 입력해주세요.", "error");
+            const hasDuplicates = new Set(keywords).size !== keywords.length;
+            console.log(hasDuplicates);
+            if (keywords.length === 0 || hasDuplicates) {
+                showModal("중복된 키워드가 존재하거나, 키워드를 입력하지 않았습니다. 확인 후 수정해 주세요!", "error");
                 return;
             }
+            
 
             // 🔥 2. 이메일 형식 검사 (추가)
             // 일반적인 이메일 양식(example@domain.com)인지 정규식으로 검사합니다.
@@ -805,14 +818,14 @@
                 // [검사 1] 일치 여부
                 if (pw !== pwConfirm) {
                     showModal("비밀번호가 일치하지 않습니다.", "error");
-                    return; 
+                    return;
                 }
 
                 // [검사 2] 8자 이상, 영문/숫자 혼합
                 const pwRegex = /^(?=.*[a-zA-Z])(?=.*\d).{8,}$/;
                 if (!pwRegex.test(pw)) {
                     showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.", "error");
-                    return; 
+                    return;
                 }
             }
 
@@ -827,22 +840,22 @@
                 "phone_number": phone,
                 "keyword": keywords,
             };
-            
+
             if (pw != '') {
                 param.pw = pw;
             }
-            
+
             try {
                 let {data} = await axios.post("/update_profile", param);
-                
+
                 document.getElementById('display-name').innerText = userData.name;
-                updateNavbar(); 
+                updateNavbar();
 
                 renderProfile();
-                toggleEdit(); 
-                await updateNotifUI(); 
+                toggleEdit();
+                await updateNotifUI();
                 showModal("개인정보가 성공적으로 수정되었습니다.", "success");
-                
+
                 document.getElementById('password').value = '';
                 if (document.getElementById('password-confirm')) {
                     document.getElementById('password-confirm').value = '';

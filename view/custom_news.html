@@ -194,7 +194,7 @@
                             <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
                                 <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>                                  
+                                    <span class="header-count" id="notifCountText"></span>
                                 </div>
                                  <div id="notifList"></div>
                             </div>
@@ -332,21 +332,20 @@
             if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
-            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
-                // 1. 인사말 영역 처리
-                // 관리자 계정일 경우
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null' && savedUserId !== 'undefined') {
+                // 1. 인사말 영역 처리 (굵은 검정 글자 테마 적용)
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
-                        <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
-                                반갑습니다
+                        <div class="text-sm text-gray-600 font-medium">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md font-bold text-gray-800">관리자님</a>
+                            반갑습니다
                         </div>
                         `
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <a class="text-sm text-gray-600">
-                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
+                        <a class="font-bold text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
                         </a>
                         `
                 }

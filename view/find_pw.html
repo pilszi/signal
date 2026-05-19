@@ -152,8 +152,8 @@
             const newPw = document.getElementById('newPasswordInput').value;
             const confirmPw = document.getElementById('confirmPasswordInput').value;
 
-            if (newPw.length < 8) {
-                showAlert("비밀번호는 8자 이상이어야 합니다.");
+            if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pw)) {
+                showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.");
                 return;
             }
             if (newPw !== confirmPw) {
