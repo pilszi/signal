@@ -327,13 +327,14 @@
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
+            // 태그가 없을 시 함수 종료(에러방지)
+            // console.log(authContainer);
             if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
             if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null' && savedUserId !== 'undefined') {
                 // 1. 인사말 영역 처리 (굵은 검정 글자 테마 적용)
                 if (savedUserId === 'admin') {
-                    // 관리자 계정일 경우
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600 font-medium">
                             <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md font-bold text-gray-800">관리자님</a>
@@ -343,12 +344,11 @@
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <div class="text-sm text-gray-600 font-medium">
-                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
-                        </div>
-                    `;
+                        <a class="text-sm text-gray-600">
+                            <span>${savedUserId} 님 반갑습니다</span>
+                        </a>
+                        `
                 }
-                if (userGreeting) userGreeting.classList.remove('hidden');
 
                 // 2. 로그아웃 버튼 표시
                 authContainer.innerHTML = `
@@ -583,7 +583,6 @@
             });
             await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
             updateNotifUI();
-            location.href = 'signal_log.html';
         }
 
         // 모두 읽음
