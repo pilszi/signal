@@ -89,8 +89,9 @@ class Config:
 
 
     # --- 5. 데이터베이스 및 저장소 설정 ---
+    # "http://100.123.232.79:9200"
     # 환경변수에서 'http://localhost:9200' 형태로 오든 'localhost'로 오든 대응 가능하게 설정
-    _raw_es_host = get_env("ES_HOST", default="localhost", required=False)
+    _raw_es_host = get_env("ES_HOST", default="100.123.232.79", required=False)
 
     # http://가 포함되어 있지 않다면 붙여주기
     if not _raw_es_host.startswith("http"):

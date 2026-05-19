@@ -14,7 +14,7 @@ from dateutil import parser as date_parser
 from concurrent.futures import ThreadPoolExecutor
 from utils import is_noise_article
 
-es = Elasticsearch(["http://localhost:9200"])
+es = Elasticsearch(["http://100.123.232.79:9200"])
 INDEX_NAME = "news_origin"
 
 

@@ -199,7 +199,7 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <div id="user-greeting"></div>
+                        <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
                         <div class="notif-container" id="notifContainer">
                             <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
                                 <i data-lucide="bell" class="w-5 h-5"></i>
@@ -236,10 +236,21 @@
 
             <div class="grid lg:grid-cols-4 gap-8">
                 <div class="lg:col-span-3">
-                    <div id="signal-list" class="grid gap-4"></div>
+                    <div id="signal-list" class="grid gap-4">
+                        </div>
                     <div id="pagination" class="mt-8 flex items-center justify-center gap-2"></div>
                 </div>
 
+                <div class="lg:col-span-1">
+                    <div class="bg-white border rounded-xl p-5 shadow-sm sticky top-24">
+                        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <i data-lucide="bell-ring" class="w-4 h-4 text-red-500"></i> 실시간 주요 시그널
+                        </h3>
+                        <div id="signal-log-container" class="space-y-4 max-h-[600px] overflow-y-auto">
+                            <p class="text-xs text-gray-400 text-center py-4">동기화 중...</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </body>
@@ -271,7 +282,7 @@
                 ]);
 
                 allSignals = (signalsRes.data && signalsRes.data.data) ? signalsRes.data.data : [];
-                console.log(signalsRes, notiRes);
+
                 // 💡 백엔드 응답 키인 .noti를 정확히 명시하고 안전장치(|| [])를 장착합니다.
                 noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : [];
 
@@ -284,31 +295,28 @@
 
         // 3. 필터링 및 메인 리스트 렌더링
         function applyFilterAndRender() {
-            // 1. 필터링 로직
+            // 1. 필터링
             if (!selectedLevel || selectedLevel === '전체') {
-                // '전체'일 경우 모든 시그널 표시
                 filteredSignals = [...allSignals];
             } else {
-                // selectedLevel이 '심각', '주의', '안정'으로 들어오므로 데이터와 바로 비교
-                // .includes()를 사용하면 '심각'이 포함된 모든 등급을 안전하게 찾아냅니다.
-                filteredSignals = allSignals.filter(s => s.risk_level.includes(selectedLevel));
+                filteredSignals = allSignals.filter(
+                    s => s.risk_level.includes(selectedLevel)
+                );
             }
 
             // 2. 최신순 정렬
-            filteredSignals.sort((a, b) => new Date(b.signal_time) - new Date(a.signal_time));
+            filteredSignals.sort(
+                (a, b) => new Date(b.signal_time) - new Date(a.signal_time)
+            );
 
-            // 3. 화면 렌더링 호출
+            // 3. 렌더링
             renderSignalList();
             renderPagination();
-        }
 
-        // 4. 리스크 레벨 클래스 결정
-        function getRiskClass(level) {
-            if (level === '심각') return 'risk-severe';
-            if (level === '주의') return 'risk-warning';
-            return 'risk-stable';
-        }
+            // 4. 최초 1회만 스크롤 이동 실행
+            executeScrollToCard();
 
+        }
         // 5. 상세 리스트 렌더링
         function renderSignalList() {
             const listContainer = document.getElementById('signal-list');
@@ -370,27 +378,27 @@
             if (window.lucide) lucide.createIcons();
     }
 
-        // // 6. 실시간 사이드바 렌더링
-        // function renderSignalLogs() {
-        //     const logs = noti.filter(n => n.risk_level === "심각" || n.risk_level === "주의");
-        //     const container = document.getElementById('signal-log-container');
-        //     if (!container) return;
+        // 6. 실시간 사이드바 렌더링
+        function renderSignalLogs() {
+            const logs = noti.filter(n => n.risk_level === "심각" || n.risk_level === "주의");
+            const container = document.getElementById('signal-log-container');
+            if (!container) return;
 
-        //     if (logs.length === 0) {
-        //         container.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">안정적인 상태입니다.</p>';
-        //         return;
-        //     }
+            if (logs.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-400 text-center py-4">안정적인 상태입니다.</p>';
+                return;
+            }
 
-        //     container.innerHTML = logs.slice(0, 5).map(log => `
-        //         <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
-        //             <div class="flex items-center gap-2 mb-1">
-        //                 <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
-        //                 <span class="text-[9px] text-gray-400">${timeAgo(log.time)}</span>
-        //             </div>
-        //             <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.message}</p>
-        //         </div>
-        //     `).join('');
-        // }
+            container.innerHTML = logs.slice(0, 5).map(log => `
+                <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
+                        <span class="text-[9px] text-gray-400">${timeAgo(log.time)}</span>
+                    </div>
+                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.message || '리스크 감지'}</p>
+                </div>
+            `).join('');
+        }
 
         // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
         function updateNotifUI_Static() {
@@ -419,7 +427,7 @@
             }
 
             renderList(document.getElementById('notifList'), noti);
-            // renderSignalLogs();
+            renderSignalLogs();
             if (window.lucide) lucide.createIcons();
         }
 
@@ -427,7 +435,6 @@
         function filterLevel(level) {
             // 1. 전역 상태 업데이트 (전체일 경우 null 처리)
             selectedLevel = (level === '전체') ? null : level;
-            // console.log(selectedLevel);
             currentPage = 1;
 
             // 2. 필터 버튼 시각적 피드백 (Tailwind 클래스 직접 조작)
@@ -473,14 +480,6 @@
             return dateString.includes(' ') ? dateString.split(' ')[0] : dateString;
         }
 
-        // 10. 유틸리티 및 페이지네이션
-// <!--        function timeAgo(dateString) {-->
-// <!--            const diff = Math.floor((new Date() - new Date(dateString)) / 1000);-->
-// <!--            if (diff < 60) return '방금 전';-->
-// <!--            if (diff < 3600) return `${Math.floor(diff/60)}분 전`;-->
-// <!--            if (diff < 86400) return `${Math.floor(diff/3600)}시간 전`;-->
-// <!--            return dateString.split('T')[0];-->
-// <!--        }-->
 
 
         function handlePageChange(page) {
@@ -504,34 +503,8 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 11. 알림 리스트 드롭다운 렌더링
-        function renderList(container, data) {
-            if (!container) return;
-            if (data.length === 0) {
-                container.innerHTML = '<div class="p-10 text-center text-gray-400">알림이 없습니다.</div>';
-                return;
-            }
-            // 알림창 출력 필드
-            container.innerHTML = data.map(n => `
-                <div class="notif-item p-4 border-b relative ${n.is_read ? '' : 'bg-blue-50 hover:bg-blue-100'}" onclick="readItem(${n.id})">
-                    <div class="text-xs font-bold ${n.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} mb-1">
-                        ${n.risk_level} 단계 알림
-                    </div>
 
-                    <div class="text-sm text-gray-800 mb-1 pr-6">${n.title}</div>
 
-                    <div class="text-[10px] text-gray-400">${timeAgo(n.time)}</div>
-                    <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
-                        <i data-lucide="x" class="w-4 h-4"></i>
-                    </button>
-                </div>
-            `).join('') + `
-                <div class="p-3 text-center bg-gray-50">
-                    <button onclick="allRead()" class="text-xs text-blue-600 hover:underline">모두 읽음으로 처리</button>
-                </div>`;
-        }
-
-        // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
             // 태그가 없을 시 함수 종료(에러방지)
@@ -660,7 +633,7 @@
 
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.signal_no})">
+                         onclick="readItem(${n.id}, ${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -674,7 +647,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -689,24 +662,23 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 3. 특정 알림 클릭 시 읽음 업데이트 및 조준경 타겟 페이지 이동
-        // 알림 클릭 시 읽음 처리 후 목적지 카드로 고유 해시(#)를 들고 이동하는 함수
-        async function readItem(id) {
+        // signal_log.html 전용 readItem (최종 마감 버전)
+        async function readItem(id, signalNo) {
             try {
-                // 1. 서버에 읽음 상태 반영 (POST 규격)
-                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+                // 1. 서버 읽음 처리
+                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
 
-                const targetUrl = `signal_log.html#signal-${id}`;
+                // 2. 알림창 닫기 (이걸 빼먹으면 알림창이 계속 열려있습니다!)
+                if (typeof dropdown !== 'undefined') dropdown.classList.add('hidden');
 
-                // 2. 만약 이미 시그널로그 페이지에 머물고 있다면 화면 갱신 없이 바로 스크롤 구동
-                if (window.location.pathname.endsWith('signal_log.html')) {
-                    window.location.hash = `signal-${id}`;
-                    executeScrollToCard(); // 아래 2번에서 만들 함수 호출
-                    updateNotifUI();       // 알림창 개수 갱신
-                } else {
-                    // 3. 다른 페이지(main, custom)에 있다면 해시를 품고 시그널 로그 페이지로 강제 이동
-                    window.location.href = targetUrl;
-                }
+                // 3. 해시 변경 (주소창에 #signal-149가 뜸)
+                window.location.hash = `signal-${signalNo}`;
+
+                // 4. 스크롤 및 효과 발동
+                executeScrollToCard();
+
+                // 5. 알림 배지 카운트 갱신 (서버 다녀온 뒤 숫자 1 줄이기)
+                await updateNotifUI();
             } catch (err) {
                 console.error("알림 확인 통신 오류:", err);
             }
@@ -723,8 +695,9 @@
                 targetItem.remove();
             }
 
-            // 🎯 3. [핵심 패치] String()을 감싸 문자열이든 숫자든 강제로 일치시켜 배열에서 확실히 빼버립니다.
-            noti = noti.filter(n => String(n.id) !== String(id) && String(n.signal_no) !== String(id));
+            noti = noti.filter(
+                n => String(n.id) !== String(id)
+            );
 
             // 4. 안 읽은 알림 수 재계산
             const unreads = noti.filter(n => !n.is_read);
@@ -781,15 +754,47 @@
                 console.error("전체 알림 읽음 처리 통신 오류:", err);
             }
         }
-        // 주소창 뒤의 #signal-번호를 역추적해서 해당 카드로 부드럽게 스크롤하고 반짝임 효과를 주는 함수
-        function executeScrollToCard() {
+        // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
+        async function executeScrollToCard() {
             const hash = window.location.hash;
-            if (hash && hash.startsWith('#signal-')) {
-                setTimeout(() => {
-                    const targetCard = document.querySelector(hash);
-                    if (targetCard) {
-                        // 1. 해당 카드가 브라우저 정중앙에 오도록 부드럽게 스크롤 무빙
-                        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (!hash || !hash.startsWith('#signal-')) return;
+
+            const targetId = hash.substring(8); // 'signal-' 뒷부분 숫자 추출
+            // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
+            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
+            const existsInFiltered = filteredSignals.find(s => String(s.signal_no) === String(targetId));
+
+            console.log("🔍 [진단] 타겟:", targetId);
+            console.log("🔍 전체 데이터에 존재?", !!existsInAll);
+            console.log("🔍 필터링 데이터에 존재?", !!existsInFiltered);
+            console.log("🔍 현재 선택된 레벨(selectedLevel):", selectedLevel);
+            // ----------------------------------------------------------------
+            // 1. 데이터가 로드될 때까지 0.1초씩 재시도 (비동기 데이터 보호)
+            if (!allSignals || allSignals.length === 0) {
+                setTimeout(executeScrollToCard, 100);
+                return;
+            }
+
+            // 2. 타겟 위치 파악
+            const targetIndex = allSignals.findIndex(s => String(s.signal_no) === String(targetId));
+
+            if (targetIndex !== -1) {
+                const targetPage = Math.ceil((targetIndex + 1) / SIGNALS_PER_PAGE);
+
+                // 3. 페이지 전환이 필요하면 전환 후 대기
+                if (currentPage !== targetPage) {
+                    currentPage = targetPage;
+                    applyFilterAndRender();
+
+                    // 💡 [기존의 핵심!] 렌더링이 브라우저에 반영될 때까지 확실히 기다림
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                }
+
+                // 4. DOM 안착 확인 후 사격
+                const targetCard = document.getElementById(`signal-${targetId}`);
+                if (targetCard) {
+                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetCard.classList.add('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]', 'transition-all', 'duration-500');
 
                         // 2. 테두리에 파란색 강렬한 네온 링 이펙트 일시 주입 (Tailwind)
                         targetCard.classList.add('ring-4', 'ring-blue-500', 'transition-all', 'duration-500');
@@ -798,11 +803,13 @@
                         setTimeout(() => {
                             targetCard.classList.remove('ring-4', 'ring-blue-500');
                         }, 2000);
-                    }
-                }, 600); // 리스트 도면 엘리먼트들이 확실히 그려질 때까지 대기하는 안정 마진 시간
+                    } else {
+                    console.log("❌ 카드 못 찾음 (DOM 렌더링 지연):", targetId);
+                }
+            } else {
+                console.log("❌ 해당 기사가 필터링 결과에 없습니다:", targetId);
             }
         }
-
         // 💡 [참고] 기존 DOMContentLoaded 이벤트 리스너의 맨 아래에 넣어주세요!
         document.addEventListener('DOMContentLoaded', async () => {
             const currentPath = window.location.pathname.split("/").pop() || "signal.html";
@@ -815,7 +822,7 @@
             navItems.forEach(item => {
                 // href 속성값에서 파일명만 가져와서 비교
                 const itemHref = item.getAttribute('href').split("/").pop();
-    
+
                 if (currentPath === itemHref) {
                     if (item.querySelector('i')) {
                         item.classList.replace('text-gray-600', 'text-blue-600');
@@ -828,11 +835,11 @@
             });
             // 6. 아이콘 최종 렌더링
             if (window.lucide) lucide.createIcons();
-    
+
             // 🎯 페이지 로드 시 해시가 있으면 추적 스크롤 가동!
             executeScrollToCard();
         });
-    
+
         // 드롭다운 토글 제어
         if (trigger && dropdown) {
             trigger.addEventListener('click', (e) => {
@@ -845,6 +852,6 @@
                 }
             });
         }
-        
+
     </script>
 </html>
