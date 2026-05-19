@@ -815,9 +815,8 @@ def signal_log(id: str, db: Session = Depends(get_db)):
             AND (sm.prediction LIKE CONCAT('%', mk.keyword, '%') 
                  OR sm.prediction_reason LIKE CONCAT('%', mk.keyword, '%'))
         WHERE m.id = :user_id
-        GROUP BY sm.signal_no, al.alarm_view, sm.risk_level, sm.signal_time, sm.prediction, sm.prediction_reason, sm.url
-        ORDER BY al.alarm_time DESC
-        LIMIT 50
+        GROUP BY sm.signal_no
+        ORDER BY sm.signal_time DESC
     """)
 
     # 쿼리 실행 및 맵핑 결과 획득
@@ -835,6 +834,7 @@ def signal_log(id: str, db: Session = Depends(get_db)):
             "signal_time": r["signal_time"].strftime("%Y-%m-%d %H:%M") if r["signal_time"] else "시간 미상",
             "prediction": r["prediction"],
             "prediction_reason": r["prediction_reason"],
+            "time": r["signal_time"].strftime("%Y-%m-%d %H:%M"),
             "url": r["url"] or "#",
             "is_read": r["alarm_view"],
             "match_keyword": kw_list
@@ -863,9 +863,9 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
             JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
             JOIN member_info t3 ON t2.member_no = t3.member_no
             WHERE t3.id = :id
-            AND t2.alarm_view = 0 
             AND t1.risk_level = '심각'
-            ORDER BY t2.alarm_time DESC limit 10
+            ORDER BY t1.signal_time DESC
+            LIMIT 10
             """)
         res = db.execute(sql, {"id": id}).mappings().fetchall()
         # logger.info(f'에러나는지 확인 : {res}')
