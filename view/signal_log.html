@@ -208,7 +208,7 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
+                        <div id="user-greeting"></div>
                         <div class="notif-container" id="notifContainer">
                             <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
                                 <i data-lucide="bell" class="w-5 h-5"></i>
@@ -333,6 +333,7 @@
                 executeScrollToCard();
             }
         }
+
         // 5. 상세 리스트 렌더링
         function renderSignalList() {
             const listContainer = document.getElementById('signal-list');
@@ -546,8 +547,8 @@
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <a class="font-bold text-sm text-gray-600">
-                            <span>${savedUserId} 님 반갑습니다</span>
+                        <a class="font=bold text-sm text-gray-600">
+                            <span class="text-gray-800">${savedUserId} 님 반갑습니다</span>
                         </a>
                         `
                 }
@@ -863,7 +864,7 @@
 
                         targetCard.scrollIntoView({
                             behavior: 'smooth',
-                            block: 'center'
+                            block: 'start'
                         });
 
                         targetCard.classList.add(
@@ -944,17 +945,17 @@
             const modal = document.getElementById('alert-modal');
             const iconDiv = document.getElementById('modal-icon');
             document.getElementById('modal-message').innerText = msg;
-            
+
             if(type === 'success') {
                 iconDiv.innerHTML = '<i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>';
             } else {
                 iconDiv.innerHTML = '<i data-lucide="alert-circle" class="w-12 h-12 text-blue-500"></i>';
             }
-            
+
             // 세 번째 인자로 들어온 함수(탈퇴 처리 로직 등)를 전역 변수에 담아둡니다.
             // 일반 알림창일 때는 아무것도 안 들어오므로 null이 됩니다.
             modalCallback = onConfirm;
-            
+
             modal.classList.remove('hidden');
             lucide.createIcons();
         }
@@ -962,7 +963,7 @@
         function closeModal() {
             // 1. 우선 화면에서 모달창을 숨깁니다.
             document.getElementById('alert-modal').classList.add('hidden');
-            
+
             // 2. 만약 이번에 닫힌 모달창이 '특별한 행동(콜백)'을 품고 있었다면 실행합니다.
             if (typeof modalCallback === 'function') {
                 modalCallback();    // 폼 제출 이벤트에서 넘겨준 async () => { axios.post... } 가 여기서 실행됩니다!
