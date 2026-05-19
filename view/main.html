@@ -442,22 +442,33 @@
         document.addEventListener('DOMContentLoaded', async() => {
             axios.get("/session_out");
             updateNavbar();
-            // 1️⃣ [순서 보장] 인터넷에서 지도 도면을 다운로드하여 ECharts에 등록하는 걸 눈으로 확인한 후,
+            // 1. 국가명 매핑 먼저
+            await loadCountryMap();
+            // 2. 지도 생성
             await initMap();
-
-            // 2️⃣ [순서 보장] 백엔드에서 50~400점대 황금 밸런스 점수를 가져와 지도를 안전하게 칠합니다!
+            // 3. 데이터 가져오기 + heatmap 적용
             await fetchMainData();
 
+            // 4. 나머지 ui
             renderExchangeRates();
             initCalendar();
             lucide.createIcons();
-            updateNotifUI();
+
+            await updateNotifUI();
+
             renderNews();
             renderPagination();
+
             updateStation();
-            loadCountryMap();
+<!--            loadCountryMap();-->
             updateRefreshTime();
             scheduleNextUpdate();
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    executeScrollToCard();
+                });
+            });
         });
 
         async function fetchMainData(date = null) {
@@ -474,6 +485,7 @@
 
                 // 1. 뉴스 데이터 설정 (변수명 통일: newsRes)
                 allSignals = newsRes.data.msg || [];
+                filteredNews = [...allSignals];
 
                 // 2. 히트맵 데이터 가공 (MariaDB 데이터 우선 사용)
                 if (countryRes.data && countryRes.data.country_signal) {
@@ -718,29 +730,7 @@
                 console.error("알림 확인 통신 오류:", err);
             }
         }
-        // 주소창 뒤의 #signal-번호를 역추적해서 해당 카드로 부드럽게 스크롤하고 반짝임 효과를 주는 함수 (오류 파괴 버전)
-        function executeScrollToCard() {
-            const hash = window.location.hash;
-            if (!hash || !hash.startsWith('#signal-')) return;
 
-            // 🎯 [핵심 패치] querySelector 대신 브라우저 엔진이 가장 좋아하는 getElementById로 다이렉트 서칭!
-            const targetCard = document.getElementById(hash.substring(1));
-
-            if (targetCard) {
-                setTimeout(() => {
-                    // 1. 해당 카드가 브라우저 정중앙에 오도록 부드럽게 스크롤 무빙
-                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                    // 2. 테두리에 파란색 강렬한 네온 링과 글로우 이펙트 주입
-                    targetCard.classList.add('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]', 'transition-all', 'duration-500');
-
-                    // 3. 2초간 시선 집중을 시킨 뒤, 자연스럽게 원래 상태로 소멸 청소
-                    setTimeout(() => {
-                        targetCard.classList.remove('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]');
-                    }, 2000);
-                }, 300); // 렌더링 안정 마진 시간 0.3초
-            }
-        }
         // 아이템 삭제
         async function deleteItem(e, id) {
             e.stopPropagation();
@@ -1076,8 +1066,9 @@
 
                 return `
                 <a href="${news.url}" target="_blank">
-                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative"
-                         onclick="logNewsClick('${news.url}')">
+                    <div id="signal-${news.signal_no}"
+                        class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative"
+                        onclick="logNewsClick('${news.url}')">
 
                         <div class="relative h-48 overflow-hidden">
                             <img src="${imageUrl}"
@@ -1419,6 +1410,141 @@
                 // 두 번째 타이머: 그 이후부터는 정확히 12시간(43,200,000ms)마다 반복 실행
                 setInterval(updateRefreshTime, 12 * 60 * 60 * 1000);
             }, timeUntilNextUpdate);
+        }
+
+
+
+        // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
+        async function executeScrollToCard() {
+            const hash = window.location.hash;
+            if (!hash || !hash.startsWith('#signal-')) return;
+
+            const targetId = hash.replace('#signal-', '');
+            // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
+            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
+            const existsInFiltered = filteredNews.find(s => String(s.signal_no) === String(targetId));
+
+            console.log("🔍 [진단] 타겟:", targetId);
+            console.log("🔍 전체 데이터에 존재?", !!existsInAll);
+            console.log("🔍 필터링 데이터에 존재?", !!existsInFiltered);
+            // ----------------------------------------------------------------
+            // 1. 데이터가 로드될 때까지 0.1초씩 재시도 (비동기 데이터 보호)
+            if (!allSignals || allSignals.length === 0) {
+                setTimeout(executeScrollToCard, 100);
+                return;
+            }
+
+            // renderNews와 동일한 데이터 흐름 사용
+            const uniqueSignals = Array.from(
+                new Map(allSignals.map(item => [item.url, item])).values()
+            );
+
+            const sortedSignals = uniqueSignals.sort((a, b) => {
+
+                if (a.risk_score !== b.risk_score) {
+                    return a.risk_score - b.risk_score;
+                }
+
+                return new Date(b.published_date) - new Date(a.published_date);
+            });
+
+            // 실제 렌더링 기준 데이터에서 위치 찾기
+            let targetIndex = sortedSignals.findIndex(
+                s => String(s.signal_no) === String(targetId)
+            );
+
+            // 💥 핵심 패치
+            if (targetIndex === -1) {
+                console.log("⚠️ 현재 필터에 없음 → 전체 보기로 자동 복구");
+
+
+<!--                // 버튼 UI도 전체 상태로 복구-->
+<!--                document.querySelectorAll('#filter-container button').forEach(btn => {-->
+<!--                    const btnText = btn.innerText;-->
+
+<!--                    if (btnText === '전체') {-->
+<!--                        btn.className =-->
+<!--                            "px-4 py-2 rounded-lg bg-gray-900 text-white font-bold shadow-md transition-all";-->
+<!--                    } else if (btnText.includes('심각')) {-->
+<!--                        btn.className =-->
+<!--                            "px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors";-->
+<!--                    } else if (btnText.includes('주의')) {-->
+<!--                        btn.className =-->
+<!--                            "px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-colors";-->
+<!--                    } else if (btnText.includes('안정')) {-->
+<!--                        btn.className =-->
+<!--                            "px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors";-->
+<!--                    }-->
+<!--                });-->
+
+                applyFilters();
+
+                const filteredUniqueSignals = Array.from(
+                    new Map(filteredNews.map(item => [item.url, item])).values()
+                );
+
+                const filteredSortedSignals = filteredUniqueSignals.sort((a, b) => {
+
+                    if (a.risk_score !== b.risk_score) {
+                        return a.risk_score - b.risk_score;
+                    }
+
+                    return new Date(b.published_date) - new Date(a.published_date);
+                });
+
+                targetIndex = filteredSortedSignals.findIndex(
+                    s => String(s.signal_no) === String(targetId)
+                );
+            }
+
+            if (targetIndex !== -1) {
+                const targetPage = Math.ceil((targetIndex + 1) / SIGNALS_PER_PAGE);
+
+                // 페이지 이동 필요 시
+                if (currentPage !== targetPage) {
+                    currentPage = targetPage;
+                    renderNews();
+                    renderPagination();
+
+                    await new Promise(resolve =>
+                        requestAnimationFrame(() =>
+                            requestAnimationFrame(resolve)
+                        )
+                    );
+                }
+
+                // DOM 렌더링 완료 후 카드 찾기
+                const targetCard = document.getElementById(`signal-${targetId}`);
+
+                if (targetCard) {
+                    targetCard.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+
+                    targetCard.classList.add(
+                        'ring-4',
+                        'ring-blue-500',
+                        'shadow-[0_0_25px_rgba(59,130,246,0.8)]',
+                        'transition-all',
+                        'duration-500'
+                    );
+
+                    setTimeout(() => {
+                        targetCard.classList.remove(
+                            'ring-4',
+                            'ring-blue-500',
+                            'shadow-[0_0_25px_rgba(59,130,246,0.8)]'
+                        );
+
+                        history.replaceState(null, null, window.location.pathname);
+
+                        hasPendingScroll = false;
+                    }, 2000);
+                } else {
+                    console.log("❌ 카드 DOM 못 찾음:", targetId);
+                }
+            }
         }
 
     </script>

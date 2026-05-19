@@ -276,22 +276,28 @@
         // 2. 데이터 가져오기 통합 (상세 로그 + 알림 데이터)
         async function refreshAllData() {
             try {
+                // [병렬 호출로 속도 최적화]
                 const [signalsRes, notiRes] = await Promise.all([
                     axios.get('/signal_log?id=' + savedUserId),
                     axios.get("/noti/signal?id=" + savedUserId)
                 ]);
 
+                // 2. 전체 로그 처리
                 allSignals = (signalsRes.data && signalsRes.data.data) ? signalsRes.data.data : [];
 
-                // 💡 백엔드 응답 키인 .noti를 정확히 명시하고 안전장치(|| [])를 장착합니다.
-                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : [];
+                // 3. 알림용 데이터 처리 (기존 로직 + 안전장치)
+                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
 
-                applyFilterAndRender(); // 메인 리스트 렌더링
-                updateNotifUI_Static(); // 알림 배지 및 사이드바 렌더링
+                // 4. 렌더링 동기화
+                applyFilterAndRender(); // allSignals 기반으로 페이지 리스트 갱신
+                updateNotifUI_Static(); // noti 기반으로 알림 뱃지 및 드롭다운 갱신
+
             } catch (error) {
+                // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
                 console.error("데이터 동기화 실패:", error);
             }
         }
+        let hasPendingScroll = false;
 
         // 3. 필터링 및 메인 리스트 렌더링
         function applyFilterAndRender() {
@@ -314,8 +320,9 @@
             renderPagination();
 
             // 4. 최초 1회만 스크롤 이동 실행
-            executeScrollToCard();
-
+            if (hasPendingScroll) {
+                executeScrollToCard();
+            }
         }
         // 5. 상세 리스트 렌더링
         function renderSignalList() {
@@ -336,7 +343,7 @@
                 const style = levelStyles[signal.risk_level] || levelStyles["안정"];
 
                 return `
-                    <div id="signal-${signal.signal_no}" class="${style.bg} border-2 ${style.border} rounded-2xl p-8 mb-6 shadow-sm transition-all hover:shadow-md">
+                    <div id="signal-${signal.id}" class="${style.bg} border-2 ${style.border} rounded-2xl p-8 mb-6 shadow-sm transition-all hover:shadow-md">
                         <div class="flex justify-between items-start mb-4">
                             <div class="flex items-center gap-3">
                                 <span class="text-sm font-bold text-gray-500">${signal.signal_time.replace('T', ' ')}</span>
@@ -393,9 +400,9 @@
                 <div class="p-3 border-b last:border-0 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg" onclick="location.href='signal_log.html'">
                     <div class="flex items-center gap-2 mb-1">
                         <span class="text-[10px] font-bold ${log.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} uppercase">[${log.risk_level}]</span>
-                        <span class="text-[9px] text-gray-400">${timeAgo(log.time)}</span>
+                        <span class="text-[9px] text-gray-400">${timeAgo(log.time || log.signal_time)}</span>
                     </div>
-                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1">${log.message || '리스크 감지'}</p>
+                    <p class="text-xs font-semibold text-gray-800 mb-1 line-clamp-1"> ${log.message || log.prediction || '리스크 감지'}</p>
                 </div>
             `).join('');
         }
@@ -577,22 +584,22 @@
             try {
                 // 백엔드 통합 알림 API 호출
                 const { data } = await axios.get(`/noti/signal?id=${savedUserId}`);
-                noti = data.noti || [];
+                const notiList = data.noti || [];
 
                 // 드롭다운 내부에 알림 카드 카드 출력
-                renderList(listContainer, noti);
+                renderList(listContainer, notiList);
 
                 // 안 읽은 알림(alarm_view = 0)만 카운팅하여 빨간색 배지 노출
-                const unreads = noti.filter(n => !n.is_read);
+                const unreads = notiList.filter(n => !n.is_read);
                 if (countText) countText.innerText = `${unreads.length}개의 새 알림`;
 
-                if (unreads.length > 0) {
-                    if (badge) {
+                if (badge) {
+                    if (unreads.length > 0) {
                         badge.innerText = unreads.length;
-                        badge.style.display = 'flex';
+                        badge.style.display = 'flex'; // 혹은 block
+                    } else {
+                        badge.style.display = 'none';
                     }
-                } else {
-                    if (badge) badge.style.display = 'none';
                 }
             } catch (error) {
                 console.error("알림 UI 로드 실패:", error);
@@ -668,17 +675,21 @@
                 // 1. 서버 읽음 처리
                 await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
 
-                // 2. 알림창 닫기 (이걸 빼먹으면 알림창이 계속 열려있습니다!)
-                if (typeof dropdown !== 'undefined') dropdown.classList.add('hidden');
+                noti = noti.map(n => String(n.signal_no) === String(signalNo) ? { ...n, is_read: 1 } : n);
+                updateNotifUI_Static();
+
+                // 3. 알림창 닫기
+                const dropdown = document.getElementById('notifDropdown');
+                if (dropdown) dropdown.classList.add('hidden');
 
                 // 3. 해시 변경 (주소창에 #signal-149가 뜸)
-                window.location.hash = `signal-${signalNo}`;
-
-                // 4. 스크롤 및 효과 발동
-                executeScrollToCard();
-
-                // 5. 알림 배지 카운트 갱신 (서버 다녀온 뒤 숫자 1 줄이기)
-                await updateNotifUI();
+                window.location.hash = `#signal-${signalNo}`;
+                hasPendingScroll = true;
+                if (typeof executeScrollToCard === 'function') {
+                    executeScrollToCard();
+                } else {
+                    window.location.href = `signal_log.html#signal-${signalNo}`;
+                }
             } catch (err) {
                 console.error("알림 확인 통신 오류:", err);
             }
@@ -748,7 +759,7 @@
             try {
                 let { data } = await axios.post("/noti/read_all", { "user_id": savedUserId });
                 if (data.res) {
-                    updateNotifUI();
+                    await refreshAllData();
                 }
             } catch (err) {
                 console.error("전체 알림 읽음 처리 통신 오류:", err);
@@ -756,13 +767,14 @@
         }
         // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
         async function executeScrollToCard() {
+            console.log("🚨 executeScrollToCard 진입");
             const hash = window.location.hash;
             if (!hash || !hash.startsWith('#signal-')) return;
 
-            const targetId = hash.substring(8); // 'signal-' 뒷부분 숫자 추출
+            const targetId = hash.replace('#signal-', '');
             // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
-            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
-            const existsInFiltered = filteredSignals.find(s => String(s.signal_no) === String(targetId));
+            const existsInAll = allSignals.find(s => String(s.id) === String(targetId));
+            const existsInFiltered = filteredSignals.find(s => String(s.id) === String(targetId));
 
             console.log("🔍 [진단] 타겟:", targetId);
             console.log("🔍 전체 데이터에 존재?", !!existsInAll);
@@ -775,39 +787,99 @@
                 return;
             }
 
-            // 2. 타겟 위치 파악
-            const targetIndex = allSignals.findIndex(s => String(s.signal_no) === String(targetId));
+            // 2. 현재 필터에 없으면 자동으로 전체 보기로 복구
+            let targetIndex = filteredSignals.findIndex(
+                s => String(s.id) === String(targetId)
+            );
+
+            // 💥 핵심 패치
+            if (targetIndex === -1) {
+                console.log("⚠️ 현재 필터에 없음 → 전체 보기로 자동 복구");
+
+                selectedLevel = null;
+
+                // 버튼 UI도 전체 상태로 복구
+                document.querySelectorAll('#filter-container button').forEach(btn => {
+                    const btnText = btn.innerText;
+
+                    if (btnText === '전체') {
+                        btn.className =
+                            "px-4 py-2 rounded-lg bg-gray-900 text-white font-bold shadow-md transition-all";
+                    } else if (btnText.includes('심각')) {
+                        btn.className =
+                            "px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors";
+                    } else if (btnText.includes('주의')) {
+                        btn.className =
+                            "px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-colors";
+                    } else if (btnText.includes('안정')) {
+                        btn.className =
+                            "px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors";
+                    }
+                });
+
+                applyFilterAndRender();
+
+                // 다시 타겟 찾기
+                targetIndex = filteredSignals.findIndex(
+                    s => String(s.id) === String(targetId)
+                );
+            }
 
             if (targetIndex !== -1) {
                 const targetPage = Math.ceil((targetIndex + 1) / SIGNALS_PER_PAGE);
 
-                // 3. 페이지 전환이 필요하면 전환 후 대기
+                // 페이지 이동 필요 시
                 if (currentPage !== targetPage) {
                     currentPage = targetPage;
                     applyFilterAndRender();
 
-                    // 💡 [기존의 핵심!] 렌더링이 브라우저에 반영될 때까지 확실히 기다림
-                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    await new Promise(resolve =>
+                        requestAnimationFrame(() =>
+                            requestAnimationFrame(resolve)
+                        )
+                    );
                 }
 
-                // 4. DOM 안착 확인 후 사격
+                // DOM 렌더링 완료 후 카드 찾기
                 const targetCard = document.getElementById(`signal-${targetId}`);
+
                 if (targetCard) {
-                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    targetCard.classList.add('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]', 'transition-all', 'duration-500');
 
-                        // 2. 테두리에 파란색 강렬한 네온 링 이펙트 일시 주입 (Tailwind)
-                        targetCard.classList.add('ring-4', 'ring-blue-500', 'transition-all', 'duration-500');
+                    setTimeout(() => {
 
-                        // 3. 2초간 유지 후 이펙트 자연스럽게 소멸 청소
+                        targetCard.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start'
+                        });
+
+                        targetCard.classList.add(
+                            'ring-4',
+                            'ring-blue-500',
+                            'shadow-[0_0_25px_rgba(59,130,246,0.8)]',
+                            'transition-all',
+                            'duration-500'
+                        );
+
                         setTimeout(() => {
-                            targetCard.classList.remove('ring-4', 'ring-blue-500');
+                            targetCard.classList.remove(
+                                'ring-4',
+                                'ring-blue-500',
+                                'shadow-[0_0_25px_rgba(59,130,246,0.8)]'
+                            );
+
+                            history.replaceState(
+                                null,
+                                null,
+                                window.location.pathname
+                            );
+
                         }, 2000);
-                    } else {
-                    console.log("❌ 카드 못 찾음 (DOM 렌더링 지연):", targetId);
+
+                    }, 300);
+
+                } else {
+                    console.log("❌ 카드 DOM 못 찾음:", targetId);
                 }
-            } else {
-                console.log("❌ 해당 기사가 필터링 결과에 없습니다:", targetId);
             }
         }
         // 💡 [참고] 기존 DOMContentLoaded 이벤트 리스너의 맨 아래에 넣어주세요!
