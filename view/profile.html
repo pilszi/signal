@@ -303,7 +303,7 @@
                                     <i data-lucide="key" class="w-4 h-4 text-gray-400"></i> 비밀번호 변경 (선택사항)
                                 </label>
                                 <input type="password" id="password" placeholder="새 비밀번호 입력" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
-                                <input type="password" placeholder="새 비밀번호 확인" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <input type="password" id="password-confirm" placeholder="새 비밀번호 확인" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
 
                             <!-- 저장 버튼 (수정 모드 시 노출) -->
@@ -762,23 +762,21 @@
                 updateButtons();
             }
         }
-
-        function updateButtons() {
-            const rows = document.querySelectorAll('.keyword-row');
-            rows.forEach((row, idx) => {
-                const plusBtn = row.querySelector('button[onclick*="addKeywordField"]');
-                plusBtn.style.display = (idx === rows.length - 1) ? 'block' : 'none';
-            });
-        }
-
-        let param = {};
-        // 폼 제출
+        // 폼 제출 (가장 확실한 태그 매칭 버전)
         async function handleSubmit(e) {
             e.preventDefault();
+
+            const email = document.getElementById('form-email').value.trim();
+            const phone = document.getElementById('form-phone').value.replaceAll('-', '').trim();
             
-            const email = document.getElementById('form-email').value;
-            const phone = document.getElementById('form-phone').value.replaceAll('-', '');;
+            // 🚨 버튼을 누른 순간 화면에서 직접 id로 값을 가져옵니다.
             const pw = document.getElementById('password').value;
+            
+            // 혹시 HTML에 id가 다르게 되어있을 수 있으니 화면을 꼭 확인하세요!
+            const pwConfirmInput = document.getElementById('password-confirm');           
+            
+            const pwConfirm = pwConfirmInput ? pwConfirmInput.value : '';
+            
             const keywordInputs = document.querySelectorAll('.keyword-input');
             const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
 
@@ -787,9 +785,40 @@
                 return;
             }
 
-            // 데이터 업데이트
+            // 🔥 2. 이메일 형식 검사 (추가)
+            // 일반적인 이메일 양식(example@domain.com)인지 정규식으로 검사합니다.
+            const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+            if (!emailRegex.test(email)) {
+                showModal("올바른 이메일 형식이 아닙니다. (예: user@example.com)", "error");
+                return;
+            }
+
+            // 🔥 3. 연락처 자릿수 검사 (추가)
+            // 하이픈을 뺀 순수 숫자가 대한민국 전화번호 기준(최소 10자에서 최대 11자)인지 검사합니다.
+            if (phone.length < 10 || phone.length > 11) {
+                showModal("올바른 연락처 번호가 아닙니다. 자릿수를 확인해주세요. (10~11자리)", "error");
+                return;
+            }
+
+            //  4. 비밀번호 입력이 있을 때만 유효성 검사 실시
+            if (pw !== '') {
+                // [검사 1] 일치 여부
+                if (pw !== pwConfirm) {
+                    showModal("비밀번호가 일치하지 않습니다.", "error");
+                    return; 
+                }
+
+                // [검사 2] 8자 이상, 영문/숫자 혼합
+                const pwRegex = /^(?=.*[a-zA-Z])(?=.*\d).{8,}$/;
+                if (!pwRegex.test(pw)) {
+                    showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.", "error");
+                    return; 
+                }
+            }
+
+            // 데이터 업데이트 진행
             userData.email = email;
-            userData.phone = phone;
+            userData.phone = document.getElementById('form-phone').value;
             userData.keywords = keywords;
 
             param = {
@@ -798,21 +827,32 @@
                 "phone_number": phone,
                 "keyword": keywords,
             };
-            if(pw != ''){
+            
+            if (pw != '') {
                 param.pw = pw;
             }
-            let {data} = await axios.post("/update_profile", param);
-            console.log(data);
-            // UI 업데이트
-            // 왼쪽 카드와 상단바의 이름도 즉시 업데이트
-            document.getElementById('display-name').innerText = userData.name;
-            updateNavbar(); // 상단바 다시 그리기
+            
+            try {
+                let {data} = await axios.post("/update_profile", param);
+                
+                document.getElementById('display-name').innerText = userData.name;
+                updateNavbar(); 
 
-            renderProfile();
-            toggleEdit(); // 수정 모드 종료
-            await updateNotifUI(); // 수정 완료 후 알림 배지와 목록을 즉시 새로고침!
-            showModal("개인정보가 성공적으로 수정되었습니다.", "success");
+                renderProfile();
+                toggleEdit(); 
+                await updateNotifUI(); 
+                showModal("개인정보가 성공적으로 수정되었습니다.", "success");
+                
+                document.getElementById('password').value = '';
+                if (document.getElementById('password-confirm')) {
+                    document.getElementById('password-confirm').value = '';
+                }
+            } catch (error) {
+                console.error(error);
+                showModal("프로필 수정 중 오류가 발생했습니다.", "error");
+            }
         }
+
 
         // 모달 제어
         function showModal(msg, type) {
