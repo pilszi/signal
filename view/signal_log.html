@@ -263,6 +263,7 @@
         let selectedLevel = null;
         let savedUserId = sessionStorage.getItem("savedUserId");
         let noti = [];            // 실시간 사이드바 및 알림용
+        let isInitialScrollDone = false;
 
         // 시그널 컬러 테마
         const levelStyles = {
@@ -293,31 +294,28 @@
 
         // 3. 필터링 및 메인 리스트 렌더링
         function applyFilterAndRender() {
-            // 1. 필터링 로직
+            // 1. 필터링
             if (!selectedLevel || selectedLevel === '전체') {
-                // '전체'일 경우 모든 시그널 표시
                 filteredSignals = [...allSignals];
             } else {
-                // selectedLevel이 '심각', '주의', '안정'으로 들어오므로 데이터와 바로 비교
-                // .includes()를 사용하면 '심각'이 포함된 모든 등급을 안전하게 찾아냅니다.
-                filteredSignals = allSignals.filter(s => s.risk_level.includes(selectedLevel));
+                filteredSignals = allSignals.filter(
+                    s => s.risk_level.includes(selectedLevel)
+                );
             }
 
             // 2. 최신순 정렬
-            filteredSignals.sort((a, b) => new Date(b.signal_time) - new Date(a.signal_time));
+            filteredSignals.sort(
+                (a, b) => new Date(b.signal_time) - new Date(a.signal_time)
+            );
 
-            // 3. 화면 렌더링 호출
+            // 3. 렌더링
             renderSignalList();
             renderPagination();
-        }
 
-        // 4. 리스크 레벨 클래스 결정
-        function getRiskClass(level) {
-            if (level === '심각') return 'risk-severe';
-            if (level === '주의') return 'risk-warning';
-            return 'risk-stable';
-        }
+            // 4. 최초 1회만 스크롤 이동 실행
+            executeScrollToCard();
 
+        }
         // 5. 상세 리스트 렌더링
         function renderSignalList() {
             const listContainer = document.getElementById('signal-list');
@@ -504,32 +502,6 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 11. 알림 리스트 드롭다운 렌더링
-        function renderList(container, data) {
-            if (!container) return;
-            if (data.length === 0) {
-                container.innerHTML = '<div class="p-10 text-center text-gray-400">알림이 없습니다.</div>';
-                return;
-            }
-            // 알림창 출력 필드
-            container.innerHTML = data.map(n => `
-                <div class="notif-item p-4 border-b relative ${n.is_read ? '' : 'bg-blue-50 hover:bg-blue-100'}" onclick="readItem(${n.id})">
-                    <div class="text-xs font-bold ${n.risk_level === '심각' ? 'text-red-600' : 'text-yellow-600'} mb-1">
-                        ${n.risk_level} 단계 알림
-                    </div>
-
-                    <div class="text-sm text-gray-800 mb-1 pr-6">${n.prediction}</div>
-
-                    <div class="text-[10px] text-gray-400">${timeAgo(n.signal_time)}</div>
-                    <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
-                        <i data-lucide="x" class="w-4 h-4"></i>
-                    </button>
-                </div>
-            `).join('') + `
-                <div class="p-3 text-center bg-gray-50">
-                    <button onclick="allRead()" class="text-xs text-blue-600 hover:underline">모두 읽음으로 처리</button>
-                </div>`;
-        }
 
 
         function updateNavbar() {
@@ -689,7 +661,7 @@
 
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.signal_no})">
+                         onclick="readItem(${n.id}, ${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -703,7 +675,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -718,24 +690,23 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        // 3. 특정 알림 클릭 시 읽음 업데이트 및 조준경 타겟 페이지 이동
-        // 알림 클릭 시 읽음 처리 후 목적지 카드로 고유 해시(#)를 들고 이동하는 함수
-        async function readItem(id) {
+        // signal_log.html 전용 readItem (최종 마감 버전)
+        async function readItem(id, signalNo) {
             try {
-                // 1. 서버에 읽음 상태 반영 (POST 규격)
-                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+                // 1. 서버 읽음 처리
+                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
 
-                const targetUrl = `signal_log.html#signal-${id}`;
+                // 2. 알림창 닫기 (이걸 빼먹으면 알림창이 계속 열려있습니다!)
+                if (typeof dropdown !== 'undefined') dropdown.classList.add('hidden');
 
-                // 2. 만약 이미 시그널로그 페이지에 머물고 있다면 화면 갱신 없이 바로 스크롤 구동
-                if (window.location.pathname.endsWith('signal_log.html')) {
-                    window.location.hash = `signal-${id}`;
-                    executeScrollToCard(); // 아래 2번에서 만들 함수 호출
-                    updateNotifUI();       // 알림창 개수 갱신
-                } else {
-                    // 3. 다른 페이지(main, custom)에 있다면 해시를 품고 시그널 로그 페이지로 강제 이동
-                    window.location.href = targetUrl;
-                }
+                // 3. 해시 변경 (주소창에 #signal-149가 뜸)
+                window.location.hash = `signal-${signalNo}`;
+
+                // 4. 스크롤 및 효과 발동
+                executeScrollToCard();
+
+                // 5. 알림 배지 카운트 갱신 (서버 다녀온 뒤 숫자 1 줄이기)
+                await updateNotifUI();
             } catch (err) {
                 console.error("알림 확인 통신 오류:", err);
             }
@@ -752,8 +723,9 @@
                 targetItem.remove();
             }
 
-            // 🎯 3. [핵심 패치] String()을 감싸 문자열이든 숫자든 강제로 일치시켜 배열에서 확실히 빼버립니다.
-            noti = noti.filter(n => String(n.id) !== String(id) && String(n.signal_no) !== String(id));
+            noti = noti.filter(
+                n => String(n.id) !== String(id)
+            );
 
             // 4. 안 읽은 알림 수 재계산
             const unreads = noti.filter(n => !n.is_read);
@@ -810,36 +782,57 @@
                 console.error("전체 알림 읽음 처리 통신 오류:", err);
             }
         }
-        // 주소창 뒤의 #signal-번호를 역추적해서 해당 카드로 부드럽게 스크롤하고 반짝임 효과를 주는 함수
-        function executeScrollToCard() {
+        // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
+        async function executeScrollToCard() {
             const hash = window.location.hash;
-            if (hash && hash.startsWith('#signal-')) {
-                setTimeout(() => {
-                    const targetCard = document.querySelector(hash);
-                    if (targetCard) {
-                        // 1. 해당 카드가 브라우저 정중앙에 오도록 부드럽게 스크롤 무빙
-                        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (!hash || !hash.startsWith('#signal-')) return;
 
-                        // 2. 테두리에 파란색 강렬한 네온 링 이펙트 일시 주입 (Tailwind)
-                        targetCard.classList.add('ring-4', 'ring-blue-500', 'transition-all', 'duration-500');
+            const targetId = hash.substring(8); // 'signal-' 뒷부분 숫자 추출
+            // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
+            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
+            const existsInFiltered = filteredSignals.find(s => String(s.signal_no) === String(targetId));
 
-                        // 3. 2초간 유지 후 이펙트 자연스럽게 소멸 청소
-                        setTimeout(() => {
-                            targetCard.classList.remove('ring-4', 'ring-blue-500');
-                        }, 2000);
-                    }
-                }, 600); // 리스트 도면 엘리먼트들이 확실히 그려질 때까지 대기하는 안정 마진 시간
+            console.log("🔍 [진단] 타겟:", targetId);
+            console.log("🔍 전체 데이터에 존재?", !!existsInAll);
+            console.log("🔍 필터링 데이터에 존재?", !!existsInFiltered);
+            console.log("🔍 현재 선택된 레벨(selectedLevel):", selectedLevel);
+            // ----------------------------------------------------------------
+            // 1. 데이터가 로드될 때까지 0.1초씩 재시도 (비동기 데이터 보호)
+            if (!allSignals || allSignals.length === 0) {
+                setTimeout(executeScrollToCard, 100);
+                return;
+            }
+
+            // 2. 타겟 위치 파악
+            const targetIndex = allSignals.findIndex(s => String(s.signal_no) === String(targetId));
+
+            if (targetIndex !== -1) {
+                const targetPage = Math.ceil((targetIndex + 1) / SIGNALS_PER_PAGE);
+
+                // 3. 페이지 전환이 필요하면 전환 후 대기
+                if (currentPage !== targetPage) {
+                    currentPage = targetPage;
+                    applyFilterAndRender();
+
+                    // 💡 [기존의 핵심!] 렌더링이 브라우저에 반영될 때까지 확실히 기다림
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                }
+
+                // 4. DOM 안착 확인 후 사격
+                const targetCard = document.getElementById(`signal-${targetId}`);
+                if (targetCard) {
+                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    targetCard.classList.add('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]', 'transition-all', 'duration-500');
+
+                    setTimeout(() => {
+                        targetCard.classList.remove('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]');
+                    }, 2000);
+                } else {
+                    console.log("❌ 카드 못 찾음 (DOM 렌더링 지연):", targetId);
+                }
+            } else {
+                console.log("❌ 해당 기사가 필터링 결과에 없습니다:", targetId);
             }
         }
-
-        // 💡 [참고] 기존 DOMContentLoaded 이벤트 리스너의 맨 아래에 넣어주세요!
-        document.addEventListener('DOMContentLoaded', async () => {
-            updateNavbar();
-            axios.get("/session_out");
-            await refreshAllData();
-
-            // 🎯 페이지 로드 시 해시가 있으면 추적 스크롤 가동!
-            executeScrollToCard();
-        });
     </script>
 </html>

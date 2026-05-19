@@ -53,7 +53,7 @@ logging.getLogger("elastic_transport").setLevel(logging.WARNING) # 통신 로그
 logging.getLogger("urllib3").setLevel(logging.WARNING) # 네트워크 요청 로그 숨기기
 
 def get_es():
-    return Elasticsearch("http://localhost:9200")
+    return Elasticsearch("http://100.123.232.79:9200")
 
 
 def close_es(es):
