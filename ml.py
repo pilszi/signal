@@ -227,8 +227,16 @@ def get_weighted_keyword_score(title, content):
 
 # 제미나이 프롬프트
 async def get_ai_prediction_report(risk_level, title, keywords, scores):
+    # 💡 [추가] keywords가 문자열(str)로 들어오면 리스트로 바꿔주는 방어 로직
+    if isinstance(keywords, str):
+        # 만약 "키워드1, 키워드2" 형태라면 분리하고, 아니면 단일 리스트로 만듦
+        keywords = [k.strip() for k in keywords.split(',')] if ',' in keywords else [keywords]
+
+    # 이제 안전하게 상위 2개를 뽑습니다.
+    # 만약 keywords가 ['Unknown'] 이라면 kw_str은 "Unknown"이 됩니다.
+    kw_filtered = [k for k in keywords if k and k.lower() != 'unknown']  # 의미 없는 단어 제거
      # 키워드 상위 2개를 뽑아 문장에 자연스럽게 삽입
-    kw_str = ", ".join(keywords[:2]) if keywords else "주요 지표"
+    kw_str = ", ".join(kw_filtered[:2]) if kw_filtered else "주요 지표"
     subject = title[:20] + "..." if len(title) > 20 else title
 
     if risk_level == "주의":

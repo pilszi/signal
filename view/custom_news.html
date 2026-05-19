@@ -194,9 +194,10 @@
                             <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
                                 <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>                                  
+                                    <span class="header-title">실시간 위기 감지</span>
+                                    <span class="header-count" id="notifCountText">0개의 새 알림</span>
                                 </div>
-                                 <div id="notifList"></div>
+                                <div id="notifList"></div>
                             </div>
                         </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
@@ -327,29 +328,28 @@
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
-            // 태그가 없을 시 함수 종료(에러방지)
-            // console.log(authContainer);
             if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
-            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null') {
-                // 1. 인사말 영역 처리
-                // 관리자 계정일 경우
+            if (userGreeting && savedUserId && savedUserId !== 'guest' && savedUserId !== 'null' && savedUserId !== 'undefined') {
+                // 1. 인사말 영역 처리 (굵은 검정 글자 테마 적용)
                 if (savedUserId === 'admin') {
+                    // 관리자 계정일 경우
                     userGreeting.innerHTML = `
-                        <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
-                                반갑습니다
+                        <div class="text-sm text-gray-600 font-medium">
+                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md font-bold text-gray-800">관리자님</a>
+                            반갑습니다
                         </div>
-                        `
-                // 회원 계정일 경우
+                    `;
                 } else {
+                    // 일반 회원 계정일 경우 (main.html과 동일하게 커스텀)
                     userGreeting.innerHTML = `
-                        <a class="text-sm text-gray-600">
-                            <span>${savedUserId} 님 반갑습니다</span>
-                        </a>
-                        `
+                        <span class="text-sm text-gray-600 font-medium">
+                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
+                        </span>
+                    `;
                 }
+                if (userGreeting) userGreeting.classList.remove('hidden');
 
                 // 2. 로그아웃 버튼 표시
                 authContainer.innerHTML = `
@@ -359,20 +359,16 @@
                 `;
             } else {
                 // 로그아웃 상태일 때
-                if (userGreeting) {
-                    userGreeting.classList.add('hidden'); // 인사말 숨김
-                }
-
+                if (userGreeting) userGreeting.classList.add('hidden');
                 authContainer.innerHTML = `
                     <a href="login.html" class="px-4 py-2 text-sm font-medium text-blue-600 rounded-lg hover:bg-gray-100 transition-colors uppercase">
                         LOG IN
                     </a>
                 `;
             }
-            
+
             if (window.lucide) lucide.createIcons();
         }
-
 
         const trigger = document.getElementById('notifTrigger');
         const dropdown = document.getElementById('notifDropdown');
@@ -534,21 +530,6 @@
             location.href = 'signal_log.html';
         }
 
-        // 아이템 삭제
-        async function deleteItem(e, id) {
-            e.stopPropagation();
-            noti = noti.map(n => {
-                if (n.id === id) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, is_read: 1 };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
-                }
-            });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
-            updateNotifUI();
-        }
 
         // 모두 읽음
         async function allRead() {
@@ -564,8 +545,15 @@
                 "주의": "bg-yellow-100 text-yellow-700",
                 "심각": "bg-red-100 text-red-700"
             };
-            // console.log(news);
-            const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
+
+            const displayScore = 100 - Math.round(Math.abs((news.risk_score || 0) * 100));
+
+            // 💡 [방어 코드] 날짜 데이터가 비어있거나 다를 때 split 오류로 페이지 전체가 멈추는 버그 차단
+            const displayDate = news.published_date ? news.published_date.split('T')[0] : "날짜 미상";
+
+            // 키워드가 배열일 때 화면에 보기 좋게 문자열로 파싱 예외 처리
+            const keywordBadge = Array.isArray(news.keyword) ? news.keyword.join(', ') : (news.keyword || '일반');
+
             let newBadge = '';
             if (!news.is_read) {
                 newBadge = '<div class="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>';
@@ -573,7 +561,7 @@
 
             return `
                 <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
-                    <a href=${news.url} target="_blank">
+                    <a href="${news.url}" target="_blank">
                     <img src="${news.main_image}"
                         onerror="this.onerror=null; this.src='/static/img/signal_image.png';"
                         alt="news"
@@ -584,13 +572,13 @@
                             <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level] || 'bg-gray-100'}">
                                 Signal ${displayScore}
                             </span>
-                            <span class="text-xs text-blue-600 font-medium">${news.keyword}</span>
+                            <span class="text-xs text-blue-600 font-medium">${keywordBadge}</span>
                         </div>
                         <div class="flex justify-between items-center mt-4">
                             <span class="text-sm text-gray-500 h-8">${news.press_name}</span>
-                            <span class="text-xs text-gray-400 h-8">${news.published_date.split('T')[0]}</span>
-                            </div>
-                        <a href=${news.url} target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
+                            <span class="text-xs text-gray-400 h-8">${displayDate}</span>
+                        </div>
+                        <a href="${news.url}" target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
                     </div>
                     ${newBadge}
                 </div>
@@ -770,7 +758,206 @@
                     alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
                 }
             } 
-        }      
+        }
+        // 1. 알림 UI 및 배지 수량 실시간 갱신
+        async function updateNotifUI() {
+            const badge = document.getElementById('notifBadge');
+            const listContainer = document.getElementById('notifList');
+            const countText = document.getElementById('notifCountText');
+
+            // 비회원 및 게스트 유저 예외 방어 처리
+            if (!savedUserId || savedUserId === "null" || savedUserId === "undefined" || savedUserId === "guest") {
+                if (badge) badge.style.display = 'none';
+                if (countText) countText.innerText = '0개의 새 알림';
+                if (listContainer) {
+                    listContainer.innerHTML = `
+                        <div style="padding: 40px; text-align: center;">
+                            <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
+                        </div>`;
+                }
+                return;
+            }
+
+            try {
+                // 백엔드 통합 알림 API 호출
+                const { data } = await axios.get(`/noti/signal?id=${savedUserId}`);
+                noti = data.noti || [];
+
+                // 드롭다운 내부에 알림 카드 카드 출력
+                renderList(listContainer, noti);
+
+                // 안 읽은 알림(alarm_view = 0)만 카운팅하여 빨간색 배지 노출
+                const unreads = noti.filter(n => !n.is_read);
+                if (countText) countText.innerText = `${unreads.length}개의 새 알림`;
+
+                if (unreads.length > 0) {
+                    if (badge) {
+                        badge.innerText = unreads.length;
+                        badge.style.display = 'flex';
+                    }
+                } else {
+                    if (badge) badge.style.display = 'none';
+                }
+            } catch (error) {
+                console.error("알림 UI 로드 실패:", error);
+            }
+        }
+
+        // 2. 알림 드롭다운 카드 내부 디자인 렌더링
+        function renderList(container, notiList) {
+            if (!container) return;
+
+            if (notiList.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
+                return;
+            }
+
+            // 알림이 5개 이상 쌓일 때만 내부 스크롤바 활성화하여 레이아웃 붕괴 방지
+            if (notiList.length >= 5) {
+                container.style.maxHeight = '420px';
+                container.style.overflowY = 'auto';
+            } else {
+                container.style.maxHeight = 'none';
+                container.style.overflowY = 'visible';
+            }
+
+            container.innerHTML = notiList.map(n => {
+                let icon = "bell";
+                let iconColor = "text-gray-400";
+                let bgColor = "bg-gray-100";
+
+                // 위험 수위가 '심각'인 비상용 시그널 처리
+                if (n.type === 'emergency') {
+                    icon = "alert-triangle";
+                    iconColor = "text-red-500";
+                    bgColor = "bg-red-50";
+                }
+
+                return `
+                    <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
+                         onclick="readItem(${n.signal_no})">
+                        <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
+                            <i data-lucide="${icon}" class="w-5 h-5"></i>
+                        </div>
+
+                        <div class="flex-1 pr-6">
+                            <div class="text-sm font-bold text-gray-900 mb-0.5 line-clamp-1">${n.title}</div>
+                            <div class="text-xs text-gray-600 line-clamp-2 leading-relaxed">${n.message}</div>
+                            <div class="flex items-center gap-2 mt-1.5">
+                                <span class="text-[10px] text-gray-400">${timeAgo(n.time)}</span>
+                                ${n.is_read ? '' : '<span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>'}
+                            </div>
+                        </div>
+
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('') + `
+                <div class="p-3 text-center bg-gray-50 rounded-b-xl border-t">
+                    <button onclick="allRead()" class="text-xs text-blue-600 font-bold hover:underline transition-all">
+                        모두 읽음으로 표시
+                    </button>
+                </div>`;
+
+            if (window.lucide) lucide.createIcons();
+        }
+
+        // 3. 특정 알림 클릭 시 읽음 업데이트 및 조준경 타겟 페이지 이동
+        // 알림 클릭 시 읽음 처리 후 목적지 카드로 고유 해시(#)를 들고 이동하는 함수
+        async function readItem(id) {
+            try {
+                // 1. 서버에 읽음 상태 반영 (POST 규격)
+                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+
+                const targetUrl = `signal_log.html#signal-${id}`;
+
+                // 2. 만약 이미 시그널로그 페이지에 머물고 있다면 화면 갱신 없이 바로 스크롤 구동
+                if (window.location.pathname.endsWith('signal_log.html')) {
+                    window.location.hash = `signal-${id}`;
+                    executeScrollToCard(); // 아래 2번에서 만들 함수 호출
+                    updateNotifUI();       // 알림창 개수 갱신
+                } else {
+                    // 3. 다른 페이지(main, custom)에 있다면 해시를 품고 시그널 로그 페이지로 강제 이동
+                    window.location.href = targetUrl;
+                }
+            } catch (err) {
+                console.error("알림 확인 통신 오류:", err);
+            }
+        }
+
+        // [세 페이지 공통] 타입 미스매치 버그가 완벽 해결된 실시간 삭제 카운터 함수
+        async function deleteItem(e, id) {
+            // 1. 부모 박스 클릭 이벤트 전파 차단
+            e.stopPropagation();
+
+            // 2. 화면에서 카드 레이아웃 즉시 파기
+            const targetItem = e.target.closest('.notif-item');
+            if (targetItem) {
+                targetItem.remove();
+            }
+
+            // 🎯 3. [핵심 패치] String()을 감싸 문자열이든 숫자든 강제로 일치시켜 배열에서 확실히 빼버립니다.
+            noti = noti.filter(n => String(n.id) !== String(id) && String(n.signal_no) !== String(id));
+
+            // 4. 안 읽은 알림 수 재계산
+            const unreads = noti.filter(n => !n.is_read);
+
+            // 5. 알림창 드롭다운 헤더 텍스트 실시간 동기화 ("X개의 새 알림")
+            const countText = document.getElementById('notifCountText');
+            if (countText) {
+                countText.innerText = `${unreads.length}개의 새 알림`;
+            }
+
+            // 6. 종 모양 배지 숫자 실시간 동기화
+            const badge = document.getElementById('notifBadge');
+            if (badge) {
+                if (unreads.length > 0) {
+                    badge.innerText = unreads.length;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none'; // 0개가 되면 빨간 배지 숨김
+                }
+            }
+
+            // 7. 알림판에 더 이상 남은 기사가 없을 때 안내 텍스트 출력
+            const listContainer = document.getElementById('notifList');
+            if (listContainer) {
+                const remainingItems = listContainer.querySelectorAll('.notif-item');
+                if (remainingItems.length === 0) {
+                    listContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
+                    listContainer.style.maxHeight = 'none';
+                    listContainer.style.overflowY = 'visible';
+                }
+            }
+
+            // 8. 시그널 로그 페이지용 실시간 사이드바 연동 방어선
+            if (typeof renderSignalLogs === 'function') {
+                renderSignalLogs();
+            }
+
+            // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
+            try {
+                await axios.post("/noti/delete", { "id": id, "user_id": savedUserId });
+            } catch (err) {
+                console.error("알림 숨김 처리 서버 통신 에러:", err);
+            }
+        }
+
+        // 5. 하단 모두 읽음 버튼 클릭 시: 비동기 POST 일괄 확인 완료 처리
+        async function allRead() {
+            try {
+                let { data } = await axios.post("/noti/read_all", { "user_id": savedUserId });
+                if (data.res) {
+                    updateNotifUI();
+                }
+            } catch (err) {
+                console.error("전체 알림 읽음 처리 통신 오류:", err);
+            }
+        }
         
     </script>
 

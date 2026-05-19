@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import subprocess
+import random
 import asyncio
 from typing import Dict, Any
 import traceback
@@ -107,7 +108,6 @@ async def run_analysis_and_save():
                 # [STEP 2] 키워드 매칭
                 # ==========================================
                 news_keywords = res.get('keywords', [])
-
                 if news_keywords:
 
                     match_sql = sqlalchemy.text("""
@@ -129,7 +129,6 @@ async def run_analysis_and_save():
 
                     # 사용자별 처리
                     for user in matched_users:
-
                         logger.info(
                             f"🎯 매칭 성공! 사용자: {user.member_no}"
                         )
@@ -166,11 +165,8 @@ async def run_analysis_and_save():
                                     },
                                     news_url=res.get('url'),
                                     risk_level='심각',
-                                    keywords_str=", ".join(news_keywords),
-                                    title=res.get(
-                                        'title',
-                                        '리스크 감지 알림'
-                                    )
+                                    keywords_str=news_keywords,
+                                    title=res.get('title','리스크 감지 알림')
                                 )
 
                             except Exception as mail_err:
@@ -264,11 +260,9 @@ async def lifespan(app: FastAPI):
     global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
     global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
     global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
-    # 학습/분석 파이프라인 관리 (5분마다 체크)
     global_scheduler.add_job(run_analysis_and_save,'interval',minutes=10,id='ml_analysis',max_instances=1,replace_existing=True)
-
-    # 배치 작업 다 끝난 이후에 스케줄러 실행
-    await run_initial_batch(global_scheduler)
+    # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
+    asyncio.create_task(run_initial_batch(global_scheduler))
 
     global_scheduler.start()
     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
@@ -276,8 +270,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- 서버 종료 시 정리 로직 ---
-    logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")        # 서버가 돌아가는 지점
-
+    logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")
     global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
     executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
 
@@ -306,8 +299,13 @@ def overlay(id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/regist")
-def regist(info: RegistModel, db: Session = Depends(get_db)):
+def regist(info: RegistModel, req: Request, db: Session = Depends(get_db)):
     """회원가입 및 키워드 저장"""
+    # [백엔드 이중 보안] 진짜 이메일 인증 단계를 통과했는지 세션 최종 검증
+    session_data = req.session.get("regist_auth")
+    if not session_data or session_data["email"] != info.email or not session_data["verified"]:
+        return {"msg": "이메일 인증이 완료되지 않았거나 세션이 만료되었습니다."}
+
     pw = hash_password(info.pw)
 
     sql = sqlalchemy.text("""INSERT INTO member_info (id, pw, user_name, phone_number, email)
@@ -319,8 +317,74 @@ def regist(info: RegistModel, db: Session = Depends(get_db)):
     child_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES (:member_no, :keyword)")
     for key in info.keyword:
         db.execute(child_sql, {"member_no": member_no, "keyword": key})
+    # 가입 성공 시 인증 관련 세션 파기하여 깔끔하게 정리
+    req.session.pop("regist_auth", None)
     db.commit()
     return
+
+
+# 회원가입 인증번호 요청
+@app.post("/request_auth")
+def request_auth(email: str):
+    import random
+    # 1. 6자리 랜덤 번호 생성
+    auth_code = str(random.randint(100000, 999999))
+
+    # 여기에 인증번호 호출 코드를 넣기
+    notifier.send_emergency_email(
+        to_email=email,
+        ai_report={'prediction': auth_code},
+        news_url=None,
+        risk_level="AUTH",
+        keywords_str=None,
+        title="회원가입 인증번호"
+    )
+
+    # 이후 생성된 코드를 DB나 세션에 저장하여 검증
+    return {"msg": "인증번호가 발송되었습니다."}
+
+
+
+
+# 회원가입 1단계: 이메일 발송 요청
+@app.post("/regist/request_code")
+def regist_request_code(info: Dict[str, str], req: Request):
+    email = info.get("email")
+    if not email:
+        return {"res": False, "msg": "이메일 주소를 입력해주세요."}
+
+    # 6자리 랜덤 번호 생성
+    auth_code = str(random.randint(100000, 999999))
+
+    # 세션에 이메일과 매핑하여 인증코드 임시 보관
+    req.session["regist_auth"] = {"email": email, "code": auth_code, "verified": False}
+
+    # 만능 알림 함수 호출 (AUTH 모드 가동)
+    success = notifier.send_emergency_email(
+        to_email=email,
+        ai_report={'prediction': auth_code},
+        news_url=None,
+        risk_level="AUTH",
+        keywords_str=None,
+        title="회원가입 이메일 인증번호"
+    )
+    return {"res": success, "msg": "인증코드가 발송되었습니다." if success else "메일 발송에 실패했습니다."}
+
+
+# 회원가입 2단계: 인증코드 검증
+@app.post("/regist/verify_code")
+def regist_verify_code(info: Dict[str, str], req: Request):
+    input_code = info.get("code")
+    session_data = req.session.get("regist_auth")
+
+    if not session_data or session_data["code"] != input_code:
+        return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
+
+    # 검증 성공 상태를 세션에 업데이트
+    session_data["verified"] = True
+    req.session["regist_auth"] = session_data
+    return {"res": True}
+
 
 
 @app.post('/login')
@@ -605,12 +669,13 @@ def news_view(info:Dict[str, str], db: Session = Depends(get_db)):
 
 
 # 맞춤형뉴스 요청
+# [main.py 내부 - custom_news 함수 완전히 덮어씌우기]
 @app.get("/custom_news")
 def custom_news(id: str, db: Session = Depends(get_db)):
     """ 맞춤형 뉴스 데이터 요청 """
     logger.info(f'📡 맞춤형 요청 id = {id}')
 
-    # 1. 사용자의 관심 키워드 조회 (단순하고 확실하게)
+    # 1. 사용자의 관심 키워드 조회
     kw_sql = sqlalchemy.text("""
         SELECT mk.keyword 
         FROM member_keyword mk 
@@ -619,7 +684,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
     """)
     user_keywords = db.execute(kw_sql, {"id": id}).scalars().all()
 
-    # 2. 사용자가 읽은 기사 URL 목록 조회 (중복 제거를 위해)
+    # 2. 사용자가 읽은 기사 URL 목록 조회
     view_sql = sqlalchemy.text("""
         SELECT nv.news_url 
         FROM news_view nv 
@@ -635,7 +700,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
     # 공백 제거 및 중복 제거
     clean_keywords = list(set(k.strip() for k in user_keywords if k.strip()))
 
-    # 3. Elasticsearch 쿼리 구성
+    # 3. Elasticsearch 쿼리 구성 (💡 term 쿼리를 대소문자/공백 방어형 match 쿼리로 업그레이드)
     body = {
         "query": {
             "bool": {
@@ -643,11 +708,11 @@ def custom_news(id: str, db: Session = Depends(get_db)):
                     {
                         "bool": {
                             "should": [
-                                # 리스트의 각 키워드마다 _name을 붙여서 쿼리 생성
-                                {"term": {"keywords": {"value": kw, "_name": kw}}}
+                                # match 쿼리로 바꾸어도 _name 속성을 통해 matched_queries 추출이 가능합니다!
+                                {"match": {"keywords": {"query": kw, "_name": kw}}}
                                 for kw in clean_keywords
                             ],
-                            "minimum_should_match": 1  # terms 쿼리처럼 최소 하나는 매치되어야 함
+                            "minimum_should_match": 1
                         }
                     }
                 ],
@@ -655,7 +720,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
                     {
                         "range": {
                             "published_date": {
-                                "gte": "now-30d",  # 57건을 보려면 범위를 넉넉히 잡으세요
+                                "gte": "now-30d",
                                 "lte": "now"
                             }
                         }
@@ -673,7 +738,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
     custom_news_list = []
     for hit in res['hits']['hits']:
         source = hit["_source"]
-        # hit 객체에서 바로 matched_queries를 가져옵니다.
+        # 매칭된 쿼리 배열 추출
         display_keyword = hit.get('matched_queries', [])
         logger.info(f"🎯 매칭 키워드 = {display_keyword}")
 
@@ -683,10 +748,9 @@ def custom_news(id: str, db: Session = Depends(get_db)):
             'main_image': source.get("main_image") or "https://via.placeholder.com/400x300",
             'published_date': source.get("published_date"),
             'press_name': source.get("press_name", "알 수 없음"),
-            'keyword': display_keyword,
+            'keyword': display_keyword, # 배열 구조 유지
             'risk_score': source.get("final_total_score", {}).get("total", 0),
             'risk_level': source.get("risk_level", "안정"),
-            # 여기서 열람 여부를 체크합니다.
             'is_read': source.get("url") in read_urls
         })
 
@@ -696,7 +760,6 @@ def custom_news(id: str, db: Session = Depends(get_db)):
         "total_val": len(custom_news_list),
         "news": custom_news_list
     }
-
 
 # 시그널로그 페이지
 @app.get("/signal_log")
@@ -750,45 +813,50 @@ def signal_log(id: str, db: Session = Depends(get_db)):
             "match_keyword": kw_list
         })
 
-    logger.info(f"✅ {id} 리더님 매칭 문서 {len(doc_no)}건 반환 완료")
+    logger.info(f"✅ {id}님의 signal {len(doc_no)}건 반환 완료")
     return {"data": doc_no}
 
 
 
-# 네이게이션바 signal 알림 토글 요청
+# signal 알림 토글 요청
 @app.get("/noti/signal")
 def noti_signal(id:str, db: Session = Depends(get_db)):
     """ 페이지 상단 네비게이션바 통합 알림 요청 """
-    # logger.info(f'----{id}----')
     logger.info(f"📋 {id}님의 시그널 로그 알림 요청")
+
     sql = sqlalchemy.text("""
-        SELECT
-            t1.signal_no AS id
-            ,t1.risk_level
-            ,t1.prediction AS message
-            ,t1.signal_time AS time
-            ,t2.alarm_view AS is_read
-            ,CASE
-                WHEN t1.risk_level = '심각' THEN 'emergency'
-             END AS type
-        FROM signal_message t1
-        JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
-        JOIN member_info t3 ON t2.member_no = t3.member_no
-        WHERE t3.id = :id
-        AND t2.alarm_view = 0 AND t1.risk_level = '심각'
-        ORDER BY t2.alarm_time DESC LIMIT 10
-    """)
+            SELECT
+                t1.signal_no AS signal_no
+                ,t1.risk_level
+                ,t1.prediction AS message
+                ,t1.signal_time AS time
+                ,t2.alarm_view AS is_read
+                ,CASE
+                    WHEN t1.risk_level = '심각' THEN 'emergency'
+                    ELSE 'keyword'
+                 END AS type
+            FROM signal_message t1
+            JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
+            JOIN member_info t3 ON t2.member_no = t3.member_no
+            WHERE t3.id = :id
+            AND t2.alarm_view = 0 AND t1.risk_level = '심각'
+            ORDER BY t2.alarm_time DESC LIMIT 10
+        """)
     res = db.execute(sql, {"id": id}).mappings().fetchall()
+
     notis = []
     for n in res:
+        # DB의 datetime 객체를 프론트엔드가 다루기 좋게 문자열로 포맷팅
+        time_str = n["time"].strftime("%Y-%m-%d %H:%M") if n["time"] else ""
         notis.append({
-            "id": n["id"],
+            "id": n["signal_no"], # 구형 프론트엔드 호환용
+            "signal_no": n["signal_no"], # 신형 스크립트 매핑용 (moveToSignalLog 사용)
             "type": n["type"],
             "risk_level": n["risk_level"],
-            "title": f"{n['risk_level']} 위험 시그널" if n['type'] == 'emergency' else "키워드 알림",
+            "title": f"{n['risk_level']} 위험 시그널",
             "message": n["message"],
             "is_read": n["is_read"],
-            "time": n["time"]
+            "time": time_str
         })
     return {"noti": notis}
 
@@ -796,7 +864,7 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
 # 알림토글 읽음 요청
 @app.post("/noti/read")
 def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
-
+    """ 알림 클릭 시 해당 알림 확인 상태 변경 """
     sql = sqlalchemy.text("""
             UPDATE alarm_log t1 JOIN member_info t2 
                 ON t1.member_no = t2.member_no 
@@ -804,27 +872,45 @@ def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
                         WHERE t1.signal_no = :signal_no AND t2.id = :id
         """)
     res = db.execute(sql, {"signal_no": info["id"], "id": info["user_id"]})
-    logger.info(f'알림 확인 업데이트 = {res.rowcount}개')
+    logger.info(f'👉 알림 확인 업데이트 완료 = {res.rowcount}개')
     db.commit()
-    return
+    return {"res": True}
 
+
+# X 버튼 클릭 시: 알림판에서만 제외 (DB 데이터는 보존)
+@app.post("/noti/delete")
+def noti_delete(info: Dict[str, Any], db: Session = Depends(get_db)):
+    """ 사용자가 X 버튼을 눌러 알림판에서 숨김 처리 (Hard Delete ➔ Soft Hide) """
+
+    # alarm_view 상태만 1로 바꿉니다.
+    sql = sqlalchemy.text("""
+        UPDATE alarm_log t1 
+        JOIN member_info t2 ON t1.member_no = t2.member_no
+        SET t1.alarm_view = 1 
+        WHERE t1.signal_no = :signal_no AND t2.id = :id
+    """)
+    res = db.execute(sql, {"signal_no": info.get("id"), "id": info.get("user_id")})
+    logger.info(f"👀 알림 숨김(읽음) 처리 완료 = {res.rowcount}개")
+    db.commit()
+    return {"res": True}
 
 
 # 모든 알림토글 읽음 요청
-@app.get("/noti/read_all")
-def noti_raed_all(id:str, db: Session = Depends(get_db)):
-    """ 네비게이션바 시그널알림 확인 요청 """
+@app.post("/noti/read_all")
+def noti_raed_all(info: Dict[str, Any], db: Session = Depends(get_db)):
+    """ 하단 '모두 읽음으로 표시' 클릭 시 드롭다운 일괄 드롭 """
+    user_id = info.get("user_id")
 
     sql = sqlalchemy.text("""
-        UPDATE alarm_log t1 JOIN member_info t2 
-            ON t1.member_no = t2.member_no
-                SET t1.alarm_view = 1 
-                    WHERE t1.alarm_view = 0 AND t2.id = :id
-    """)
-    res = db.execute(sql, {"id": id})
-    logger.info(f'{id} 의 모든 알림 읽음 업데이트 = {res.rowcount}개')
+            UPDATE alarm_log t1 
+            JOIN member_info t2 ON t1.member_no = t2.member_no
+            SET t1.alarm_view = 1 
+            WHERE t1.alarm_view = 0 AND t2.id = :id
+        """)
+    res = db.execute(sql, {"id": user_id})
+    logger.info(f"🧹 {user_id}의 모든 알림 읽음 처리 완료 = {res.rowcount}개")
     db.commit()
-    return
+    return {"res": True}
 
 
 # ==========================================
@@ -928,46 +1014,158 @@ def country_map(db: Session = Depends(get_db)):
 # ===============================
 #        find ID / PW
 # ===============================
-# 아이디 찾기
-@app.post("/find_id")
-def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
-    logger.info(f'id 찾기 info = {info}')
-    findId = []
+# 아이디 찾기 1단계: 인증코드 요청
+@app.post("/find_id/request")
+def find_id_request(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
+    name = info.get("name")
+    email = info.get("email")
 
-    sql = sqlalchemy.text("""SELECT id, create_at FROM member_info WHERE user_name = :name AND email = :email""")
-    res = db.execute(sql, {"name": info["name"], "email": info["email"]}).mappings().fetchall()
-    # logger.info(f'id 찾기 결과 = {res}')
-    save_admin_log(db=db, log_type='find', title='아이디 요청', content=f'아이디 찾기 요청 : {info["name"]}')
-    return {"res": res}
+    # 가입된 유저가 있는지 먼저 확인
+    sql = sqlalchemy.text("SELECT 1 FROM member_info WHERE user_name = :name AND email = :email")
+    user_exists = db.execute(sql, {"name": name, "email": email}).scalar()
+
+    if not user_exists:
+        return {"res": False, "msg": "일치하는 회원 정보가 없습니다."}
+
+    # 정보가 일치하여 이메일로 인증번호를 쏘기 직전에 요청 기록 적재
+    save_admin_log(
+        db=db,
+        log_type='find',
+        title='아이디 찾기 요청',
+        content=f'아이디 찾기 인증코드 요청 : {name}'
+    )
+    # 6자리 인증코드 생성 및 세션 저장
+    auth_code = str(random.randint(100000, 999999))
+    req.session["find_id_auth"] = {"email": email, "name": name, "code": auth_code}
+
+    # 만능 알림 함수 호출 (AUTH 모드)
+    notifier.send_emergency_email(
+        to_email=email,
+        ai_report={'prediction': auth_code},
+        news_url=None,
+        risk_level="AUTH",
+        keywords_str=None,
+        title="아이디 찾기 인증번호"
+    )
+    return {"res": True}
 
 
-# 비밀번호 찾기
-@app.post("/request_code")
-def request_code(info:Dict[str, str], db: Session = Depends(get_db)):
-    # logger.info(f'비밀번호 요청 {info}')
-    success = False
+# 아이디 찾기 2단계: 코드 검증 및 아이디 반환
+@app.post("/find_id/verify")
+def find_id_verify(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
+    input_code = info.get("code")
+    session_data = req.session.get("find_id_auth")
 
-    sql = sqlalchemy.text("""SELECT user_name FROM member_info WHERE id = :id AND email = :email""")
-    res = db.execute(sql, {"id": info["userId"], "email": info["email"]}).mappings().fetchone()
-    # logger.info(res)
-    save_admin_log(db=db, log_type='find', title='비밀번호 요청', content=f'비밀번호 찾기 요청 : {info["userId"]}', target_id=info['userId'])
-    if res:
-        success = True
+    if not session_data or session_data["code"] != input_code:
+        return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
+
+    # 인증 성공 시 아이디 조회 후 반환
+    sql = sqlalchemy.text("SELECT id, create_at FROM member_info WHERE user_name = :name AND email = :email")
+    res = db.execute(sql, {"name": session_data["name"], "email": session_data["email"]}).mappings().fetchall()
+    # 🎯 [버그 수정 완료] info["name"] 대신 안전한 session_data["name"]을 사용하여 최종 성공 로그 적재
+    save_admin_log(
+        db=db,
+        log_type='find',
+        title='아이디 찾기 완료',
+        content=f'아이디 찾기 최종 성공 : {session_data["name"]}'
+    )
+    # 사용 완료된 세션 파기
+    req.session.pop("find_id_auth", None)
+
+    # 데이터 가공하여 전달
+    result_list = [{"id": r["id"], "create_at": r["create_at"].strftime("%Y-%m-%d")} for r in res]
+    return {"res": True, "data": result_list}
+
+
+# 비밀번호 찾기 1단계: 인증코드 요청
+@app.post("/find_pw/request")
+async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
+    user_id = info.get("userId")
+    email = info.get("email")
+
+    sql = sqlalchemy.text("SELECT 1 FROM member_info WHERE id = :id AND email = :email")
+    user_exists = db.execute(sql, {"id": user_id, "email": email}).scalar()
+
+    if not user_exists:
+        return {"res": False}
+
+    # 회원 정보가 일치하여 '인증코드 요청'이 정상 수락되었을 때 로그 기록
+    save_admin_log(
+        db=db,
+        log_type='find',
+        title='비밀번호 요청',
+        content=f'비밀번호 찾기 인증코드 요청 : {user_id}',
+        target_id=user_id
+    )
+
+    # 6자리 인증코드 생성 및 세션 저장
+    pwd_code = str(random.randint(100000, 999999))
+    req.session["find_pw_auth"] = {"email": email, "userId": user_id, "code": pwd_code}
+
+    # 만능 알림 함수 호출 (PWD 모드)
+    success = notifier.send_emergency_email(
+        to_email=email,
+        ai_report={'prediction': pwd_code},  # 진짜 코드를 넣어서 쏘세요!
+        news_url=None,
+        risk_level="PWD",
+        keywords_str=None,
+        title="비밀번호 재설정 인증번호"
+    )
     return {"res": success}
 
 
-# 비밀번호 변경
-@app.post("/reset_pw")
-def reset_pw(info:Dict[str, str], db: Session = Depends(get_db)):
+# 비밀번호 찾기 2단계: 코드 검증
+@app.post("/find_pw/verify")
+async def find_pw_verify(info: Dict[str, str], req: Request):
+    input_code = info.get("code")
+    session_data = req.session.get("find_pw_auth")
+
+    logger.info("========================================")
+    logger.info(f"💾 세션 전체 데이터: {session_data}")
+    logger.info(f"📥 사용자가 친 코드: '{input_code}'")
+    if session_data:
+        logger.info(f"🎯 세션 안의 진짜 코드: '{str(session_data.get('code'))}'")
+    logger.info("========================================")
+
+    # 세션 자체가 유실되었다면 에러 메시지를 명확하게 분리해서 반환
+    if not session_data:
+        return {"res": False, "msg": "서버 세션이 만료되었거나 인증번호가 생성되지 않았습니다. 코드를 다시 받아주세요."}
+
+    if str(session_data.get("code")).strip() != input_code:
+        return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
+
+    return {"res": True}
+
+
+# 3단계: 최종 비밀번호 변경
+@app.post("/find_pw/reset")
+async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends(get_db)):
     logger.info(f'비밀번호 변경 info = {info}')
-    new_pw = hash_password(info["password"])
-    success = 0
+    user_id = info.get("userId")
+    new_pw = hash_password(info.get("password"))
+    session_data = req.session.get("find_pw_auth")
 
-    sql = sqlalchemy.text("""UPDATE member_info SET pw = :pw WHERE id = :id""")
-    res = db.execute(sql, {"id": info["userId"], "pw": new_pw})
-    success = res.rowcount
-    save_admin_log(db=db, log_type='update', title='비밀번호 변경', content=f'비밀번호 변경 : {info["userId"]}', target_id=info['userId'])
-    return {"res": success}
+    # 세션 검증 보안 장치 (인증코드, 코드검증 단계를 정상적으로 거쳤는지 확인)
+    if not session_data or session_data["userId"] != user_id:
+        return {"res": 0, "msg": "잘못된 접근입니다."}
+
+    sql = sqlalchemy.text("UPDATE member_info SET pw = :pw WHERE id = :id")
+    res = db.execute(sql, {"id": user_id, "pw": new_pw})
+
+    if res.rowcount > 0:
+        # 단순히 요청한 것뿐만 아니라, 진짜로 '비밀번호 변경이 최종 성공 완료'된 시점도 기록
+        save_admin_log(
+            db=db,
+            log_type='find',
+            title='비밀번호 변경 완료',
+            content=f'비밀번호 재설정 최종 성공 : {user_id}',
+            target_id=user_id
+        )
+
+    # 재설정 완료 시 세션 파기
+    req.session.pop("find_pw_auth", None)
+    db.commit()
+    return {"res": res.rowcount}
 
 
 # ======================

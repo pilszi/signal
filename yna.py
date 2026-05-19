@@ -15,7 +15,10 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import os
 from config import Config
+from logger import get_logger
 from utils import is_noise_article
+
+logger = get_logger(__name__)
 
 # webdriver-manager 로그 끄기
 os.environ['WDM_LOG_LEVEL'] = '0'
@@ -190,29 +193,35 @@ def article_save(news_list):
 
 
 def article_process(keywords, total_pages):
-    logging.info("----- 연합뉴스 수집 시작 -----")
+    logger.info("----- 연합뉴스 수집 시작 -----")
     final_stats = {"success": 0, "failed": 0, "skipped": 0}
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
+    driver = webdriver.Chrome(options=options)
     driver.set_page_load_timeout(30)  # 페이지 로딩 30초 제한
     driver.implicitly_wait(5)  # 요소 찾기 5초 제한
 
     try:
         for key in keywords:
+            # 현재 수집 중인 키워드
+            logger.info(f"🔍 [YNA] 수집 중인 키워드: {key}")
+
             for p in range(1, total_pages + 1):
                 articles = article_crawling(driver, p, key)
                 if articles:
                     # article_save가 리턴하는 {success, failed, skipped}를 받음
                     res = article_save(articles)
-
                     final_stats["success"] += res.get("success", 0)
                     final_stats["failed"] += res.get("failed", 0)
                     final_stats["skipped"] += res.get("skipped", 0)
                 time.sleep(1)  # 키워드 간 짧은 휴식
+    except Exception as e:
+        logger.error(f"❌ [YNA] 수집 중 치명적 오류 발생: {e}")
     finally:
         driver.quit()
-        logging.info("----- 연합뉴스 수집 종료 -----")
+        logger.info(f"📊 연합뉴스 수집 요약: 신규 저장 {final_stats['success']}건 / 중복 제외 {final_stats['skipped']}건")
+        logger.info("--- 연합뉴스 수집 시퀀스 종료 ---")
     return final_stats
+
 
 # 키워드를 하나로 합치고 랜덤으로 8~10개를 뽑는 보조 함수
 def get_random_strategic_keywords():

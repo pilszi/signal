@@ -189,9 +189,10 @@
                             <!-- 드롭다운 메뉴 (기본 숨김) -->
                             <div class="notif-dropdown hidden" id="notifDropdown">
                                 <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>
+                                    <span class="header-title">실시간 위기 감지</span>
+                                    <span class="header-count" id="notifCountText">0개의 새 알림</span>
                                 </div>
-                                 <div id="notifList"></div>
+                                <div id="notifList"></div>
                             </div>
                         </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
@@ -530,7 +531,6 @@
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
             // 태그가 없을 시 함수 종료(에러방지)
-            // console.log(authContainer);
             if (!authContainer){return};
             const userGreeting = document.getElementById('user-greeting');
 
@@ -943,11 +943,11 @@
             searchQuery = '';
             startDate = null;
             endDate = null;
-            
+
             // UI 요소들도 초기값으로 변경
             document.getElementById('search-input').value = '';
             document.getElementById('date-display').innerText = "날짜를 선택해주세요";
-            
+
             document.getElementById('country-name').innerText = '';
             document.getElementById('country-score').innerText = '';
 
@@ -963,7 +963,7 @@
                     name: selectedCountry
                 });
             }
-            
+
             infoBox.classList.add('hidden');
             selectedCountry = null;
             applyFilters(); // 다시 전체 렌더링
@@ -1321,7 +1321,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "main.html";
+            const currentPath = window.location.pathname.split("/").pop() || "index.html";
             const navItems = document.querySelectorAll('.nav-item');
 
             navItems.forEach(item => {
