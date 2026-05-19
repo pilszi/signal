@@ -137,14 +137,6 @@
             try {
                 let {data} = await axios.post("/find_id/request", { "name": name, "email": email });
                 console.log(data);
-                if (data.res) {
-                    showAlert("입력하신 이메일로 인증코드가 발송되었습니다.");
-
-                    findIdForm.classList.add('hidden'); // 이름/이메일 창 숨기기
-                    codeForm.classList.remove('hidden'); // 👈 인증코드 입력창 보여주기
-                    stepDescription.textContent = "이메일로 발송된 인증코드를 입력해주세요";
-                    document.getElementById('emailTargetInfo').textContent = `${email}로 발송된 6자리 코드를 입력하세요.`;
-                }
                 if (data.res && data.res.length > 0) {
                     // 1. 결과 데이터 배열을 순회하며 HTML 생성
                     const listItems = data.res.map(user => `
@@ -168,17 +160,17 @@
                     resultView.classList.remove('hidden');
                     
                 } else {
-                    showAlert("입력하신 정보와 일치하는 계정을 찾을 수 없습니다.");
+                    showModal("입력하신 정보와 일치하는 계정을 찾을 수 없습니다.");
                     findIdForm.reset();
                 }
             } catch (error) {
                 console.error(error);
-                showAlert("서버 통신 중 오류가 발생했습니다.");
+                showModal("서버 통신 중 오류가 발생했습니다.");
             }
         });
 
         // 모달 제어 함수
-        function showAlert(message) {
+        function showModal(message) {
             modalMessage.textContent = message;
             alertModal.classList.remove('hidden');
         }
@@ -221,10 +213,10 @@
                     stepDescription.textContent = "아이디 확인이 완료되었습니다.";
                     footerLinks.classList.add('hidden'); // 로그인/비번찾기 하단 링크 숨김
                 } else {
-                    showAlert(data.msg || "인증코드가 올바르지 않습니다.");
+                    showModal(data.msg || "인증코드가 올바르지 않습니다.");
                 }
             } catch (error) {
-                showAlert("인증 실패 시스템 오류 발생");
+                showModal("인증 실패 시스템 오류 발생");
             }
         });
     </script>

@@ -158,57 +158,66 @@
     </style>
 </head>
 <body class="bg-gray-50">
-        <!-- Navbar -->
-        <nav class="border-b bg-white sticky top-0 z-50">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center h-20">
-                    <div class="flex items-center gap-8">
-                        <!-- href에서 / 제거 -->
-                        <a href="main.html" class="flex items-center gap-2">
-                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
-                                Signal
-                            </span>
-                        </a>
-                        
-                        <div class="hidden md:flex gap-1">
-                            <!-- 상대 경로 적용 -->
-                            <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
-                            <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
-                            <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
+    <!-- 공통 알림 모달 -->
+    <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
+        <div class="absolute inset-0 bg-black/50"></div>
+        <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 relative z-10 shadow-2xl border">
+            <div id="modal-icon" class="flex justify-center mb-4"></div>
+            <p id="modal-message" class="text-center font-medium text-gray-800 mb-6"></p>
+            <button onclick="closeModal()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-bold">확인</button>
+        </div>
+    </div>
+    <!-- Navbar -->
+    <nav class="border-b bg-white sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <div class="flex items-center gap-8">
+                    <!-- href에서 / 제거 -->
+                    <a href="main.html" class="flex items-center gap-2">
+                        <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
+                            Signal
+                        </span>
+                    </a>
+                    
+                    <div class="hidden md:flex gap-1">
+                        <!-- 상대 경로 적용 -->
+                        <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
+                        <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
+                        <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
+                    <div id="user-greeting"></div>
+                    <!-- 알림 컴포넌트 -->
+                    <div class="notif-container" id="notifContainer">
+                        <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
+                        <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
+                            <i data-lucide="bell" class="w-5 h-5"></i>
+                            <!-- 알림 숫자 배지 -->
+                                <!-- 초기 상태는 숨김 처리 -->
+                            <span class="notif-badge" id="notifBadge" style="display: none;"></span>
+                        </button>
+
+                        <!-- 드롭다운 메뉴 (기본 숨김) -->
+                        <div class="notif-dropdown hidden" id="notifDropdown">
+                            <div class="notif-header">
+                                <span class="header-count" id="notifCountText"></span>
+                            </div>
+                                <div id="notifList"></div>
                         </div>
                     </div>
-
-                    <div class="flex items-center gap-3">
-                        <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
-                        <div id="user-greeting"></div>
-                        <!-- 알림 컴포넌트 -->
-                        <div class="notif-container" id="notifContainer">
-                            <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
-                            <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
-                                <i data-lucide="bell" class="w-5 h-5"></i>
-                                <!-- 알림 숫자 배지 -->
-                                 <!-- 초기 상태는 숨김 처리 -->
-                                <span class="notif-badge" id="notifBadge" style="display: none;"></span>
-                            </button>
-
-                            <!-- 드롭다운 메뉴 (기본 숨김) -->
-                            <div class="notif-dropdown hidden" id="notifDropdown">
-                                <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>
-                                </div>
-                                 <div id="notifList"></div>
-                            </div>
-                        </div>
-                        <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
-                            <i data-lucide="user" class="w-5 h-5"></i>
-                        </a>
-                        <div id="authContainer">
-                            
-                        </div>
+                    <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
+                        <i data-lucide="user" class="w-5 h-5"></i>
+                    </a>
+                    <div id="authContainer">
+                        
                     </div>
                 </div>
             </div>
-        </nav>
+        </div>
+    </nav>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div class="mb-8">
@@ -797,15 +806,46 @@
         }
 
         async function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")){
-                try {
+            showModal("로그아웃 하시겠습니까?", "confirm", async () => {
+                 try {
                     await axios.get("/logout");
                     sessionStorage.removeItem('savedUserId');
                     location.href = "login.html";
                 }catch (error) {
                     console.error("로그아웃 중 오류 발생:", error);
-                    alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
+                    showModal("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.", error);
                 }
+            });
+        }
+
+        // 모달 제어
+        function showModal(msg, type, onConfirm = null) {
+            const modal = document.getElementById('alert-modal');
+            const iconDiv = document.getElementById('modal-icon');
+            document.getElementById('modal-message').innerText = msg;
+            
+            if(type === 'success') {
+                iconDiv.innerHTML = '<i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>';
+            } else {
+                iconDiv.innerHTML = '<i data-lucide="alert-circle" class="w-12 h-12 text-blue-500"></i>';
+            }
+            
+            // 세 번째 인자로 들어온 함수(탈퇴 처리 로직 등)를 전역 변수에 담아둡니다.
+            // 일반 알림창일 때는 아무것도 안 들어오므로 null이 됩니다.
+            modalCallback = onConfirm;
+            
+            modal.classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            // 1. 우선 화면에서 모달창을 숨깁니다.
+            document.getElementById('alert-modal').classList.add('hidden');
+            
+            // 2. 만약 이번에 닫힌 모달창이 '특별한 행동(콜백)'을 품고 있었다면 실행합니다.
+            if (typeof modalCallback === 'function') {
+                modalCallback();    // 폼 제출 이벤트에서 넘겨준 async () => { axios.post... } 가 여기서 실행됩니다!
+                modalCallback = null; // 실행 후에는 상자를 비워주어 다른 모달에 영향이 없게 합니다.
             }
         }
 
