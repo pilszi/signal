@@ -865,7 +865,7 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
             WHERE t3.id = :id
             AND t2.alarm_view = 0 
             AND t1.risk_level = '심각'
-            ORDER BY t2.alarm_time DESC 
+            ORDER BY t2.alarm_time DESC limit 10
             """)
         res = db.execute(sql, {"id": id}).mappings().fetchall()
         # logger.info(f'에러나는지 확인 : {res}')
