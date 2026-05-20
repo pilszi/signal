@@ -20,6 +20,9 @@ from utils import is_noise_article
 
 logger = get_logger(__name__)
 
+# yna.py의 흐름
+# run_yna_collect() -> article_process() -> article_crawling() -> article_save()
+
 # webdriver-manager 로그 끄기
 os.environ['WDM_LOG_LEVEL'] = '0'
 options = webdriver.ChromeOptions()
@@ -67,6 +70,64 @@ def fetch_content_single(article):
     return article
 
 
+# 1. 스케줄러 및 시작
+def run_yna_collect():
+    """main.py에서 10분마다 호출하는 메인 함수"""
+    logging.info("📡 [연합뉴스 통합 수집 시작]")
+
+    # 딕셔너리에 있는 모든 키워드를 리스트 하나로 합치기
+    selected_keywords = get_random_strategic_keywords()
+    logging.info(f"🎯 이번 회차 선정 키워드: {selected_keywords}")
+
+    total_pages = 1  # 테스트 시(1페이지), 운영 시(2페이지)
+
+    # 뽑힌 키워드를 실제 크롤링 함수로 전달
+    return article_process(selected_keywords, total_pages)
+
+
+# 1-1. 키워드를 하나로 합치고 랜덤으로 8~10개를 뽑는 보조 함수
+def get_random_strategic_keywords():
+    # 딕셔너리의 모든 리스트를 하나로 합침
+    all_flat_keywords = [kw for sublist in Config.STRATEGIC_KEYWORDS.values() for kw in sublist]
+    # 8~10개 사이로 랜덤 추출
+    sample_size = min(len(all_flat_keywords), random.randint(8, 10))
+    return random.sample(all_flat_keywords, sample_size)
+
+
+# 2. 크롤링 루프
+def article_process(keywords, total_pages):
+    logger.info("----- 연합뉴스 수집 시작 -----")
+    final_stats = {"success": 0, "failed": 0, "skipped": 0}
+
+    driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(30)  # 페이지 로딩 30초 제한
+    driver.implicitly_wait(5)  # 요소 찾기 5초 제한
+
+    try:
+        for key in keywords:
+            # 현재 수집 중인 키워드
+            logger.info(f"🔍 [YNA] 수집 중인 키워드: {key}")
+
+            for p in range(1, total_pages + 1):
+                articles = article_crawling(driver, p, key)
+                if articles:
+                    # article_save가 리턴하는 {success, failed, skipped}를 받음
+                    res = article_save(articles)
+                    final_stats["success"] += res.get("success", 0)
+                    final_stats["failed"] += res.get("failed", 0)
+                    final_stats["skipped"] += res.get("skipped", 0)
+                time.sleep(1)  # 키워드 간 짧은 휴식
+    except Exception as e:
+        logger.error(f"❌ [YNA] 수집 중 치명적 오류 발생: {e}")
+    finally:
+        driver.quit()
+        logger.info(f"📊 연합뉴스 수집 요약: 신규 저장 {final_stats['success']}건 / 중복 제외 {final_stats['skipped']}건")
+        logger.info("--- 연합뉴스 수집 시퀀스 종료 ---")
+    return final_stats
+
+
+
+# 3. 검색 결과 추출
 def article_crawling(driver, p: int, keyword):
     press = '연합뉴스'
     article_list = []
@@ -145,10 +206,10 @@ def article_crawling(driver, p: int, keyword):
         logging.error(f"크롤링 에러: {e}")
     finally:
         es.close()
-
     return article_list
 
 
+# 4. 저장 및 분석
 def article_save(news_list):
     if len(news_list) > 0:
         es = get_es()
@@ -158,10 +219,25 @@ def article_save(news_list):
             df = df[df["content"].str.len() > 0]
             if df.empty: return {}
 
+            # --- [추가] 날짜 필터링 로직 ---
+            # 1. 일단 날짜형으로 변환 (에러 방지를 위해 errors='coerce' 사용)
+            df['temp_date'] = pd.to_datetime(df['published_date'], errors='coerce')
+
+            # 2. 2026년 이후 기사만 남기고 나머지는 버림
+            original_count = len(df)
+            df = df[df['temp_date'].dt.year >= 2026]
+
+            if len(df) < original_count:
+                logging.info(f"⏭️ [날짜 스킵] {original_count - len(df)}건의 오래된 기사가 필터링되었습니다.")
+
+            if df.empty: return {}
+            # ---------------------------
+
             # 분석 로직
             df["extracted_keywords"] = df.apply(lambda x: extract_keywords(x["title"], x["content"]), axis=1)
             df["country_name"] = df.apply(lambda x: find_target_country(x["title"], x["content"]), axis=1)
             df["is_processed"] = False
+
 
             try:
                 df['published_date'] = pd.to_datetime(df['published_date']).dt.strftime('%Y-%m-%dT%H:%M:%S')
@@ -192,47 +268,7 @@ def article_save(news_list):
     return {}
 
 
-def article_process(keywords, total_pages):
-    logger.info("----- 연합뉴스 수집 시작 -----")
-    final_stats = {"success": 0, "failed": 0, "skipped": 0}
-
-    driver = webdriver.Chrome(options=options)
-    driver.set_page_load_timeout(30)  # 페이지 로딩 30초 제한
-    driver.implicitly_wait(5)  # 요소 찾기 5초 제한
-
-    try:
-        for key in keywords:
-            # 현재 수집 중인 키워드
-            logger.info(f"🔍 [YNA] 수집 중인 키워드: {key}")
-
-            for p in range(1, total_pages + 1):
-                articles = article_crawling(driver, p, key)
-                if articles:
-                    # article_save가 리턴하는 {success, failed, skipped}를 받음
-                    res = article_save(articles)
-                    final_stats["success"] += res.get("success", 0)
-                    final_stats["failed"] += res.get("failed", 0)
-                    final_stats["skipped"] += res.get("skipped", 0)
-                time.sleep(1)  # 키워드 간 짧은 휴식
-    except Exception as e:
-        logger.error(f"❌ [YNA] 수집 중 치명적 오류 발생: {e}")
-    finally:
-        driver.quit()
-        logger.info(f"📊 연합뉴스 수집 요약: 신규 저장 {final_stats['success']}건 / 중복 제외 {final_stats['skipped']}건")
-        logger.info("--- 연합뉴스 수집 시퀀스 종료 ---")
-    return final_stats
-
-
-# 키워드를 하나로 합치고 랜덤으로 8~10개를 뽑는 보조 함수
-def get_random_strategic_keywords():
-    # 딕셔너리의 모든 리스트를 하나로 합침
-    all_flat_keywords = [kw for sublist in Config.STRATEGIC_KEYWORDS.values() for kw in sublist]
-    # 8~10개 사이로 랜덤 추출
-    sample_size = min(len(all_flat_keywords), random.randint(8, 10))
-    return random.sample(all_flat_keywords, sample_size)
-
-
-
+# 스케줄 알람: 시스템이 알아서 정해진 시간에 run_yna_collect를 호출하도록 명령을 내리는 것
 def get_scheduler():
     # job_defaults 설정을 추가하여 인스턴스 제한을 풀기
     job_defaults = {
@@ -248,24 +284,6 @@ def get_scheduler():
     )
     return sch
 
-
-def run_yna_collect():
-    """main.py에서 10분마다 호출하는 메인 함수"""
-    logging.info("📡 [연합뉴스 통합 수집 시작]")
-
-    # 1. 딕셔너리에 있는 모든 키워드를 리스트 하나로 합치기
-    all_flat_keywords = [kw for sublist in Config.STRATEGIC_KEYWORDS.values() for kw in sublist]
-
-    # 2. 함수가 호출되는 '지금 이 순간' 랜덤하게 8~10개를 뽑기
-    # 이렇게 해야 10분 뒤에 다시 호출될 때 또 새로운 단어를 뽑음
-    sample_size = random.randint(8, 10)
-    selected_keywords = random.sample(all_flat_keywords, sample_size)
-    logging.info(f"🎯 이번 회차 선정 키워드: {selected_keywords}")
-
-    total_pages = 1  # 테스트 시(1페이지), 운영 시(2페이지)
-
-    # 3. 뽑힌 키워드를 실제 크롤링 함수로 전달
-    return article_process(selected_keywords, total_pages)
 
 
 if __name__ == '__main__':

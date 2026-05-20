@@ -62,8 +62,6 @@ RSS_FEEDS = [
     "https://www.scmp.com/rss/91/feed",
     "https://www.ft.com/?format=rss"
 ]
-
-
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -72,92 +70,82 @@ USER_AGENTS = [
 ]
 
 
-def get_config():
-    cfg = NewsConfig()
-    cfg.browser_user_agent = random.choice(USER_AGENTS)
-    cfg.request_timeout = 20
-    cfg.memoize_articles = False
-    return cfg
+# rss.py의 흐름
+# run_reuters_collect -> crawl_job -> fetch_and_save
+
+# 1. 수집 준비 (키워드 준비, 진입)
+def run_reuters_collect():
+    """main.py의 스케줄러와 연결되는 글로벌 뉴스 수집 메인 함수"""
+    logging.info("📡 [글로벌 뉴스 수집 시작] RSS 피드 탐색 중...")
+
+    # 영문 키워드 전체를 하나의 리스트로 통합 (필터링용)
+    TARGET_KEYWORDS = [kw.lower() for sublist in AppConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
+
+    # 이 키워드들을 가지고 수집 로직 실행
+    return crawl_job(TARGET_KEYWORDS)
 
 
-# --- 2. 보조 함수 ---
 
-def get_source_name(url):
-    domain = urlparse(url).netloc.lower()
-    if 'abcnews' in domain: return "ABC News"
-    if 'reuters' in domain: return "Reuters"
-    if 'cnbc' in domain: return "CNBC"
-    if 'investing' in domain: return "Investing.com"
-    if 'theguardian' in domain: return "The Guardian"
-    if 'aljazeera' in domain: return "Al Jazeera"
-    if 'zerohedge' in domain: return "ZeroHedge"
-    if 'yahoo' in domain: return "Yahoo Finance"
-    if 'marketwatch' in domain: return "MarketWatch"
-    if 'scmp' in domain: return "SCMP"
-    return "Global News"
+# 2. 피드 탐색 및 후보군 선별 (피드 순회, 1차검증, 노이즈컷 1차, 키워드 매칭, 링크 정규화)
+def crawl_job(keywords):
+    logging.info("🌍 [GLOBAL-RSS] === 글로벌 뉴스 수집 프로세스 시작 ===")
+    link_data = {}
 
-
-def extract_exact_date(html, article_obj):
-    """
-    [방법 B 강화] 주요 외신별 맞춤형 시간 파싱 로직
-    """
-    soup = BeautifulSoup(html, 'html.parser')
-
-    # 1. CNBC 전용: 'last_updated_datetime' 또는 'published_datetime' 메타 데이터
-    cnbc_meta = soup.find('meta', attrs={'name': 'last-modified'}) or \
-                soup.find('meta', attrs={'property': 'article:published_time'})
-    if cnbc_meta and cnbc_meta.get('content'):
+    for feed_url in RSS_FEEDS:
         try:
-            return date_parser.parse(cnbc_meta['content'])
-        except:
-            pass
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries:
+                title = entry.title.lower()
+                summary = entry.get('summary', '').lower()
+                search_text = (title + " " + summary)
 
-    # 2. Al Jazeera 전 "@type": "NewsArticle" 내의 datePublished 검색
-    import json
-    scripts = soup.find_all('script', type='application/ld+json')
-    for script in scripts:
-        try:
-            data = json.loads(script.string)
-            if isinstance(data, dict) and data.get('@type') == 'NewsArticle':
-                return date_parser.parse(data.get('datePublished'))
-            elif isinstance(data, list):  # 가끔 리스트 형태로 들어있음
-                for item in data:
-                    if item.get('@type') == 'NewsArticle':
-                        return date_parser.parse(item.get('datePublished'))
-        except:
-            pass
+                if is_noise_article(title, summary, entry.link):
+                    continue
 
-    # 3. The Guardian 전용: 'article:published_time' 메타 태그
-    guardian_meta = soup.find('meta', attrs={'property': 'article:published_time'})
-    if guardian_meta and guardian_meta.get('content'):
-        try:
-            return date_parser.parse(guardian_meta['content'])
-        except:
-            pass
+                # --- [블랙리스트 필터링 추가] ---
+                # 1. 제목/요약에 매수 유도 키워드가 있으면 즉시 패스
+                if any(bl in search_text for bl in AppConfig.BLACKLIST):
+                    continue
 
-    # 4. 공통: newspaper3k 결과가 있다면 활용
-    if article_obj.publish_date:
-        return article_obj.publish_date
+                # 2. 티커(Ticker) 패턴 감지: (MSTR), (AAPL) 등 대문자 괄호 제외
+                import re
+                if re.search(r"\([A-Z]{1,5}\)", entry.title):
+                    continue
 
-    return None
+                # [중요] 전역 변수 TARGET_KEYWORDS 대신, 인자로 받은 keywords를 사용합니다.
+                if any(kw in search_text for kw in keywords):
+                    raw_url = entry.link
+                    norm_url = raw_url.split('?')[0].split('#')[0].strip().rstrip('/')
+
+                    if norm_url not in link_data:
+                        # RSS 데이터에 상세 시간이 있으면 최대한 보존
+                        link_data[norm_url] = entry.get('published') or entry.get('updated')
+        except Exception as e:
+            logging.error(f"Feed error ({feed_url}): {e}")
+
+    tasks = list(link_data.items())
+    if not tasks:
+        logging.info("🌍 [GLOBAL-RSS] 탐색 결과, 키워드와 일치하는 새 기사가 없습니다.")
+    else:
+        logging.info(f"🌍 [GLOBAL-RSS] 총 {len(tasks)}개의 분석 대상 기사를 발견했습니다.")
+    stats = {"SUCCESS": 0, "EXIST": 0, "FAILED": 0, "ERROR": 0}
+
+    # [최적화 2] 해외 사이트 지연을 고려하여 max_workers를 10으로 확장
+    if tasks:
+        logging.info(f"📂 [GLOBAL-RSS] 총 {len(tasks)}개의 후보 기사 처리 중...")
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(fetch_and_save, tasks))
+            for res in results:
+                stats[res] = stats.get(res, 0) + 1
+
+    # 신규 저장 건수가 있을 때만 강조 표시
+    if stats['SUCCESS'] > 0:
+        logging.info(f"✅ [GLOBAL-RSS] 저장 완료: 신규 {stats['SUCCESS']}건 (중복 제외: {stats['EXIST']}건)")
+    else:
+        logging.info(f"💤 [GLOBAL-RSS] 업데이트 없음 (탐색: {len(tasks)}건, 신규: 0건)")
 
 
-def fallback_extract(html):
-    soup = BeautifulSoup(html, 'html.parser')
-    meta_desc = soup.find('meta', attrs={'name': 'description'}) or \
-                soup.find('meta', attrs={'property': 'og:description'})
-    summary = ""
-    if meta_desc:
-        summary = meta_desc.get('content', '').strip()
-    paragraphs = soup.find_all('p')
-    body_text = "\n".join([p.get_text() for p in paragraphs if len(p.get_text()) > 30])
-    if len(body_text) > len(summary):
-        return body_text.strip()
-    return summary
-
-
-# --- 3. 메인 수집 함수 ---
-
+# 3. 상세 페이지 다운로드 및 파싱 (es 중복체크, 브라우징, 본문추출, 날짜추출, 날짜 필터)
 def fetch_and_save(data):
     link, rss_pub_date = data
 
@@ -216,6 +204,12 @@ def fetch_and_save(data):
                 dt_obj = date_parser.parse(raw_date)
             else:
                 dt_obj = raw_date
+
+            # [추가] 2026년 이전 기사 차단
+            if dt_obj.year < 2026:
+                logging.info(f"⏭️ [날짜 스킵] 오래된 글로벌 기사: {dt_obj.year}년")
+                return "FAILED"
+
             final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
         except:
             return "FAILED"
@@ -238,77 +232,88 @@ def fetch_and_save(data):
         logging.error(f"❌ [GLOBAL-RSS] 수집 실패 ({clean_url}): {e}")
         return "ERROR"
 
+# 3-1. 기사를 다운로드할 때 사용할 '설정(User-Agent, 타임아웃 등)'을 생성
+def get_config():
+    cfg = NewsConfig()
+    cfg.browser_user_agent = random.choice(USER_AGENTS)
+    cfg.request_timeout = 20
+    cfg.memoize_articles = False
+    return cfg
 
-# --- 4. 실행부 ---
+# 3-2. 기사 URL을 보고 어느 언론사(Reuters, CNBC 등)인지 이름 붙여줌
+def get_source_name(url):
+    domain = urlparse(url).netloc.lower()
+    if 'abcnews' in domain: return "ABC News"
+    if 'reuters' in domain: return "Reuters"
+    if 'cnbc' in domain: return "CNBC"
+    if 'investing' in domain: return "Investing.com"
+    if 'theguardian' in domain: return "The Guardian"
+    if 'aljazeera' in domain: return "Al Jazeera"
+    if 'zerohedge' in domain: return "ZeroHedge"
+    if 'yahoo' in domain: return "Yahoo Finance"
+    if 'marketwatch' in domain: return "MarketWatch"
+    if 'scmp' in domain: return "SCMP"
+    return "Global News"
 
-def crawl_job(keywords):
-    logging.info("🌍 [GLOBAL-RSS] === 글로벌 뉴스 수집 프로세스 시작 ===")
-    link_data = {}
+# 3-3. 기사 원본 뒤져서 진짜 발행된 시간을 찾아냄
+def extract_exact_date(html, article_obj):
+    """
+    [방법 B 강화] 주요 외신별 맞춤형 시간 파싱 로직
+    """
+    soup = BeautifulSoup(html, 'html.parser')
 
-    for feed_url in RSS_FEEDS:
+    # 1. CNBC 전용: 'last_updated_datetime' 또는 'published_datetime' 메타 데이터
+    cnbc_meta = soup.find('meta', attrs={'name': 'last-modified'}) or \
+                soup.find('meta', attrs={'property': 'article:published_time'})
+    if cnbc_meta and cnbc_meta.get('content'):
         try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries:
-                title = entry.title.lower()
-                summary = entry.get('summary', '').lower()
-                search_text = (title + " " + summary)
+            return date_parser.parse(cnbc_meta['content'])
+        except:
+            pass
 
-                if is_noise_article(title, summary, entry.link):
-                    continue
+    # 2. Al Jazeera 전 "@type": "NewsArticle" 내의 datePublished 검색
+    import json
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            data = json.loads(script.string)
+            if isinstance(data, dict) and data.get('@type') == 'NewsArticle':
+                return date_parser.parse(data.get('datePublished'))
+            elif isinstance(data, list):  # 가끔 리스트 형태로 들어있음
+                for item in data:
+                    if item.get('@type') == 'NewsArticle':
+                        return date_parser.parse(item.get('datePublished'))
+        except:
+            pass
 
-                # --- [블랙리스트 필터링 추가] ---
-                # 1. 제목/요약에 매수 유도 키워드가 있으면 즉시 패스
-                if any(bl in search_text for bl in AppConfig.BLACKLIST):
-                    continue
+    # 3. The Guardian 전용: 'article:published_time' 메타 태그
+    guardian_meta = soup.find('meta', attrs={'property': 'article:published_time'})
+    if guardian_meta and guardian_meta.get('content'):
+        try:
+            return date_parser.parse(guardian_meta['content'])
+        except:
+            pass
 
-                # 2. 티커(Ticker) 패턴 감지: (MSTR), (AAPL) 등 대문자 괄호 제외
-                import re
-                if re.search(r"\([A-Z]{1,5}\)", entry.title):
-                    continue
+    # 4. 공통: newspaper3k 결과가 있다면 활용
+    if article_obj.publish_date:
+        return article_obj.publish_date
 
-                # [중요] 전역 변수 TARGET_KEYWORDS 대신, 인자로 받은 keywords를 사용합니다.
-                if any(kw in search_text for kw in keywords):
-                    raw_url = entry.link
-                    norm_url = raw_url.split('?')[0].split('#')[0].strip().rstrip('/')
+    return None
 
-                    if norm_url not in link_data:
-                        # RSS 데이터에 상세 시간이 있으면 최대한 보존
-                        link_data[norm_url] = entry.get('published') or entry.get('updated')
-        except Exception as e:
-            logging.error(f"Feed error ({feed_url}): {e}")
-
-    tasks = list(link_data.items())
-    if not tasks:
-        logging.info("🌍 [GLOBAL-RSS] 탐색 결과, 키워드와 일치하는 새 기사가 없습니다.")
-    else:
-        logging.info(f"🌍 [GLOBAL-RSS] 총 {len(tasks)}개의 분석 대상 기사를 발견했습니다.")
-    stats = {"SUCCESS": 0, "EXIST": 0, "FAILED": 0, "ERROR": 0}
-
-    # [최적화 2] 해외 사이트 지연을 고려하여 max_workers를 10으로 확장
-    if tasks:
-        logging.info(f"📂 [GLOBAL-RSS] 총 {len(tasks)}개의 후보 기사 처리 중...")
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            results = list(executor.map(fetch_and_save, tasks))
-            for res in results:
-                stats[res] = stats.get(res, 0) + 1
-
-
-    # 신규 저장 건수가 있을 때만 강조 표시
-    if stats['SUCCESS'] > 0:
-        logging.info(f"✅ [GLOBAL-RSS] 저장 완료: 신규 {stats['SUCCESS']}건 (중복 제외: {stats['EXIST']}건)")
-    else:
-        logging.info(f"💤 [GLOBAL-RSS] 업데이트 없음 (탐색: {len(tasks)}건, 신규: 0건)")
-
-
-def run_reuters_collect():
-    """main.py의 스케줄러와 연결되는 글로벌 뉴스 수집 메인 함수"""
-    logging.info("📡 [글로벌 뉴스 수집 시작] RSS 피드 탐색 중...")
-
-    # 영문 키워드 전체를 하나의 리스트로 통합 (필터링용)
-    TARGET_KEYWORDS = [kw.lower() for sublist in AppConfig.STRATEGIC_KEYWORDS_EN.values() for kw in sublist]
-
-    # 이 키워드들을 가지고 수집 로직 실행
-    return crawl_job(TARGET_KEYWORDS)
+# 3-4. 메인 수집 도구인 newspaper3k가 본문을 제대로 못 가져올 때(광고가 너무 많거나 구조가 복잡할 때),
+# 직접 BeautifulSoup으로 HTML을 뒤져서 본문 텍스트만 긁어오는 응급 처치 함수
+def fallback_extract(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    meta_desc = soup.find('meta', attrs={'name': 'description'}) or \
+                soup.find('meta', attrs={'property': 'og:description'})
+    summary = ""
+    if meta_desc:
+        summary = meta_desc.get('content', '').strip()
+    paragraphs = soup.find_all('p')
+    body_text = "\n".join([p.get_text() for p in paragraphs if len(p.get_text()) > 30])
+    if len(body_text) > len(summary):
+        return body_text.strip()
+    return summary
 
 
 if __name__ == "__main__":
