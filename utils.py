@@ -73,13 +73,9 @@ def find_target_country(title, content):
     # [Step 4] 제목 국가 점수화
     # ---------------------------------------------------
     title_scores = {}
-
     title_countries = set()
-
     for kr_name, en_name in Config.G20_COUNTRY_MAP.items():
-
         score = 0
-
         # 한자 국가명
         if is_hanja(kr_name) and kr_name in clean_title:
             score += 5
@@ -97,7 +93,6 @@ def find_target_country(title, content):
             title_scores[en_name] = (
                 title_scores.get(en_name, 0) + score
             )
-
             title_countries.add(en_name)
 
     # ---------------------------------------------------
@@ -165,7 +160,6 @@ def find_target_country(title, content):
     # [Step 7] 최종 국가 판정
     # ---------------------------------------------------
     if country_scores:
-
         sorted_scores = sorted(
             country_scores.items(),
             key=lambda x: x[1],
@@ -178,7 +172,6 @@ def find_target_country(title, content):
             sorted_scores[1][1]
             if len(sorted_scores) > 1 else 0
         )
-
         # 점수 차이 적으면 글로벌 기사 처리
         if top_score - second_score < 2:
             return "Global"

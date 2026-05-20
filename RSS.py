@@ -33,6 +33,8 @@ from elasticsearch import Elasticsearch
 from apscheduler.schedulers.blocking import BlockingScheduler
 from bs4 import BeautifulSoup
 from utils import get_real_url
+from zoneinfo import ZoneInfo
+from datetime import timezone, timedelta
 
 # --- 1. 초기 설정 및 최적화된 소스 ---
 
@@ -48,20 +50,33 @@ es = Elasticsearch(
 INDEX_NAME = "news_en"
 scraper = cloudscraper.create_scraper()
 
-RSS_FEEDS = [
-    "https://abcnews.go.com/abcnews/businesstimes",
-    "https://abcnews.go.com/abcnews/internationalheadlines",
-    "https://finance.yahoo.com/news/rssindex",
-    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
-    "https://www.investing.com/rss/news_25.rss",
-    "https://www.investing.com/rss/market_overview.rss",
-    "http://feeds.marketwatch.com/marketwatch/topstories/",
-    "https://www.theguardian.com/world/rss",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "http://feeds.feedburner.com/zerohedge/feed",
-    "https://www.scmp.com/rss/91/feed",
-    "https://www.ft.com/?format=rss"
-]
+RSS_FEEDS = {
+    "https://abcnews.go.com/abcnews/businesstimes":
+        ZoneInfo("UTC"),
+    "https://abcnews.go.com/abcnews/internationalheadlines":
+        ZoneInfo("UTC"),
+    "https://finance.yahoo.com/news/rssindex":
+        ZoneInfo("America/New_York"),
+    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664":
+        ZoneInfo("America/New_York"),
+    "https://www.investing.com/rss/news_25.rss":
+        ZoneInfo("UTC"),
+    "https://www.investing.com/rss/market_overview.rss":
+        ZoneInfo("UTC"),
+    "http://feeds.marketwatch.com/marketwatch/topstories/":
+        ZoneInfo("America/New_York"),
+    "https://www.theguardian.com/world/rss":
+        ZoneInfo("Europe/London"),
+    "https://www.aljazeera.com/xml/rss/all.xml":
+        timezone(timedelta(hours=3)),
+    "http://feeds.feedburner.com/zerohedge/feed":
+        ZoneInfo("UTC"),
+    "https://www.scmp.com/rss/91/feed":
+        ZoneInfo("Asia/Hong_Kong"),
+    "https://www.ft.com/?format=rss":
+        ZoneInfo("Europe/London"),}
+
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -95,6 +110,21 @@ def crawl_job(keywords):
         try:
             feed = feedparser.parse(feed_url)
             for entry in feed.entries:
+                # 날짜 선필터링
+                raw_pub_date = entry.get('published') or entry.get('updated')
+                # 날짜 없는 RSS는 초반 컷
+                if not raw_pub_date:
+                    continue
+                try:
+                    dt_obj = date_parser.parse(str(raw_pub_date), fuzzy=True)
+
+                    if dt_obj.year < 2026:
+                        continue
+
+                except Exception as e:
+                    logging.warning(f"⚠️ RSS 날짜 파싱 실패: {raw_pub_date} | {e}")
+                    continue
+
                 title = entry.title.lower()
                 summary = entry.get('summary', '').lower()
                 search_text = (title + " " + summary)
@@ -119,7 +149,10 @@ def crawl_job(keywords):
 
                     if norm_url not in link_data:
                         # RSS 데이터에 상세 시간이 있으면 최대한 보존
-                        link_data[norm_url] = entry.get('published') or entry.get('updated')
+                        link_data[norm_url] = {
+                            "published": entry.get('published') or entry.get('updated'),
+                            "feed_url": feed_url
+                        }
         except Exception as e:
             logging.error(f"Feed error ({feed_url}): {e}")
 
@@ -147,7 +180,10 @@ def crawl_job(keywords):
 
 # 3. 상세 페이지 다운로드 및 파싱 (es 중복체크, 브라우징, 본문추출, 날짜추출, 날짜 필터)
 def fetch_and_save(data):
-    link, rss_pub_date = data
+    link, meta = data
+
+    rss_pub_date = meta.get("published")
+    feed_url = meta.get("feed_url")
 
     if not link.startswith(('http://', 'https://')):
         full_url = "https://" + link.lstrip('/')
@@ -197,21 +233,45 @@ def fetch_and_save(data):
         raw_date = exact_date or rss_pub_date
 
         if not raw_date:
+            logging.info(f"⏭️ [날짜 스킵] 날짜 정보 없음: {article.title[:20]}")
             return "FAILED"
-
         try:
+            # 문자열이면 강제 파싱
             if isinstance(raw_date, str):
-                dt_obj = date_parser.parse(raw_date)
+
+                # 너무 긴 쓰레기 문자열 방어
+                if len(raw_date) > 80:
+                    logging.warning(f"비정상 날짜 문자열 차단: {raw_date}")
+                    return "FAILED"
+
+                try:
+                    dt_obj = date_parser.parse(str(raw_date), fuzzy=True)
+                except Exception:
+                    logging.warning(f"날짜 파싱 실패 raw_date={raw_date}")
+                    return "FAILED"
+
             else:
                 dt_obj = raw_date
 
-            # [추가] 2026년 이전 기사 차단
+            # 연도 필터
             if dt_obj.year < 2026:
-                logging.info(f"⏭️ [날짜 스킵] 오래된 글로벌 기사: {dt_obj.year}년")
+                logging.info(f"⏭️ [최종 날짜 스킵] 상세페이지 기준 {dt_obj.year}년 기사")
                 return "FAILED"
 
-            final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
-        except:
+            # timezone 없는 경우 RSS timezone 부여
+            if dt_obj.tzinfo is None:
+                feed_tz = RSS_FEEDS.get(feed_url, ZoneInfo("UTC"))
+                dt_obj = dt_obj.replace(tzinfo=feed_tz)
+
+            # UTC 통일 저장
+            dt_obj = dt_obj.astimezone(timezone.utc)
+
+            # 최종 저장용
+            final_pub_date = dt_obj.isoformat()
+
+
+        except Exception as e:
+            logging.warning(f"❌ 날짜 파싱 중 에러 발생 ({raw_date}): {e}")
             return "FAILED"
 
         doc = {
@@ -219,6 +279,7 @@ def fetch_and_save(data):
             'content_en': content,
             'press_name': press_name,
             'published_date': final_pub_date,
+            "rss_source": feed_url,
             'main_image': get_real_url(main_image),
             'url': clean_url,
             'is_translated': False,

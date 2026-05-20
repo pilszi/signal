@@ -97,10 +97,19 @@
                                     <i data-lucide="mail" class="w-4 h-4"></i> 인증코드
                                 </button>
                             </div>
-                            <div id="verification-area" class="hidden flex gap-2">
+                            <div id="verification-area" class="hidden">
+                            <div class="flex gap-2">
                                 <input type="text" id="verificationCode" placeholder="6자리 인증코드 입력" maxlength="6" class="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <button type="button" onclick="verifyCode()" class="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors">인증확인</button>
+                                <button type="button" id="verify-btn" onclick="verifyCode()" class="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors whitespace-nowrap">인증확인</button>
                             </div>
+                            <!-- 타이머 -->
+                            <p id="code-timer" class="text-sm text-red-500 mt-2 hidden">인증번호 유효시간 03:00</p>
+                            <!-- 재전송 -->
+                            <button type="button" id="resend-btn" onclick="sendVerificationCode()" class="hidden mt-2 text-sm text-blue-600 hover:underline">
+                                인증번호 재전송
+                            </button>
+
+                        </div>
                             <div id="email-msg" class="hidden items-center gap-2 mt-2 text-sm text-green-600">
                                 <i data-lucide="check-circle" class="w-4 h-4"></i> <span>이메일 인증이 완료되었습니다.</span>
                             </div>
@@ -172,6 +181,8 @@
         let isUsernameChecked = false;
         let isUsernameTaken = null;
         let emailVerified = false;
+        let verificationTimer = null;
+        let verificationExpired = false;
 
         // --- 2. 기능 함수 정의 ---
         function updateNavbar() {
@@ -223,7 +234,24 @@
                 let {data} = await axios.post("/regist/request_code", { email });
                 console.log(data);
                 if (data.res) {
+
+                    verificationExpired = false;
+
                     document.getElementById('verification-area').classList.remove('hidden');
+
+                    // 버튼 다시 활성화
+                    const verifyBtn = document.getElementById('verify-btn');
+
+                    verifyBtn.disabled = false;
+
+                    verifyBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+                    // 입력창 초기화
+                    document.getElementById('verificationCode').value = '';
+
+                    // 3분 타이머 시작
+                    startVerificationTimer(data.expires_in || 180);
+
                     showModal('인증 코드가 입력하신 이메일로 발송되었습니다.');
                 } else {
                     showModal(data.msg || "인증 코드 발송에 실패했습니다.");
@@ -237,9 +265,15 @@
             const inputCode = document.getElementById('verificationCode').value.trim();
             if (!inputCode) { showModal("인증코드를 입력해주세요."); return; }
 
+            if (verificationExpired) {
+                showModal("인증번호 유효시간이 만료되었습니다.");
+                return;
+            }
+
             try {
                 let {data} = await axios.post("/regist/verify_code", { code: inputCode });
                 if (data.res) {
+                    clearInterval(verificationTimer); // 인증 성공 시 타이머 제거
                     emailVerified = true;
                     document.getElementById('verification-area').classList.add('hidden');
                     document.getElementById('send-code-btn').classList.add('hidden');
@@ -286,7 +320,46 @@
                 showModal("회원가입 처리 중 오류가 발생했습니다.");
             }
         }
+        function startVerificationTimer(seconds) {
+            clearInterval(verificationTimer);
+            verificationExpired = false;
 
+            const timerEl = document.getElementById('code-timer');
+            const resendBtn = document.getElementById('resend-btn');
+            const verifyBtn = document.getElementById('verify-btn');
+
+            timerEl.classList.remove('hidden');
+            resendBtn.classList.add('hidden');
+
+            let remaining = seconds;
+
+            verificationTimer = setInterval(() => {
+
+                const min = String(Math.floor(remaining / 60)).padStart(2, '0');
+                const sec = String(remaining % 60).padStart(2, '0');
+
+                timerEl.textContent = `인증번호 유효시간 ${min}:${sec}`;
+
+                if (remaining <= 0) {
+
+                    clearInterval(verificationTimer);
+
+                    verificationExpired = true;
+
+                    timerEl.textContent = "인증번호 유효시간이 만료되었습니다.";
+
+                    verifyBtn.disabled = true;
+                    verifyBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+                    resendBtn.classList.remove('hidden');
+
+                    return;
+                }
+
+                remaining--;
+
+            }, 1000);
+        }
         function showModal(msg) {
             document.getElementById('modal-message').innerText = msg;
             document.getElementById('alert-modal').classList.remove('hidden');

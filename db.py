@@ -6,7 +6,7 @@ from config import get_env
 # (한글/이모지 지원을 위한 charset 추가)
 id = get_env("DB_ID")
 pw = get_env("DB_PW")
-host = get_env("DB_HOST", default="localhost", required=False)
+host = get_env("DB_HOST", default="100.123.232.79", required=False)
 port = get_env("DB_PORT", default="3306", required=False)
 database = get_env("DB_NAME")
 url = f"mysql+pymysql://{id}:{pw}@{host}:{port}/{database}?charset=utf8mb4"
