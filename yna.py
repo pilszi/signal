@@ -1,6 +1,7 @@
 import logging
 import random
 import time
+import traceback
 from elasticsearch import Elasticsearch, helpers
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -110,15 +111,26 @@ def article_process(keywords, total_pages):
 
             for p in range(1, total_pages + 1):
                 articles = article_crawling(driver, p, key)
-                if articles:
+                if isinstance(articles, list) and len(articles) > 0:
                     # article_save가 리턴하는 {success, failed, skipped}를 받음
                     res = article_save(articles)
-                    final_stats["success"] += res.get("success", 0)
-                    final_stats["failed"] += res.get("failed", 0)
-                    final_stats["skipped"] += res.get("skipped", 0)
+
+                    # res가 딕셔너리인지 확인하여 안전하게 더함
+                    if isinstance(res, dict):
+                        final_stats["success"] += res.get("success", 0)
+                        final_stats["failed"] += res.get("failed", 0)
+                        final_stats["skipped"] += res.get("skipped", 0)
+                    else:
+                        # 만약 res가 숫자(int)라면 success에만 더함
+                        # (혹시라도 예전 버전과 꼬일까 봐 넣는 안전장치)
+                        if isinstance(res, int):
+                            final_stats["success"] += res
+                        logger.warning(f"⚠️ article_save 반환값이 예상과 다릅니다: {type(res)}")
+
                 time.sleep(1)  # 키워드 간 짧은 휴식
     except Exception as e:
         logger.error(f"❌ [YNA] 수집 중 치명적 오류 발생: {e}")
+        logger.error(traceback.format_exc())
     finally:
         driver.quit()
         logger.info(f"📊 연합뉴스 수집 요약: 신규 저장 {final_stats['success']}건 / 중복 제외 {final_stats['skipped']}건")
@@ -133,7 +145,16 @@ def article_crawling(driver, p: int, keyword):
     article_list = []
     es = get_es()  # 중복 체크용
 
-    url = f'https://www.yna.co.kr/search/index?query={keyword}&ctype=A&page_no={p}'
+    start_date = "20260101"
+    end_date = datetime.now().strftime("%Y%m%d")
+    url = (
+        f'https://www.yna.co.kr/search/index'
+        f'?query={keyword}'
+        f'&ctype=A'
+        f'&from={start_date}'
+        f'&to={end_date}'
+        f'&page_no={p}'
+    )
     # logging.info(f'url = {url}')
 
     try:
@@ -175,6 +196,22 @@ def article_crawling(driver, p: int, keyword):
                 published_date = elem.find_element(By.CSS_SELECTOR, "span.txt-time").text
 
                 if not title or not published_date: continue
+
+                # 1차 문자열 필터
+                # 연도가 문자열에 아예 없으면 제거
+                if "2026" not in published_date:
+                    continue
+
+                # 2차 날짜 필터링
+                try:
+                    parsed_date = pd.to_datetime(published_date, errors='coerce')
+                    if pd.isna(parsed_date):
+                        continue
+                    if parsed_date.year < 2026:
+                        continue
+                except Exception as e:
+                    logger.warning(f"⚠️ 날짜 파싱 실패: {published_date} | {e}")
+                    continue
 
                 temp_list.append({
                     "title": title, "photo": photo, "url": link,
@@ -219,30 +256,30 @@ def article_save(news_list):
             df = df[df["content"].str.len() > 0]
             if df.empty: return {}
 
-            # --- [추가] 날짜 필터링 로직 ---
-            # 1. 일단 날짜형으로 변환 (에러 방지를 위해 errors='coerce' 사용)
-            df['temp_date'] = pd.to_datetime(df['published_date'], errors='coerce')
-
-            # 2. 2026년 이후 기사만 남기고 나머지는 버림
-            original_count = len(df)
-            df = df[df['temp_date'].dt.year >= 2026]
-
-            if len(df) < original_count:
-                logging.info(f"⏭️ [날짜 스킵] {original_count - len(df)}건의 오래된 기사가 필터링되었습니다.")
-
-            if df.empty: return {}
-            # ---------------------------
+            # # --- [추가] 날짜 필터링 로직 ---
+            # # 1. 일단 날짜형으로 변환 (에러 방지를 위해 errors='coerce' 사용)
+            # df['temp_date'] = pd.to_datetime(df['published_date'], errors='coerce')
+            #
+            # # 2. 2026년 이후 기사만 남기고 나머지는 버림
+            # original_count = len(df)
+            # df = df[df['temp_date'].dt.year >= 2026]
+            #
+            # if len(df) < original_count:
+            #     logging.info(f"⏭️ [날짜 스킵] {original_count - len(df)}건의 오래된 기사가 필터링되었습니다.")
+            #
+            # if df.empty: return {}
+            # # ---------------------------
 
             # 분석 로직
             df["extracted_keywords"] = df.apply(lambda x: extract_keywords(x["title"], x["content"]), axis=1)
             df["country_name"] = df.apply(lambda x: find_target_country(x["title"], x["content"]), axis=1)
             df["is_processed"] = False
 
-
-            try:
-                df['published_date'] = pd.to_datetime(df['published_date']).dt.strftime('%Y-%m-%dT%H:%M:%S')
-            except:
-                df['published_date'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+            df['published_date'] = (
+                pd.to_datetime(df['published_date'], errors='coerce')
+                .fillna(pd.Timestamp.now())
+                .dt.strftime('%Y-%m-%dT%H:%M:%S')
+            )
 
             actions = [
                 {
@@ -260,12 +297,17 @@ def article_save(news_list):
                 for _, row in df.iterrows()
             ]
             success, failed = helpers.bulk(es, actions, raise_on_error=False)
-            logging.info(f"✅ 연합뉴스 저장 완료: 신규 {success}건")
+            failed_count = len(failed)
+            logging.info(
+                f"✅ 연합뉴스 저장 완료: 신규 {success}건 / 실패 {failed_count}건"
+            )
+            return {"success": success, "failed": failed_count, "skipped": 0}
         except Exception as e:
             logging.error(f"ES 저장 에러: {e}")
+            return {"success": 0, "failed": len(news_list), "skipped": 0}
         finally:
             close_es(es)
-    return {}
+    return {"success": 0, "failed": 0, "skipped": 0}
 
 
 # 스케줄 알람: 시스템이 알아서 정해진 시간에 run_yna_collect를 호출하도록 명령을 내리는 것

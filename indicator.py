@@ -63,29 +63,35 @@ def collect_market_data_job():
                     price = None
 
                     if t == "CNY=X":
-                        # 1. USD/KRW (달러당 원화) 가져오기
-                        data_krw = yf.download("USDKRW=X", period="1d", interval="1m", progress=False)
-                        # 2. USD/CNY (달러당 위안화) 가져오기
-                        data_cny = yf.download("USDCNY=X", period="1d", interval="1m", progress=False)
+                        # 방법 1: 안정적인 CNY=X 심볼 직접 다운로드
+                        data = yf.download("CNY=X", period="1d", interval="1m", progress=False)
+                        if not data.empty:
+                            # 1위안당 달러를 가져온 것일 수 있으므로(심볼따라 다름),
+                            # 만약 값이 너무 작다면(예: 0.1~0.2) 달러/원(USDKRW)을 곱해서 계산합니다.
+                            cny_usd = float(data['Close'].iloc[-1].values[0]) if hasattr(data['Close'].iloc[-1],
+                                                                                         'values') else float(
+                                data['Close'].iloc[-1])
 
-                        if not data_krw.empty and not data_cny.empty:
-                            # iloc[-1]만으로는 Series가 나올 수 있으므로, .item()을 사용하거나
-                            # 값을 확실하게 추출합니다.
-                            try:
-                                # .values[0]을 쓰면 확실하게 숫자만 뽑아낼 수 있습니다.
-                                usd_krw = float(data_krw['Close'].iloc[-1].values[0])
-                                usd_cny = float(data_cny['Close'].iloc[-1].values[0])
+                            # 만약 CNY=X가 1달러당 위안(약 7.2)이라면:
+                            # 원화 환율을 계산해야 하므로 USD/KRW를 가져와야 함
+                            data_krw = yf.download("USDKRW=X", period="1d", interval="1m", progress=False)
+                            usd_krw = float(data_krw['Close'].iloc[-1].values[0]) if hasattr(data_krw['Close'].iloc[-1],
+                                                                                             'values') else float(
+                                data_krw['Close'].iloc[-1])
 
-                                price = usd_krw / usd_cny
-                                logger.info(f"💾 [직접 계산] 위안화 환율: {price:.4f}")
-                            except Exception as inner_e:
-                                # 혹시 iloc[-1]이 이미 숫자라면 .values[0]에서 에러가 날 수 있으므로 예외 처리
-                                usd_krw = float(data_krw['Close'].iloc[-1])
-                                usd_cny = float(data_cny['Close'].iloc[-1])
-                                price = usd_krw / usd_cny
-                                logger.info(f"💾 [직접 계산 - 백업방식] 위안화 환율: {price:.4f}")
+                            # 공식: (USD/KRW) / (USD/CNY) = CNY/KRW
+                            price = usd_krw / cny_usd
+                            logger.info(f"💾 [직접 계산] 위안화 환율 (CNY=X 사용): {price:.4f}")
+
                         else:
-                            logger.info(f"  ⚠️ [데이터없음] 위안화 계산을 위한 데이터 부족")
+                            # 방법 2: 실패 시 예전처럼 CNYKRW=X 시도
+                            data_backup = yf.download("CNYKRW=X", period="1d", interval="1m", progress=False)
+                            if not data_backup.empty:
+                                price = float(data_backup['Close'].iloc[-1].values[0]) if hasattr(
+                                    data_backup['Close'].iloc[-1], 'values') else float(data_backup['Close'].iloc[-1])
+                                logger.info(f"💾 [백업 심볼 사용] 위안화 환율: {price:.4f}")
+                            else:
+                                logger.info(f"  ⚠️ [데이터없음] 위안화 데이터 수집 실패")
 
                     else:
                         # 나머지 지표들은 기존 로직대로 yfinance 다운로드

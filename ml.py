@@ -403,7 +403,7 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 500}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 20}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -416,9 +416,9 @@ async def run_analysis():
     for doc in docs:
         _id = doc['_id']
         data = doc['_source']
-
         title = data.get('title', '')
         url = data.get('url', '')
+        content = data.get('content', '')
 
         is_sports = any(kw in title for kw in Config.SPORTS_KEYWORDS)
         is_economy_news = any(kw in title for kw in Config.economy_keywords) and not is_sports
@@ -496,12 +496,8 @@ async def run_analysis():
         # ----------------------------------------------------------
         # 노이즈 기사 스킵 로직
         # ----------------------------------------------------------
-        content = data.get('content', '')
-        title = data.get('title', '')
-
         # 1. 본문이 너무 짧은 경우 (예: 100자 미만)
         # 2. 제목에 '아침 신문 보기', '뉴스 요약' 등 분석 가치 없는 단어가 포함된 경우
-
         if len(content) < 100 or any(kw in title for kw in Config.skip_keywords):
             logger.info(f"⏩ [노이즈 스킵] 분석 가치 부족으로 건너뜀: {title[:20]}...")
             await update_es_status(_id, True)
@@ -537,6 +533,7 @@ async def run_analysis():
         if noise_found:
             print(f"DEBUG: [노이즈 단어 발견 스킵] '{noise_found}' 포함 - 제목: {data.get('title')[:20]}...")
             await update_es_status(_id, True)
+
             # 여기도 처리 완료 표시 후 continue
             continue
 

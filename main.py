@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import subprocess
+from datetime import datetime, timedelta
 import math
 import random
 import asyncio
@@ -108,25 +109,30 @@ async def run_analysis_and_save():
                 # ==========================================
                 # [STEP 2] 키워드 매칭
                 # ==========================================
-                news_keywords = res.get('keywords', [])
+                news_keywords = [
+                    kw.strip().lower()
+                    for kw in res.get('keywords', [])
+                ]
+                logger.info(f"📰 기사 키워드: {news_keywords}")
                 if news_keywords:
-
                     match_sql = sqlalchemy.text("""
-                                    SELECT DISTINCT m.member_no, m.email
+                                    SELECT DISTINCT 
+                                        m.member_no, 
+                                        m.email,
+                                        mk.keyword
                                     FROM member_keyword mk
                                     JOIN member_info m
                                       ON mk.member_no = m.member_no
-                                    WHERE :prediction LIKE CONCAT('%', mk.keyword, '%')
-                                       OR :reason LIKE CONCAT('%', mk.keyword, '%')
                                 """)
+                    all_users = session.execute(match_sql).fetchall()
+                    matched_users = []
+                    for user in all_users:
+                        user_keyword = user.keyword.strip().lower()
+                        logger.info(f"👤 사용자 키워드: {user_keyword}")
 
-                    matched_users = session.execute(
-                        match_sql,
-                        {
-                            "prediction": res.get('prediction', ''),
-                            "reason": res.get('reason', '')
-                        }
-                    ).fetchall()
+                        # 완전 일치
+                        if user_keyword in news_keywords:
+                            matched_users.append(user)
 
                     # 사용자별 처리
                     for user in matched_users:
@@ -357,8 +363,11 @@ def regist_request_code(info: Dict[str, str], req: Request):
     # 6자리 랜덤 번호 생성
     auth_code = str(random.randint(100000, 999999))
 
+    # 만료 시간 (3분 뒤)
+    expires_at = (datetime.now() + timedelta(minutes=3)).isoformat()
+
     # 세션에 이메일과 매핑하여 인증코드 임시 보관
-    req.session["regist_auth"] = {"email": email, "code": auth_code, "verified": False}
+    req.session["regist_auth"] = {"email": email, "code": auth_code, "verified": False, "expires_at": expires_at}
 
     # 만능 알림 함수 호출 (AUTH 모드 가동)
     success = notifier.send_emergency_email(
@@ -369,7 +378,11 @@ def regist_request_code(info: Dict[str, str], req: Request):
         keywords_str=None,
         title="회원가입 이메일 인증번호"
     )
-    return {"res": success, "msg": "인증코드가 발송되었습니다." if success else "메일 발송에 실패했습니다."}
+    return {
+        "res": success,
+        "msg": "인증코드가 발송되었습니다." if success else "메일 발송에 실패했습니다.",
+        "expires_in": 180
+    }
 
 
 # 회원가입 2단계: 인증코드 검증
@@ -381,9 +394,21 @@ def regist_verify_code(info: Dict[str, str], req: Request):
     if not session_data or session_data["code"] != input_code:
         return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
 
+    # 만료 시간 체크
+    expires_at = datetime.fromisoformat(session_data["expires_at"])
+
+    if datetime.now() > expires_at:
+        req.session.pop("regist_auth", None)
+        return {"res": False, "msg": "인증코드가 만료되었습니다."}
+
+    # 코드 검증
+    if session_data["code"] != input_code:
+        return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
+
     # 검증 성공 상태를 세션에 업데이트
     session_data["verified"] = True
     req.session["regist_auth"] = session_data
+
     return {"res": True}
 
 
@@ -453,6 +478,7 @@ def logout(req: Request, db: Session = Depends(get_db)):
         except Exception as e:
             logger.info(f'로그아웃 처리 오류 : {e}')
     return
+
 
 # session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
 @app.get('/session_out')
@@ -733,6 +759,7 @@ def custom_news(id: str, db: Session = Depends(get_db)):
         WHERE m.id = :id
     """)
     user_keywords = db.execute(kw_sql, {"id": id}).scalars().all()
+
 
     # 2. 사용자가 읽은 기사 URL 목록 조회
     view_sql = sqlalchemy.text("""
@@ -1070,7 +1097,7 @@ def country_map(db: Session = Depends(get_db)):
 #        find ID / PW
 # ===============================
 # 아이디 찾기
-@app.post("/find_id")
+@app.post("/find_id/request")
 def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
     logger.info(f'id 찾기 info = {info}')
 
@@ -1084,11 +1111,16 @@ def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
 # 비밀번호 찾기 1단계: 인증코드 요청
 @app.post("/find_pw/request")
 async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
-    user_id = info.get("userId")
-    email = info.get("email")
+    user_id = info.get("userId").strip()
+    email = info.get("email").strip()
+
+    logger.info(f"user_id = [{user_id}]")
+    logger.info(f"email = [{email}]")
 
     sql = sqlalchemy.text("SELECT 1 FROM member_info WHERE id = :id AND email = :email")
-    user_exists = db.execute(sql, {"id": user_id, "email": email}).scalar()
+    user_exists = db.execute(sql,{"id": user_id.strip(),"email": email.strip() }).scalar()
+
+    logger.info(f"user_exists = {user_exists}")
 
     if not user_exists:
         return {"res": False}
@@ -1104,7 +1136,9 @@ async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depe
 
     # 6자리 인증코드 생성 및 세션 저장
     pwd_code = str(random.randint(100000, 999999))
-    req.session["find_pw_auth"] = {"email": email, "userId": user_id, "code": pwd_code}
+    # 3분 뒤 만료
+    expires_at = (datetime.now() + timedelta(minutes=3)).isoformat()
+    req.session["find_pw_auth"] = {"email": email, "userId": user_id, "code": pwd_code, "expires_at": expires_at}
 
     # 만능 알림 함수 호출 (PWD 모드)
     success = notifier.send_emergency_email(
@@ -1115,7 +1149,10 @@ async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depe
         keywords_str=None,
         title="비밀번호 재설정 인증번호"
     )
-    return {"res": success}
+    return {
+        "res": success,
+        "expires_in": 180
+    }
 
 
 # 비밀번호 찾기 2단계: 코드 검증
@@ -1134,9 +1171,30 @@ async def find_pw_verify(info: Dict[str, str], req: Request):
     # 세션 자체가 유실되었다면 에러 메시지를 명확하게 분리해서 반환
     if not session_data:
         return {"res": False, "msg": "서버 세션이 만료되었거나 인증번호가 생성되지 않았습니다. 코드를 다시 받아주세요."}
+    # 인증코드 만료 체크
+    try:
+        expires_at = datetime.fromisoformat(session_data["expires_at"])
 
+        if datetime.now() > expires_at:
+            req.session.pop("find_pw_auth", None)
+
+            return {
+                "res": 0,
+                "msg": "인증코드 유효시간(3분)이 만료되었습니다."
+            }
+
+    except Exception as e:
+        logger.error(f"reset 만료시간 파싱 오류: {e}")
+        return {
+            "res": 0,
+            "msg": "인증 세션 처리 중 오류가 발생했습니다."
+        }
     if str(session_data.get("code")).strip() != input_code:
         return {"res": False, "msg": "인증코드가 일치하지 않습니다."}
+
+    # 인증 성공 표시
+    session_data["verified"] = True
+    req.session["find_pw_auth"] = session_data
 
     return {"res": True}
 
@@ -1150,8 +1208,12 @@ async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends
     session_data = req.session.get("find_pw_auth")
 
     # 세션 검증 보안 장치 (인증코드, 코드검증 단계를 정상적으로 거쳤는지 확인)
-    if not session_data or session_data["userId"] != user_id:
-        return {"res": 0, "msg": "잘못된 접근입니다."}
+    if (
+            not session_data
+            or session_data["userId"] != user_id
+            or not session_data.get("verified")
+    ):
+        return {"res": 0, "msg": "인증이 완료되지 않았습니다."}
     try:
         sql = sqlalchemy.text("UPDATE member_info SET pw = :pw WHERE id = :id")
         res = db.execute(sql, {"id": user_id, "pw": new_pw})

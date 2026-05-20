@@ -110,6 +110,21 @@ def crawl_job(keywords):
         try:
             feed = feedparser.parse(feed_url)
             for entry in feed.entries:
+                # 날짜 선필터링
+                raw_pub_date = entry.get('published') or entry.get('updated')
+                # 날짜 없는 RSS는 초반 컷
+                if not raw_pub_date:
+                    continue
+                try:
+                    dt_obj = date_parser.parse(str(raw_pub_date), fuzzy=True)
+
+                    if dt_obj.year < 2026:
+                        continue
+
+                except Exception as e:
+                    logging.warning(f"⚠️ RSS 날짜 파싱 실패: {raw_pub_date} | {e}")
+                    continue
+
                 title = entry.title.lower()
                 summary = entry.get('summary', '').lower()
                 search_text = (title + " " + summary)
@@ -218,11 +233,19 @@ def fetch_and_save(data):
         raw_date = exact_date or rss_pub_date
 
         if not raw_date:
+            logging.info(f"⏭️ [날짜 스킵] 날짜 정보 없음: {article.title[:20]}")
             return "FAILED"
         try:
+            # 문자열이면 강제 파싱
             if isinstance(raw_date, str):
+
+                # 너무 긴 쓰레기 문자열 방어
+                if len(raw_date) > 80:
+                    logging.warning(f"비정상 날짜 문자열 차단: {raw_date}")
+                    return "FAILED"
+
                 try:
-                    dt_obj = date_parser.parse(raw_date)
+                    dt_obj = date_parser.parse(str(raw_date), fuzzy=True)
                 except Exception:
                     logging.warning(f"날짜 파싱 실패 raw_date={raw_date}")
                     return "FAILED"
@@ -230,11 +253,12 @@ def fetch_and_save(data):
             else:
                 dt_obj = raw_date
 
-            if isinstance(raw_date, str) and len(raw_date) > 80:
-                logging.warning(f"비정상 날짜 문자열 차단: {raw_date}")
+            # 연도 필터
+            if dt_obj.year < 2026:
+                logging.info(f"⏭️ [최종 날짜 스킵] 상세페이지 기준 {dt_obj.year}년 기사")
                 return "FAILED"
 
-            # 1. timezone 없으면 RSS 기준 부여
+            # timezone 없는 경우 RSS timezone 부여
             if dt_obj.tzinfo is None:
                 feed_tz = RSS_FEEDS.get(feed_url, ZoneInfo("UTC"))
                 dt_obj = dt_obj.replace(tzinfo=feed_tz)
@@ -242,9 +266,12 @@ def fetch_and_save(data):
             # UTC 통일 저장
             dt_obj = dt_obj.astimezone(timezone.utc)
 
+            # 최종 저장용
             final_pub_date = dt_obj.isoformat()
+
+
         except Exception as e:
-            logging.error(f"날짜 처리 실패: {e}")
+            logging.warning(f"❌ 날짜 파싱 중 에러 발생 ({raw_date}): {e}")
             return "FAILED"
 
         doc = {
@@ -265,7 +292,6 @@ def fetch_and_save(data):
     except Exception as e:
         logging.error(f"❌ [GLOBAL-RSS] 수집 실패 ({clean_url}): {e}")
         return "ERROR"
-
 
 # 3-1. 기사를 다운로드할 때 사용할 '설정(User-Agent, 타임아웃 등)'을 생성
 def get_config():
