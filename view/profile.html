@@ -301,9 +301,15 @@
                             <div id="password-change-area" class="hidden pt-4 border-t">
                                 <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
                                     <i data-lucide="key" class="w-4 h-4 text-gray-400"></i> 비밀번호 변경 (선택사항)
+                                    <p class="text-xs text-blue-600 leading-relaxed">
+                                        * 영문, 숫자를 포함한 8자리 이상으로 입력해주세요.
+                                    </p>
                                 </label>
                                 <input type="password" id="password" placeholder="새 비밀번호 입력" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
                                 <input type="password" id="password-confirm" placeholder="새 비밀번호 확인" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <div>
+                                    <p id="password-message" class="block text-xs mt-1 hidden"></p>
+                                </div>
                             </div>
 
                             <!-- 저장 버튼 (수정 모드 시 노출) -->
@@ -850,19 +856,13 @@
 
             //  4. 비밀번호 입력이 있을 때만 유효성 검사 실시
             if (pw !== '') {
-                // [검사 1] 일치 여부
-                if (pw !== pwConfirm) {
-                    showModal("비밀번호가 일치하지 않습니다.", "error");
-                    return;
-                }
-
                 // [검사 2] 8자 이상, 영문/숫자 혼합
                 const pwRegex = /^(?=.*[a-zA-Z])(?=.*\d).{8,}$/;
                 if (!pwRegex.test(pw)) {
                     showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.", "error");
                     return;
                 }
-            }
+            } 
 
             // 데이터 업데이트 진행
             userData.email = email;
@@ -1020,6 +1020,38 @@
             });
         });
 
+        // 비밀번호 확인 함수
+        function checkPasswordMatch() {
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('password-confirm');
+            const messageTag = document.getElementById('password-message');
+
+            if (!passwordInput || !confirmInput || !messageTag) return;
+
+            const pswd = passwordInput.value;
+            const confirmPswd = confirmInput.value;
+
+            if (pswd.trim() !== '' || confirmPswd !== '') {
+                passwordInput.required = true;
+                confirmInput.required = true;
+            } else {
+                passwordInput.required = false;
+                confirmInput.required = false;
+            }
+            
+            if (!pswd || !confirmPswd) { messageTag.classList.add('hidden'); return; }
+            messageTag.classList.remove('hidden');
+            if (pswd === confirmPswd) {
+                messageTag.textContent = "비밀번호가 일치합니다.";
+                messageTag.className = "text-xs mt-1 text-green-600";
+                confirmInput.classList.add('border-green-500'); confirmInput.classList.remove('border-red-500');
+            } else {
+                messageTag.textContent = "비밀번호가 일치하지 않습니다.";
+                messageTag.className = "text-xs mt-1 text-red-600";
+                confirmInput.classList.add('border-red-500'); confirmInput.classList.remove('border-green-500');
+            }
+        }
+
         // 페이지 오픈시 실행
         document.addEventListener('DOMContentLoaded', async () => {
             axios.get("/session_out");
@@ -1044,6 +1076,14 @@
                     userData.phone = this.value; // 실시간 데이터 동기화
                 });
             }
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('password-confirm');
+            
+            if (passwordInput || confirmInput) {
+                passwordInput.addEventListener('input', checkPasswordMatch);
+                confirmInput.addEventListener('input', checkPasswordMatch);
+            }
+
         });
 
     </script>
