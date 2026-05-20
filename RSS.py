@@ -33,6 +33,8 @@ from elasticsearch import Elasticsearch
 from apscheduler.schedulers.blocking import BlockingScheduler
 from bs4 import BeautifulSoup
 from utils import get_real_url
+from zoneinfo import ZoneInfo
+from datetime import timezone, timedelta
 
 # --- 1. 초기 설정 및 최적화된 소스 ---
 
@@ -42,26 +44,37 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("elastic_transport").setLevel(logging.WARNING)
 
 es = Elasticsearch(
-    ["http://100.123.232.79:9200"],
+    ["http://localhost:9200"],
     request_timeout=30
 )
-INDEX_NAME = "news_en"
+INDEX_NAME = "news_en1000"
 scraper = cloudscraper.create_scraper()
 
-RSS_FEEDS = [
-    "https://abcnews.go.com/abcnews/businesstimes",
-    "https://abcnews.go.com/abcnews/internationalheadlines",
-    "https://finance.yahoo.com/news/rssindex",
-    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
-    "https://www.investing.com/rss/news_25.rss",
-    "https://www.investing.com/rss/market_overview.rss",
-    "http://feeds.marketwatch.com/marketwatch/topstories/",
-    "https://www.theguardian.com/world/rss",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "http://feeds.feedburner.com/zerohedge/feed",
-    "https://www.scmp.com/rss/91/feed",
-    "https://www.ft.com/?format=rss"
-]
+RSS_FEEDS = {
+    "https://abcnews.go.com/abcnews/businesstimes":
+        ZoneInfo("UTC"),
+    "https://abcnews.go.com/abcnews/internationalheadlines":
+        ZoneInfo("UTC"),
+    "https://finance.yahoo.com/news/rssindex":
+        ZoneInfo("America/New_York"),
+    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664":
+        ZoneInfo("America/New_York"),
+    "https://www.investing.com/rss/news_25.rss":
+        ZoneInfo("UTC"),
+    "https://www.investing.com/rss/market_overview.rss":
+        ZoneInfo("UTC"),
+    "http://feeds.marketwatch.com/marketwatch/topstories/":
+        ZoneInfo("America/New_York"),
+    "https://www.theguardian.com/world/rss":
+        ZoneInfo("Europe/London"),
+    "https://www.aljazeera.com/xml/rss/all.xml":
+        timezone(timedelta(hours=3)),
+    "http://feeds.feedburner.com/zerohedge/feed":
+        ZoneInfo("UTC"),
+    "https://www.scmp.com/rss/91/feed":
+        ZoneInfo("Asia/Hong_Kong"),
+    "https://www.ft.com/?format=rss":
+        ZoneInfo("Europe/London"),}
 
 
 USER_AGENTS = [
@@ -159,7 +172,10 @@ def fallback_extract(html):
 # --- 3. 메인 수집 함수 ---
 
 def fetch_and_save(data):
-    link, rss_pub_date = data
+    link, meta = data
+
+    rss_pub_date = meta.get("published")
+    feed_url = meta.get("feed_url")
 
     if not link.startswith(('http://', 'https://')):
         full_url = "https://" + link.lstrip('/')
@@ -211,13 +227,35 @@ def fetch_and_save(data):
         if not raw_date:
             return "FAILED"
 
+        exact_date = extract_exact_date(html, article)
+        raw_date = exact_date or rss_pub_date
+
         try:
             if isinstance(raw_date, str):
-                dt_obj = date_parser.parse(raw_date)
+                try:
+                    dt_obj = date_parser.parse(raw_date)
+                except Exception:
+                    logging.warning(f"날짜 파싱 실패 raw_date={raw_date}")
+                    return "FAILED"
+
             else:
                 dt_obj = raw_date
-            final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
-        except:
+
+            if isinstance(raw_date, str) and len(raw_date) > 80:
+                logging.warning(f"비정상 날짜 문자열 차단: {raw_date}")
+                return "FAILED"
+
+            # 1. timezone 없으면 RSS 기준 부여
+            if dt_obj.tzinfo is None:
+                feed_tz = RSS_FEEDS.get(feed_url, ZoneInfo("UTC"))
+                dt_obj = dt_obj.replace(tzinfo=feed_tz)
+
+            # UTC 통일 저장
+            dt_obj = dt_obj.astimezone(timezone.utc)
+
+            final_pub_date = dt_obj.isoformat()
+        except Exception as e:
+            logging.error(f"날짜 처리 실패: {e}")
             return "FAILED"
 
         doc = {
@@ -225,6 +263,7 @@ def fetch_and_save(data):
             'content_en': content,
             'press_name': press_name,
             'published_date': final_pub_date,
+            "rss_source": feed_url,
             'main_image': get_real_url(main_image),
             'url': clean_url,
             'is_translated': False,
@@ -273,7 +312,10 @@ def crawl_job(keywords):
 
                     if norm_url not in link_data:
                         # RSS 데이터에 상세 시간이 있으면 최대한 보존
-                        link_data[norm_url] = entry.get('published') or entry.get('updated')
+                        link_data[norm_url] = {
+                            "published": entry.get('published') or entry.get('updated'),
+                            "feed_url": feed_url
+                        }
         except Exception as e:
             logging.error(f"Feed error ({feed_url}): {e}")
 

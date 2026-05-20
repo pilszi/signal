@@ -11,8 +11,12 @@ from deep_translator import GoogleTranslator
 from konlpy.tag import Okt
 from dateutil import parser as date_parser
 
+import RSS
 # 커스텀 유틸리티 함수 (기존 파일에서 불러오기)
 from utils import extract_keywords, find_target_country, generate_article_id
+# pytz를 지우고 zoneinfo를 사용합니다. (Python 3.9+ 표준)
+from zoneinfo import ZoneInfo
+from datetime import timezone
 
 # 로그 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -22,13 +26,13 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 okt = Okt()
 es = Elasticsearch(
-    ["http://100.123.232.79:9200"],
+    ["http://localhost:9200"],
     request_timeout=30,
     retry_on_timeout=True
 )
 
-TARGET_INDICES = ["news_en"]
-DEST_INDEX = "news_origin"
+TARGET_INDICES = ["news_en1000"]
+DEST_INDEX = "news_origin1000"
 
 
 def translate_chunk(chunk):
@@ -66,6 +70,13 @@ def process_translation():
     3. 그 다음 여유롭게 번역과 분석을 진행한다.
     """
     logging.info(f"[{datetime.now().strftime('%H:%M:%S')}] 번역 및 시간 변환 작업 시작...")
+
+    TZ_MAPPING = {
+        "abcnews": ZoneInfo("America/New_York"),  # 뉴욕 (UTC-4 또는 -5)
+        "scmp": ZoneInfo("Asia/Hong_Kong"),  # 홍콩 (UTC+8)
+        "zerohedge": ZoneInfo("UTC"),  # 제로헤지는 아까 검증 시 UTC 숫정이었으므로 UTC 지정
+        "guardian": ZoneInfo("Europe/London"),  # 런던 (UTC+0 또는 +1)
+    }
 
     while True: # [수정] 번역 대상이 없을 때까지 무한 반복
         # [해결책] 일꾼들끼리 0~1초 사이로 엇박자를 줍니다.
@@ -109,18 +120,34 @@ def process_translation():
 
                 # logging.info(f"[{index_name}] 선점 성공 & 작업 시작: {source.get('title_en', 'No Title')[:30]}...")
 
-
-                # 2. 날짜 KST(+9시간) 변환
-                raw_date = source.get('published_date')
+                # 2. 날짜 KST 변환 (서머타임 완벽 해결 및 자동 분기 버전)
+                # 2. 날짜 KST 변환 (완전 가공 없는 현지 시간 매칭 버전)
+                # 2. 날짜 KST 변환
+                raw_date = source.get("published_date")
                 final_pub_date = raw_date
+
                 if raw_date:
                     try:
-                        dt_obj = date_parser.parse(raw_date)
-                        kst_dt = dt_obj + timedelta(hours=9)
-                        final_pub_date = kst_dt.strftime('%Y-%m-%dT%H:%M:%S')
-                    except Exception as date_err:
-                        logging.warning(f"날짜 변환 오류 ({raw_date}): {date_err}")
+                        # 한국시간 변환
+                        raw_date = source.get("published_date")
 
+                        dt_obj = date_parser.parse(raw_date)
+
+                        # DB에는 UTC만 저장했다고 가정
+                        if dt_obj.tzinfo is None:
+                            dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+
+                        kst_dt = dt_obj.astimezone(ZoneInfo("Asia/Seoul"))
+
+                        final_pub_date = kst_dt.strftime('%Y-%m-%dT%H:%M:%S')
+
+                        logging.info(f"""
+                        raw_date={raw_date}
+                        kst_date={final_pub_date}
+                        """)
+
+                    except Exception as date_err:
+                        logging.warning(f"날짜 변환 오류 ({raw_date}) : {date_err}")
                 # 3. 번역 진행
                 translator = GoogleTranslator(source='en', target='ko')
                 # 제목 번역
@@ -140,7 +167,8 @@ def process_translation():
                 # 5. [ES1 업데이트] 원본 인덱스 상태 변경 (반드시 필요!)
                 # 이 업데이트를 안 하면 다음 루프에서 똑같은 기사를 또 가져옵니다.
                 es.update(index=index_name, id=doc_id, body={
-                    "doc": {"is_translated": True}
+                    "doc": {"is_translated": True,
+                            "published_date_kst": final_pub_date}
                 }, refresh=True)
 
                 # 6. [ES2 저장]
@@ -155,13 +183,21 @@ def process_translation():
                     "extracted_keyword": extracted_ks,
                     "country_name": target_country
                 }
-
+                logging.info(f"press_name={source.get('press_name')}")
                 es.index(index=DEST_INDEX, id=doc_id, document=analysis_doc)
                 # logging.info(f"✅ 저장 완료 (KST: {final_pub_date})")
 
+
             except Exception as e:
                 logging.error(f"❌ [{index_name}] 처리 중 오류 발생: {e}")
-                # 오류 발생 시 무한 루프에 빠지지 않도록 잠시 대기
+                # [안전장치] 만약 선점(is_translated=True)까지 성공했는데 그 뒤에서 에러가 났다면?
+                # 다시 False로 돌려놓아서 다음 루프나 다른 일꾼이 긁어갈 수 있게 복구합니다.
+                if doc_id:
+                    try:
+                        logging.info(f"🔄 [{index_name}] 에러로 인한 선점 해제 조치 (ID: {doc_id})")
+                        es.update(index=index_name, id=doc_id, body={"doc": {"is_translated": False}}, refresh=True)
+                    except Exception as re_err:
+                        logging.error(f"선점 해제 실패: {re_err}")
                 time.sleep(1)
                 continue
 
@@ -169,6 +205,9 @@ def process_translation():
         if not found_job_in_this_turn:
             logging.info("모든 번역 작업이 완료되었습니다.")
             return
+
+
+
 
 
 if __name__ == "__main__":
