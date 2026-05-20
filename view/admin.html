@@ -157,6 +157,32 @@
         </style>
     </head>
     <body class="bg-gray-50">
+        <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
+            <div class="absolute inset-0 bg-black/50" onclick="closeModal()"></div> <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 relative z-10 shadow-2xl border">
+                <div id="modal-icon" class="flex justify-center mb-4"></div>
+                <p id="modal-message" class="text-center font-medium text-gray-800 mb-6"></p>
+                
+                <div class="flex gap-3">
+                    <button 
+                        id="modal-cancel-btn"
+                        type="button" 
+                        onclick="closeModal()" 
+                        class="hidden w-1/2 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-semibold"
+                    >
+                        취소
+                    </button>
+                    
+                    <button 
+                        id="modal-confirm-btn"
+                        type="button" 
+                        onclick="confirmModal()" 
+                        class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-bold"
+                    >
+                        확인
+                    </button>
+                </div>
+            </div>
+        </div>
         <!-- Navbar -->
         <nav class="border-b bg-white sticky top-0 z-50">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -402,7 +428,7 @@
                             로그인 내역
                         </h2>
 
-                        <div id="login_log" class="space-y-3 text-sm">
+                        <div id="login_log" class="grid md:grid-cols-2 gap-4 text-sm">
                         </div>
                     </div>
 
@@ -479,17 +505,18 @@
         }
 
         async function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")){
-                try {
+            showModal("로그아웃 하시겠습니까?", "confirm", async () => {
+                 try {
                     await axios.get("/logout");
                     sessionStorage.removeItem('savedUserId');
                     location.href = "login.html";
                 }catch (error) {
                     console.error("로그아웃 중 오류 발생:", error);
-                    alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
+                    showModal("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.", error);
                 }
-            } 
-        } 
+            });
+        }
+
 
         // 모든 user 나열 함수
         async function loadUsers(user = userData) {
@@ -540,6 +567,19 @@
         async function showUserDetail(id){
 
             const detail = document.getElementById('member_detail');
+            const currentOpenId = detail.getAttribute('data-current-id');
+            if (currentOpenId === id) {
+                // 같은 ID를 다시 클릭했다면? 창을 닫고(초기화) 함수를 종료합니다.
+                detail.innerHTML = '';
+                detail.removeAttribute('data-current-id'); // 저장해둔 ID 삭제
+                
+                // (선택사항) 로그인 로그 영역도 함께 비워줍니다.
+                const logContainer = document.getElementById('login_log'); 
+                if (logContainer) logContainer.innerHTML = '';
+                
+                return; // 아래 상세보기 코드를 실행하지 않고 여기서 끝냄
+            }
+
             const user = userData.find(user => user.id === id);
 
             if (!user) return;
@@ -608,11 +648,13 @@
                     }
                 </div>
             `;
+            detail.setAttribute('data-current-id', id);
             // console.log(id);
             // 회원 상세보기시 로그인 로그 나열(시간순서대로)
             await userLoginLog(id);
                             
         }
+
         
         // 로그인로그 가져오기 함수
         async function userLoginLog(id) {
@@ -715,6 +757,23 @@
             // 일주일이 넘어가면 그냥 원래 날짜(년-월-일)를 보여줍니다.
             return dateString.split('T')[0]; 
         }
+ 
+        // 상세보기 접고 / 펼치기 토글 함수
+        function toggleSignalList(btn, targetId) {
+            const container = document.getElementById(targetId);
+            
+            if (container) {
+                // hidden 클래스를 토글 (없으면 넣고, 있으면 뺌)
+                container.classList.toggle('hidden');
+                
+                // 상태에 따라 버튼 텍스트 변경
+                if (container.classList.contains('hidden')) {
+                    btn.textContent = '펼치기';
+                } else {
+                    btn.textContent = '접기';
+                }
+            }
+        }
 
         // 회원 알림 로그
         async function admin_log() {
@@ -725,8 +784,11 @@
 
             let html = `
                 <div class="flex justify-between py-3 px-4 text-sm font-semibold text-gray-500 bg-gray-100/50">
-                    <span>회원정보 알림</span>
+                    <span>회원정보 알림</span><button type="button" onclick="toggleSignalList(this, 'user_list_container')" class="text-xs text-blue-500 hover:text-blue-700 font-normal focus:outline-none">
+                        접기
+                    </button>
                 </div>
+                <div id="user_list_container" class="transition-all duration-300">
             `;
 
             html += adminLog.map(log => `
@@ -740,6 +802,7 @@
                     </p>
                 </div>
             `).join('');
+            html +=`</div>`;
 
             user_log.innerHTML = html;
         }
@@ -758,12 +821,15 @@
 
             let html = `
                 <div class="flex justify-between py-3 px-4 text-sm font-semibold text-gray-500 bg-gray-100/50">
-                    <span>시그널 알림</span>
+                    <span>시그널 알림</span><button type="button" onclick="toggleSignalList(this, 'signal_list_container')" class="text-xs text-blue-500 hover:text-blue-700 font-normal focus:outline-none">
+                        접기
+                    </button>
                 </div>
+                <div id="signal_list_container" class="transition-all duration-300">
             `;
             html += warnningLog.map(log =>
-                `
-                <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors" onclick='signalDetail(${log.signal_no})'>
+               `
+                <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-100 last:border-none" onclick='signalDetail(${log.signal_no})'>
                     <div class="flex justify-between items-start">
                         ${riskMap[log.risk_level] || 3}단계 Signal 위험 감지
                     </div>
@@ -773,6 +839,7 @@
                 </div>
                 `
             ).join('');
+            html +=`</div>`;
             signal_log.innerHTML = html;
         }
         
@@ -783,9 +850,6 @@
                 log.before_data,
                 log.after_data
             );
-            // 1. JSON 문자열을 객체로 변환
-            const befObj = JSON.parse(diff.before); 
-            const aftObj = JSON.parse(diff.after);
 
             // 2. 객체를 [Key, Value] 배열로 쪼갠 뒤, 문장으로 합치기
             document.getElementById("detail_before").textContent = 
@@ -803,12 +867,12 @@
                 log.created_at || "-";   
 
             document.getElementById("detail_before").textContent = 
-                Object.entries(befObj).map(([key, value]) => 
+                Object.entries(diff.before).map(([key, value]) => 
                     `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
                     ).join("\n");            
        
             document.getElementById("detail_after").textContent =
-                Object.entries(aftObj).map(([key, value]) => 
+                Object.entries(diff.after).map(([key, value]) => 
                     `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
                     ).join("\n");   
 
@@ -885,20 +949,25 @@
             document.getElementById("signal_id").textContent =
                 log.signal_no || "-";
 
-            if (log.member_list > 5) {
-                userNoEl.innerHTML = memberList.slice(0, 5).join(", ");
+            const currentArr = log.member_list ? log.member_list.split(",") : [];
+
+            // 2. 글자 수가 아니라 실제 '회원 수'가 5명을 넘는지 체크합니다.
+            if (currentArr.length > 5) {
+                // 5명만 잘라서 보여주기 (.slice와 .join이 완벽하게 작동합니다)
+                userNoEl.innerHTML = currentArr.slice(0, 5).join(", ");
                 moreBtnEl.style.display = "inline-block";
+                
                 // 더보기 버튼 클릭 이벤트 리스너 등록
                 moreBtnEl.onclick = function() {
                     // 전체 리스트를 화면에 다 보여주기
-                    userNoEl.textContent = memberList.join(", ");
+                    userNoEl.textContent = currentArr.join(", ");
                     // 전부 다 보여줬으니 더보기 버튼은 다시 숨기기
                     moreBtnEl.style.display = "none";
                 };
-            }else {
-                userNoEl.innerHTML =
-                    log.member_list.split(",").join(", ");
-                    moreBtnEl.style.display = "none";
+            } else {
+                // 5명 이하일 때는 그냥 한 번에 다 보여주기
+                userNoEl.innerHTML = currentArr.join(", ");
+                moreBtnEl.style.display = "none";
             }
 
             document.getElementById("signal_level").textContent =
@@ -911,9 +980,9 @@
                 log.alarm_time;
 
             const link = document.getElementById("signal_url");
-                if (log.news_url) {
-                    link.href = log.news_url;
-                    link.textContent = log.news_url;
+                if (log.url) {
+                    link.href = log.url;
+                    link.textContent = log.url;
                 } else {
                     link.href = "#";
                     link.textContent = "링크 없음";
@@ -924,7 +993,51 @@
                 .classList.remove("hidden");
         }
         
+        // 모달 제어
+        function showModal(msg, type, onConfirm = null) {
+            const modal = document.getElementById('alert-modal');
+            const iconDiv = document.getElementById('modal-icon');
+            const cancelBtn = document.getElementById('modal-cancel-btn'); // 취소 버튼 가져오기
+            
+            document.getElementById('modal-message').innerText = msg;
+            
+            // 1. 타입별 아이콘 및 취소 버튼 노출 여부 설정
+            if(type === 'success') {
+                iconDiv.innerHTML = '<i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>';
+                if(cancelBtn) cancelBtn.classList.add('hidden'); // 일반 알림일 땐 취소 버튼 숨기기
+            } else if (type === 'confirm') {
+                // 로그아웃, 탈퇴 등 물어보는 창일 때
+                iconDiv.innerHTML = '<i data-lucide="help-circle" class="w-12 h-12 text-yellow-500"></i>';
+                if(cancelBtn) cancelBtn.classList.remove('hidden'); // 확인 창일 땐 취소 버튼 보이기
+            } else {
+                iconDiv.innerHTML = '<i data-lucide="alert-circle" class="w-12 h-12 text-red-500"></i>';
+                if(cancelBtn) cancelBtn.classList.add('hidden'); // 에러 알림일 땐 취소 버튼 숨기기
+            }
+            
+            // 2. 콜백 함수를 전역 변수에 저장
+            modalCallback = onConfirm;
+            
+            modal.classList.remove('hidden');
+            lucide.createIcons();
+        }
 
+        // [수정] 단순 창을 닫는 함수 (취소 버튼이나 X 버튼에 연결)
+        function closeModal() {
+            document.getElementById('alert-modal').classList.add('hidden');
+            modalCallback = null; // 그냥 닫았으므로 콜백을 비워버림 (아무 일도 안 일어남)
+        }
+
+        // [추가] 모달의 '확인' 버튼을 클릭했을 때 실행할 함수
+        function confirmModal() {
+            // 1. 화면에서 모달창을 숨깁니다.
+            document.getElementById('alert-modal').classList.add('hidden');
+            
+            // 2. 만약 넘겨받은 실행 대상(함수)이 있다면 "확인"을 누른 이 시점에 실행합니다!
+            if (typeof modalCallback === 'function') {
+                modalCallback();
+                modalCallback = null; // 실행 후 박스 비우기
+            }
+        }
 
     </script>
 </html>
