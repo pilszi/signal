@@ -403,7 +403,7 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 10}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 500}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -425,17 +425,73 @@ async def run_analysis():
         is_politics = "sid=100" in url or any(kw in title for kw in Config.politics_kws)
 
         # 🔥 노이즈 초기 컷 (스포츠/연예/추천/잡뉴스)
-        is_noise = (
-                any(kw.lower() in title.lower() for kw in Config.SPORTS_KEYWORDS)
-                or any(kw.lower() in title.lower() for kw in Config.ENTERTAINMENT_KEYWORDS)
-                or any(kw.lower() in title.lower() for kw in Config.RECOMMENDATION_KEYWORDS)
-                or any(kw.lower() in title.lower() for kw in Config.skip_keywords)
-        )
+        triggered_keyword = None
+
+        noise_categories = {
+            "SPORTS": Config.SPORTS_KEYWORDS,
+            "ENTERTAINMENT": Config.ENTERTAINMENT_KEYWORDS,
+            "RECOMMENDATION": Config.RECOMMENDATION_KEYWORDS,
+            "SKIP": Config.skip_keywords
+        }
+
+        is_noise = False
+        title_lower = str(title or "").lower()
+
+        for category, kws in noise_categories.items():
+
+            for kw in kws:
+
+                kw_str = str(kw).strip().lower()
+
+                if not kw_str:
+                    continue
+
+                # 영문 포함 여부 확인
+                has_english = bool(re.search(r"[a-z]", kw_str))
+
+                if has_english:
+
+                    # 유효 영문/숫자 길이 계산
+                    valid_chars = re.sub(r"[^a-z0-9]", "", kw_str)
+
+                    # 너무 짧은 키워드 방어
+                    if len(valid_chars) < 2:
+                        continue
+
+                    # 영문 독립 매칭
+                    pattern = (
+                        rf"(?<![a-z0-9])"
+                        rf"{re.escape(kw_str)}"
+                        rf"(?![a-z0-9])"
+                    )
+
+                    matched = bool(
+                        re.search(pattern, title_lower)
+                    )
+
+                else:
+                    # 한글은 부분 포함 매칭
+                    matched = kw_str in title_lower
+
+                if matched:
+                    is_noise = True
+                    triggered_keyword = (
+                        f"[{category}] -> '{kw}'"
+                    )
+                    break
+
+            if is_noise:
+                break
 
         if is_noise:
-            logger.info(f"⏩ [노이즈 컷] {title[:30]}")
-            continue
+            logger.info(
+                f"⏩ [노이즈 컷] "
+                f"원인: {triggered_keyword} | "
+                f"제목: {str(title or '')[:30]}"
+            )
+            await update_es_status(_id, True)
 
+            continue
 
         # ----------------------------------------------------------
         # 노이즈 기사 스킵 로직
@@ -448,6 +504,7 @@ async def run_analysis():
 
         if len(content) < 100 or any(kw in title for kw in Config.skip_keywords):
             logger.info(f"⏩ [노이즈 스킵] 분석 가치 부족으로 건너뜀: {title[:20]}...")
+            await update_es_status(_id, True)
             continue  # 다음 기사로 바로 넘어감
 
         refined_keywords = utils.find_target_country(data['title'], data['content'])
@@ -471,6 +528,7 @@ async def run_analysis():
 
         if len(cleaned_text.strip()) < 50:
             print(f"DEBUG: [길이 미달 스킵] {text_len}자 - 제목: {data.get('title')[:20]}...")
+            await update_es_status(_id, True)
             continue
 
         # 2. 특정 언론사 노이즈 문구 포함 시 스킵
@@ -478,6 +536,7 @@ async def run_analysis():
         noise_found = next((noise for noise in noise_keywords if noise in cleaned_text), None)
         if noise_found:
             print(f"DEBUG: [노이즈 단어 발견 스킵] '{noise_found}' 포함 - 제목: {data.get('title')[:20]}...")
+            await update_es_status(_id, True)
             # 여기도 처리 완료 표시 후 continue
             continue
 
@@ -655,6 +714,7 @@ async def run_analysis():
         try:
             # 1. 분석 완료 데이터 저장 (ES_3)
             es.index(index="news_labeling", id=_id, body=labelled_doc)
+            await update_es_status(_id, True)
             logger.info(f"✅ run_analysis에서 ES 저장 성공: {_id}")
             # 점수 산출 로그 추가
             logger.info(

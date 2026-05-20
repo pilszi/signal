@@ -363,7 +363,7 @@
                 // 1. 인사말 영역 처리 (굵은 검정 글자 테마 적용)
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
-                        <div class="text-sm text-gray-600 font-medium">
+                        <div class="text-sm text-gray-600">
                             <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md font-bold text-gray-800">관리자님</a>
                             반갑습니다
                         </div>
@@ -371,8 +371,8 @@
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <a class="font-bold text-sm text-gray-600">
-                            <span>${savedUserId} 님 반갑습니다</span>
+                        <a class="font=bold text-sm text-gray-600">
+                            <span class="text-gray-800">${savedUserId} 님 반갑습니다</span>
                         </a>
                         `
                 }
