@@ -64,7 +64,8 @@ def bulk_search_naver_news():
             for item in res['items']:
                 # [수정 4] 네이버 뉴스(n.news.naver.com) 링크만 수집 대상으로 선정
                 # API에서 'link'는 네이버 뉴스 링크, 'originallink'는 언론사 직링크입니다.
-                target_link = item.get('link')
+                target_link = item.get('link', '')
+
                 if "news.naver.com" not in target_link:
                     continue
 
@@ -90,6 +91,27 @@ def bulk_search_naver_news():
                     continue
 
                 if is_noise_article(clean_title, "", item['link'], check_length=False):
+                    continue
+
+                # 날짜 필터링
+                raw_pub_date = item.get('pubDate', '').strip()
+
+                # 1차 문자열 필터
+                if "2026" not in raw_pub_date:
+                    continue
+
+                # 2차 날짜 필터링
+                try:
+                    dt_obj = date_parser.parse(item['pubDate'], fuzzy=True)
+
+                    if dt_obj.year < 2026:
+                        continue
+
+                    # 재사용 위해 저장
+                    item['parsed_pub_date'] = dt_obj
+
+                except Exception as e:
+                    logging.warning(f"⚠️ 날짜 파싱 실패: {item.get('pubDate')} | {e}")
                     continue
 
                 # 중복이 아닌 기사만 작업 목록에 추가
@@ -137,12 +159,10 @@ def process_single_article(item):
 
         # 3. 날짜 파싱 (Elasticsearch 저장용 ISO 포맷 변환)
         try:
-            logging.info(f"🔍 [DEBUG] 파싱 시도 날짜: {item['pubDate']}")
-            dt_obj = date_parser.parse(item['pubDate'], fuzzy=True)
+            dt_obj = item.get('parsed_pub_date')
 
-            # [추가] 2026년 이전 기사는 수집 제외
-            if dt_obj.year < 2026:
-                logging.info(f"⏭️ [날짜 스킵] 2026년 이전 기사 ({dt_obj.year}년): {clean_title[:20]}")
+            if not dt_obj:
+                logging.warning(f"⚠️ parsed_pub_date 없음: {clean_title[:20]}")
                 return False
 
             final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')

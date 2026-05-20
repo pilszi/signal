@@ -95,6 +95,21 @@ def crawl_job(keywords):
         try:
             feed = feedparser.parse(feed_url)
             for entry in feed.entries:
+                # 날짜 선필터링
+                raw_pub_date = entry.get('published') or entry.get('updated')
+                # 날짜 없는 RSS는 초반 컷
+                if not raw_pub_date:
+                    continue
+                try:
+                    dt_obj = date_parser.parse(str(raw_pub_date), fuzzy=True)
+
+                    if dt_obj.year < 2026:
+                        continue
+
+                except Exception as e:
+                    logging.warning(f"⚠️ RSS 날짜 파싱 실패: {raw_pub_date} | {e}")
+                    continue
+
                 title = entry.title.lower()
                 summary = entry.get('summary', '').lower()
                 search_text = (title + " " + summary)
@@ -202,11 +217,10 @@ def fetch_and_save(data):
 
         try:
             dt_obj = date_parser.parse(str(raw_date), fuzzy=True)
-
-            # 2026년 이전 기사 차단
             if dt_obj.year < 2026:
-                logging.info(f"⏭️ [날짜 스킵] 오래된 글로벌 기사: {dt_obj.year}년")
+                logging.info(f"⏭️ [최종 날짜 스킵] 상세페이지 기준 {dt_obj.year}년 기사")
                 return "FAILED"
+            # 2026년 이전 기사 차단
             final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
 
         except Exception as e:
