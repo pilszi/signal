@@ -635,7 +635,7 @@
 
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id}, ${n.signal_no})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -649,7 +649,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -665,7 +665,7 @@
         }
 
         // signal_log.html 전용 readItem (최종 마감 버전)
-        async function readItem(id, signalNo) {
+        async function readItem(signalNo) {
 
             try {
                 // 1. 서버 읽음 처리
@@ -692,7 +692,7 @@
         }
 
         // [세 페이지 공통] 타입 미스매치 버그가 완벽 해결된 실시간 삭제 카운터 함수
-        async function deleteItem(e, id) {
+        async function deleteItem(e, signal_no) {
             // 1. 부모 박스 클릭 이벤트 전파 차단
             e.stopPropagation();
 
@@ -703,7 +703,7 @@
             }
 
             noti = noti.filter(
-                n => String(n.id) !== String(id)
+                n => String(n.signal_no) !== String(id)
             );
 
             // 4. 안 읽은 알림 수 재계산
@@ -744,7 +744,7 @@
 
             // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
             try {
-                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": signal_no, "user_id": savedUserId });
             } catch (err) {
                 console.error("알림 숨김 처리 서버 통신 에러:", err);
             }

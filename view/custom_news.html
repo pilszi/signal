@@ -480,7 +480,7 @@
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id}, ${n.signal_no})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -494,7 +494,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -515,26 +515,26 @@
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
-        async function readItem(id, signalNo) {
+        async function readItem(signal_no) {
             try {
                 // 1. 서버에 읽음 상태 반영 (POST 규격)
-                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": String(signal_no), "user_id": savedUserId });
 
                 // 2. 로컬 알림 배열 실시간 동기화 (화면 UI 갱신용)
                 if (typeof noti !== 'undefined' && Array.isArray(noti)) {
-                    noti = noti.map(n => String(n.id) === String(id) ? { ...n, is_read: 1 } : n);
+                    noti = noti.map(n => String(n.signal_no) === String(signal_no) ? { ...n, is_read: 1 } : n);
                 }
 
 
                 // 3. [방어선] 현재 이미 시그널로그 페이지라면 페이지 리로드 없이 즉시 스크롤 작동
                 if (window.location.pathname.endsWith('signal_log.html')) {
-                    window.location.hash = `signal-${id}`;
+                    window.location.hash = `signal-${signal_no}`;
                     executeScrollToCard(); // 2번 함수 즉시 가동
                     if (typeof updateNotifUI_Static === 'function') updateNotifUI_Static();
                     if (typeof updateNotifUI === 'function') updateNotifUI();
                 } else {
                     // 다른 페이지(main, custom)에 있다면 해시 주소를 들고 강제 이동
-                    window.location.href = `signal_log.html#signal-${signalNo}`;
+                    window.location.href = `signal_log.html#signal-${signal_no}`;
 
                 }
             } catch (err) {
@@ -566,10 +566,10 @@
         }
 
         // 아이템 삭제
-        async function deleteItem(e, id) {
+        async function deleteItem(signal_no) {
             e.stopPropagation();
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -577,7 +577,7 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
         }
 
@@ -603,9 +603,9 @@
                 "심각": "bg-red-100 text-red-700"
             };
             // console.log(news);
-            const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
             // 🚨 [치명적 버그 해결] 날짜가 null이거나 없을 때 split 에러로 전체 화면이 얼어붙는 현상 완전 차단
             const displayDate = news.published_date ? news.published_date.split('T')[0] : "날짜 미상";
+            const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
             const displayKeyword = Array.isArray(news.keyword) ? news.keyword.join(', ') : (news.keyword || '일반');
             let newBadge = '';
             if (!news.is_read) {
@@ -666,9 +666,11 @@
                         return -1; // a가 읽지 않은 상태면 앞으로 보냄
                     }
                 }
-                // 2. 리스크 점수 기준 정렬 (낮은 점수가 위로)
-                if (a.risk_score !== b.risk_score) {
-                    return a.risk_score - b.risk_score;
+                const scoreA = 100-Math.round(Math.abs((a.risk_score || 0) * 100));
+                const scoreB = 100-Math.round(Math.abs((b.risk_score || 0) * 100));
+                // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
+                if (scoreA !== scoreB) {
+                    return scoreB - scoreA;
                 }
                 // 3. 날짜 기준 정렬 (최신순)
                 const dateA = new Date(a.published_date);

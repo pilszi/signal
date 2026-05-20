@@ -928,7 +928,6 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
             # DB의 datetime 객체를 프론트엔드가 다루기 좋게 문자열로 포맷팅
             time_str = n["time"].strftime("%Y-%m-%d %H:%M") if n.get("time") else ""
             notis.append({
-                "id": n["signal_no"], # 구형 프론트엔드 호환용
                 "signal_no": n["signal_no"], # 신형 스크립트 매핑용 (moveToSignalLog 사용)
                 "type": "emergency",
                 "risk_level": n.get("risk_level", "심각"),
@@ -979,7 +978,7 @@ def noti_raed_all(info: Dict[str, Any], db: Session = Depends(get_db)):
             AND t1.signal_no IN :signal_nos
         """)
 
-    res = db.execute(sql, {"id": user_id, "signal_nos": signal_no_list})
+    res = db.execute(sql, {"userId": user_id, "signal_nos": signal_no_list})
     logger.info(f"🧹 {user_id}의 모든 알림 읽음 처리 완료 = {res.rowcount}개")
     db.commit()
     return {"res": True}

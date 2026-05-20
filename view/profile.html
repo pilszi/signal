@@ -420,7 +420,7 @@
                 console.error("데이터 동기화 실패:", error);
             }
         }
-        
+
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
@@ -573,7 +573,7 @@
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -587,7 +587,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -608,9 +608,9 @@
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
-        async function readItem(id) {
+        async function readItem(signal_no) {
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -618,16 +618,16 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
             location.href = 'signal_log.html';
         }
 
         // 아이템 삭제
-        async function deleteItem(e, id) {
+        async function deleteItem(e, signal_no) {
             e.stopPropagation();
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -635,7 +635,7 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
         }
 

@@ -704,7 +704,7 @@
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id}, ${n.signal_no})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -718,7 +718,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -741,28 +741,28 @@
 
         // 아이템 클릭 (읽음 처리 및 이동)
         // 🎯 main.html 내의 readItem 함수 최종 교체
-        async function readItem(id, signalNo) {
+        async function readItem(signal_no) {
             try {
                 // 1. 백엔드 데이터베이스에는 알림창 고유 일련번호(id)를 실어서 정상 읽음 마감 요청
-                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": String(signal_no), "user_id": savedUserId });
 
                 // 2. 실시간 로컬 배지 카운팅 동기화 반영
                 if (typeof noti !== 'undefined' && Array.isArray(noti)) {
-                    noti = noti.map(n => String(n.id) === String(id) ? { ...n, is_read: 1 } : n);
+                    noti = noti.map(n => String(n.signal_no) === String(signal_no) ? { ...n, is_read: 1 } : n);
                 }
 
                 // 3. 목적지인 시그널로그 주소 뒤에는 실제 기사 로그 번호(signalNo)를 품고 점프!
-                window.location.href = `signal_log.html#signal-${signalNo}`;
+                window.location.href = `signal_log.html#signal-${signal_no}`;
             } catch (err) {
                 console.error("알림 확인 통신 오류:", err);
             }
         }
 
         // 아이템 삭제
-        async function deleteItem(e, id) {
+        async function deleteItem(e, signal_no) {
             e.stopPropagation();
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -770,7 +770,7 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
         }
 
@@ -1077,9 +1077,11 @@
 
             // 정렬
             const sorted = uniqueSignals.sort((a, b) => {
-
-                if (a.risk_score !== b.risk_score) {
-                    return a.risk_score - b.risk_score;
+                const scoreA = 100-Math.round(Math.abs((a.risk_score || 0) * 100));
+                const scoreB = 100-Math.round(Math.abs((b.risk_score || 0) * 100));
+                // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
+                if (scoreA !== scoreB) {
+                    return scoreB - scoreA;
                 }
 
                 return new Date(b.published_date) - new Date(a.published_date);
