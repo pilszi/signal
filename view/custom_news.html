@@ -615,8 +615,15 @@
         // 모두 읽음
         async function allRead() {
             noti = noti.map(n => ({...n, is_read: 1}));
-            await axios.post("/noti/read_all?id="+savedUserId);
-            updateNotifUI();
+            const signalNoList = noti.map(n => n.signal_no);
+            try {
+                let { data } = await axios.post("/noti/read_all", {"userId": savedUserId, "signal_nos": signalNoList});
+                if (data.res) {
+                    await updateNotifUI();
+                }
+            } catch (err) {
+                console.error("전체 알림 읽음 처리 통신 오류:", err);
+            }
         }
 
         // 3. 뉴스 카드 컴포넌트 (Template Function)

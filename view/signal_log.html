@@ -739,7 +739,7 @@
 
             // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
             try {
-                await axios.post("/noti/delete", { "id": id, "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": id, "user_id": savedUserId });
             } catch (err) {
                 console.error("알림 숨김 처리 서버 통신 에러:", err);
             }
@@ -747,8 +747,10 @@
 
         // 5. 하단 모두 읽음 버튼 클릭 시: 비동기 POST 일괄 확인 완료 처리
         async function allRead() {
+            noti = noti.map(n => ({...n, is_read: 1}));
+            const signalNoList = noti.map(n => n.signal_no);
             try {
-                let { data } = await axios.post("/noti/read_all", { "user_id": savedUserId });
+                let { data } = await axios.post("/noti/read_all", {"userId": savedUserId, "signal_nos": signalNoList});
                 if (data.res) {
                     await refreshAllData();
                 }
@@ -756,6 +758,7 @@
                 console.error("전체 알림 읽음 처리 통신 오류:", err);
             }
         }
+
         // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
         async function executeScrollToCard() {
             console.log("🚨 executeScrollToCard 진입");
