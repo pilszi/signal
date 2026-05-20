@@ -669,7 +669,7 @@
 
             try {
                 // 1. 서버 읽음 처리
-                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": String(signalNo), "user_id": savedUserId });
 
                 noti = noti.map(n => String(n.signal_no) === String(signalNo) ? { ...n, is_read: 1 } : n);
                 updateNotifUI_Static();
@@ -772,8 +772,8 @@
 
             const targetId = hash.replace('#signal-', '');
             // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
-            const existsInAll = allSignals.find(s => String(s.id) === String(targetId));
-            const existsInFiltered = filteredSignals.find(s => String(s.id) === String(targetId));
+            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
+            const existsInFiltered = filteredSignals.find(s => String(s.signal_no) === String(targetId));
 
             console.log("🔍 [진단] 타겟:", targetId);
             console.log("🔍 전체 데이터에 존재?", !!existsInAll);
