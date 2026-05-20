@@ -398,6 +398,29 @@
         let noti = [];
         let modalCallback = null;
 
+        // 데이터 호출 함수
+        async function fetchMainData() {
+            try {
+                // [병렬 호출로 속도 최적화]
+                const [userProfile, notiRes] = await Promise.all([
+                    axios.get('/profile?id=' + savedUserId),
+                    axios.get("/noti/signal?id=" + savedUserId)
+                ]);
+
+                userData = {
+                    "name" : (userProfile.data && userProfile.data.user_name) ? userProfile.data.user_name : '',
+                    "email" : (userProfile.data && userProfile.data.email) ? userProfile.data.email : '',
+                    "phone" : (userProfile.data && userProfile.data.phone_number) ? userProfile.data.phone_number : '',
+                    "keywords" : (userProfile.data && userProfile.data.keyword) ? userProfile.data.keyword : []
+                };
+                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+                console.log(userData, noti);
+            } catch (error) {
+                // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
+                console.error("데이터 동기화 실패:", error);
+            }
+        }
+        
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
@@ -490,24 +513,17 @@
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
-            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
-            
-            const {data} = await axios.get("/noti/signal?id="+savedUserId);
-            console.log(data);
-            noti = data.noti;
-            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
-            if (!savedUserId || savedUserId === "guest") {
-                badge.style.display = 'none'; // 배지 숨김
-                countText.innerText = '0개의 새 알림';
-                list.innerHTML = `
-                    <div style="padding: 40px; text-align: center;">
-                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                    </div>`;
+            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
+                console.log("로그인되지 않음, 데이터 동기화 생략");
                 return;
             }
-            
+
+            if (!noti || !Array.isArray(noti)) {
+                noti = [];
+            }
             const unreads = noti.filter(n => !n.is_read);
-            
+
             // 새 알림이 있을 때만 배지 표시
             if (unreads.length > 0) {
                 badge.innerText = unreads.length;
@@ -651,17 +667,9 @@
             const phone = document.getElementById('form-phone');
             const keyword = document.getElementById('keyword-view');
 
-            let {data} = await axios.get('/profile?id='+savedUserId);
-            console.log(data);
-            userData = {
-                "name" : data.user_name,
-                "email" : data.email,
-                "phone" : data.phone_number,
-                "keywords" : data.keyword
-            };
 
-            document.getElementById('display-name').innerText = data.user_name;
-            document.getElementById('display-email').innerText = data.email;
+            document.getElementById('display-name').innerText = userData.name;
+            document.getElementById('display-email').innerText = userData.email;
             name.value = userData.name;
             email.value = userData.email;
             phone.value = formatPhoneNumber(userData.phone);
@@ -1013,8 +1021,9 @@
         });
 
         // 페이지 오픈시 실행
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             axios.get("/session_out");
+            await fetchMainData();
             updateNavbar();
             renderProfile();
             lucide.createIcons();

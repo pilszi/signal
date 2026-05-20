@@ -438,6 +438,12 @@
 
         // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
         function updateNotifUI_Static() {
+            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
+                console.log("로그인되지 않음, 데이터 동기화 생략");
+                return;
+            }
+            
             // 🛠️ [초정밀 방어선] 데이터가 가동되기 전 루프가 빗겨 맞더라도 에러 튕김을 원천 차단합니다.
             if (!noti || !Array.isArray(noti)) {
                 noti = [];

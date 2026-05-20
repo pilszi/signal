@@ -307,48 +307,24 @@
             // 위 조건에 모두 해당하지 않으면 기본 이미지 반환
             return defaultImg;
         }
-
         async function fetchMainData() {
-            let {data} = await axios.get("/custom_news?id="+savedUserId);
-            console.log(data);
+            try {
+                // [병렬 호출로 속도 최적화]
+                const [signalsRes, notiRes] = await Promise.all([
+                    axios.get('/custom_news?id=' + savedUserId),
+                    axios.get("/noti/signal?id=" + savedUserId)
+                ]);
 
-            // 2. map 안에서 함수만 호출하면 끝!
-            allSignals = data.news.map(item => ({
-                ...item,
-                main_image: getCleanImageUrl(item.main_image)
-            }));
-
-            keyword = data.keyword;
+                // 2. 전체 로그 처리
+                allSignals = (signalsRes.data && signalsRes.data.news) ? signalsRes.data.news : [];
+                keyword = (signalsRes.data && signalsRes.data.keyword) ? signalsRes.data.keyword : [];
+                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+                console.log(keyword, allSignals, noti);
+            } catch (error) {
+                // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
+                console.error("데이터 동기화 실패:", error);
+            }
         }
-
-        document.addEventListener('DOMContentLoaded', async () => {
-            // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
-            const navItems = document.querySelectorAll('.nav-item');
-
-            navItems.forEach(item => {
-                // href 속성값에서 파일명만 가져와서 비교
-                const itemHref = item.getAttribute('href').split("/").pop();
-
-                if (currentPath === itemHref) {
-                    if (item.querySelector('i')) {
-                        item.classList.replace('text-gray-600', 'text-blue-600');
-                        item.classList.add('bg-blue-50');
-                    } else {
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
-                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
-                    }
-                }
-
-            });
-            axios.get("/session_out");
-            await fetchMainData();
-            updateNavbar();
-            updateNotifUI();
-            render();
-            renderPagination()
-            if (window.lucide) lucide.createIcons();
-        });
 
 
         // Navbar 상태 업데이트
@@ -443,22 +419,15 @@
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
-            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
-
-            const {data} = await axios.get("/noti/signal?id="+savedUserId);
-            console.log(data);
-            noti = data.noti;
-            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
-            if (!savedUserId || savedUserId === "guest") {
-                badge.style.display = 'none'; // 배지 숨김
-                countText.innerText = '0개의 새 알림';
-                list.innerHTML = `
-                    <div style="padding: 40px; text-align: center;">
-                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                    </div>`;
+            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
+                console.log("로그인되지 않음, 데이터 동기화 생략");
                 return;
             }
 
+            if (!noti || !Array.isArray(noti)) {
+                noti = [];
+            }
             const unreads = noti.filter(n => !n.is_read);
 
             // 새 알림이 있을 때만 배지 표시
@@ -889,6 +858,34 @@
             }
         }
 
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 현재 브라우저의 파일명만 추출
+            const currentPath = window.location.pathname.split("/").pop() || "index.html";
+            const navItems = document.querySelectorAll('.nav-item');
+
+            navItems.forEach(item => {
+                // href 속성값에서 파일명만 가져와서 비교
+                const itemHref = item.getAttribute('href').split("/").pop();
+
+                if (currentPath === itemHref) {
+                    if (item.querySelector('i')) {
+                        item.classList.replace('text-gray-600', 'text-blue-600');
+                        item.classList.add('bg-blue-50');
+                    } else {
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
+                    }
+                }
+
+            });
+            axios.get("/session_out");
+            await fetchMainData();
+            updateNavbar();
+            updateNotifUI();
+            render();
+            renderPagination()
+            if (window.lucide) lucide.createIcons();
+        });
     </script>
 
     <style>
