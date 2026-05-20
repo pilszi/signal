@@ -115,16 +115,16 @@
 		        console.log(data);
                 if (data.res) {
                     currentUserId = userId;
-                    showAlert("이메일로 인증코드가 발송되었습니다.");
+                    showModal("이메일로 인증코드가 발송되었습니다.");
                     // 화면 전환
                     showStep("code");
                     document.getElementById('emailTargetInfo').textContent = `${email}로 전송된 인증번호 6자리를 입력하세요.`;
                 } else {
-                    showAlert("입력하신 정보와 일치하는 계정을 찾을 수 없습니다.");
+                    showModal("입력하신 정보와 일치하는 계정을 찾을 수 없습니다.");
                     forms.verify.reset();
                 }
             } catch(error) {
-                showAlert("서버 통신 오류가 발생했습니다.");
+                showModal("서버 통신 오류가 발생했습니다.");
             }
         });
 
@@ -138,11 +138,11 @@
                 if (data.res) {
                     showStep("reset");
                 } else {
-                    showAlert(data.msg || "인증코드가 일치하지 않습니다.");
+                    showModal(data.msg || "인증코드가 일치하지 않습니다.");
                     forms.code.reset();
                 }
             } catch (error) {
-                showAlert("코드 검증 중 오류 발생");
+                showModal("코드 검증 중 오류 발생");
             }
         });
 
@@ -152,12 +152,12 @@
             const newPw = document.getElementById('newPasswordInput').value;
             const confirmPw = document.getElementById('confirmPasswordInput').value;
 
-            if (newPw.length < 8) {
-                showAlert("비밀번호는 8자 이상이어야 합니다.");
+            if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(newPw)) {
+                showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.");
                 return;
             }
             if (newPw !== confirmPw) {
-                showAlert("비밀번호가 일치하지 않습니다.");
+                showModal("비밀번호가 일치하지 않습니다.");
                 return;
             }
 
@@ -166,10 +166,10 @@
                 if (data.res && data.res > 0) {
                     showStep("complete");
                 } else {
-                    showAlert(data.msg || "비밀번호 변경 처리에 실패했습니다.");
+                    showModal(data.msg || "비밀번호 변경 처리에 실패했습니다.");
                 }
             } catch (error) {
-                showAlert("비밀번호 재설정 중 통신 오류 발생");
+                showModal("비밀번호 재설정 중 통신 오류 발생");
             }
         });
 
@@ -193,7 +193,7 @@
         }
 
         // 모달 제어
-        function showAlert(msg) {
+        function showModal(msg) {
             document.getElementById('modalMessage').textContent = msg;
             document.getElementById('alertModal').classList.remove('hidden');
         }

@@ -223,8 +223,8 @@
                             <div class="w-24 h-24 bg-gradient-to-br from-blue-600 to-blue-800 rounded-full flex items-center justify-center mb-4">
                                 <i data-lucide="user" class="w-12 h-12 text-white"></i>
                             </div>
-                            <h3 id="display-name" class="text-lg font-bold mb-1">홍길동</h3>
-                            <p id="display-email" class="text-sm text-gray-500 mb-4">hong@example.com</p>
+                            <h3 id="display-name" class="text-lg font-bold mb-1"></h3>
+                            <p id="display-email" class="text-sm text-gray-500 mb-4"></p>
 
                             <div class="w-full space-y-2">
                                 <button id="edit-toggle-btn" onclick="toggleEdit()" class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium">
@@ -316,15 +316,33 @@
             </div>
         </div>
 
-            <!-- 공통 알림 모달 -->
-            <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
-                <div class="absolute inset-0 bg-black/50"></div>
-                <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 relative z-10 shadow-2xl border">
-                    <div id="modal-icon" class="flex justify-center mb-4"></div>
-                    <p id="modal-message" class="text-center font-medium text-gray-800 mb-6"></p>
-                    <button onclick="closeModal()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-bold">확인</button>
+        <!-- 공통 알림 모달 -->
+        <div id="alert-modal" class="fixed inset-0 z-[100] flex items-center justify-center hidden">
+            <div class="absolute inset-0 bg-black/50" onclick="closeModal()"></div> <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 relative z-10 shadow-2xl border">
+                <div id="modal-icon" class="flex justify-center mb-4"></div>
+                <p id="modal-message" class="text-center font-medium text-gray-800 mb-6"></p>
+                
+                <div class="flex gap-3">
+                    <button 
+                        id="modal-cancel-btn"
+                        type="button" 
+                        onclick="closeModal()" 
+                        class="hidden w-1/2 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors font-semibold"
+                    >
+                        취소
+                    </button>
+                    
+                    <button 
+                        id="modal-confirm-btn"
+                        type="button" 
+                        onclick="confirmModal()" 
+                        class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-bold"
+                    >
+                        확인
+                    </button>
                 </div>
             </div>
+        </div>
 
         <!-- 회원 탈퇴 확인 모달 (초기엔 hidden) -->
         <div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4">
@@ -378,6 +396,7 @@
         let originalData = {};
         let savedUserId = sessionStorage.getItem("savedUserId");
         let noti = [];
+        let modalCallback = null;
 
         // Navbar 상태 업데이트
         function updateNavbar() {
@@ -393,7 +412,7 @@
                 if (savedUserId === 'admin') {
                     userGreeting.innerHTML = `
                         <div class="text-sm text-gray-600">
-                            <a href="admin.html" class="px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
+                            <a href="admin.html" class="font-bold px-1 hover:bg-blue-300 transition-colors rounded-md">관리자님</a>
                                 반갑습니다
                         </div>
                         `
@@ -401,7 +420,7 @@
                 } else {
                     userGreeting.innerHTML = `
                         <a class="text-sm text-gray-600">
-                            <span>${savedUserId} 님 반갑습니다</span>
+                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
                         </a>
                         `
                 }
@@ -632,8 +651,9 @@
                 "phone" : data.phone_number,
                 "keywords" : data.keyword
             };
-            originalData = { ...userData };
 
+            document.getElementById('display-name').innerText = data.user_name;
+            document.getElementById('display-email').innerText = data.email;
             name.value = userData.name;
             email.value = userData.email;
             phone.value = formatPhoneNumber(userData.phone);
@@ -762,29 +782,41 @@
                 updateButtons();
             }
         }
-        // 폼 제출 (가장 확실한 태그 매칭 버전)
+
+        function updateButtons() {
+            const rows = document.querySelectorAll('.keyword-row');
+            rows.forEach((row, idx) => {
+                const plusBtn = row.querySelector('button[onclick*="addKeywordField"]');
+                plusBtn.style.display = (idx === rows.length - 1) ? 'block' : 'none';
+            });
+        }
+
+        let param = {};
+        // 폼 제출
         async function handleSubmit(e) {
             e.preventDefault();
 
             const email = document.getElementById('form-email').value.trim();
             const phone = document.getElementById('form-phone').value.replaceAll('-', '').trim();
-            
+
             // 🚨 버튼을 누른 순간 화면에서 직접 id로 값을 가져옵니다.
             const pw = document.getElementById('password').value;
-            
+
             // 혹시 HTML에 id가 다르게 되어있을 수 있으니 화면을 꼭 확인하세요!
-            const pwConfirmInput = document.getElementById('password-confirm');           
-            
+            const pwConfirmInput = document.getElementById('password-confirm');
+
             const pwConfirm = pwConfirmInput ? pwConfirmInput.value : '';
-            
+
+            // 관심키워드 입력 검사 - 중복 키워드, 빈 키워드
             const keywordInputs = document.querySelectorAll('.keyword-input');
             const keywords = Array.from(keywordInputs).map(input => input.value.trim()).filter(v => v);
-
-            if (keywords.length === 0) {
-                showModal("최소 하나 이상의 키워드를 입력해주세요.", "error");
+            const hasDuplicates = new Set(keywords).size !== keywords.length;
+            // console.log(hasDuplicates);
+            if (keywords.length === 0 || hasDuplicates) {
+                showModal("중복된 키워드가 존재하거나, 키워드를 입력하지 않았습니다. 확인 후 수정해 주세요!", "error");
                 return;
             }
-
+            
             // 🔥 2. 이메일 형식 검사 (추가)
             // 일반적인 이메일 양식(example@domain.com)인지 정규식으로 검사합니다.
             const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -805,14 +837,14 @@
                 // [검사 1] 일치 여부
                 if (pw !== pwConfirm) {
                     showModal("비밀번호가 일치하지 않습니다.", "error");
-                    return; 
+                    return;
                 }
 
                 // [검사 2] 8자 이상, 영문/숫자 혼합
                 const pwRegex = /^(?=.*[a-zA-Z])(?=.*\d).{8,}$/;
                 if (!pwRegex.test(pw)) {
                     showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.", "error");
-                    return; 
+                    return;
                 }
             }
 
@@ -827,22 +859,22 @@
                 "phone_number": phone,
                 "keyword": keywords,
             };
-            
+
             if (pw != '') {
                 param.pw = pw;
             }
-            
+
             try {
                 let {data} = await axios.post("/update_profile", param);
-                
+
                 document.getElementById('display-name').innerText = userData.name;
-                updateNavbar(); 
+                updateNavbar();
 
                 renderProfile();
-                toggleEdit(); 
-                await updateNotifUI(); 
+                toggleEdit();
+                await updateNotifUI();
                 showModal("개인정보가 성공적으로 수정되었습니다.", "success");
-                
+
                 document.getElementById('password').value = '';
                 if (document.getElementById('password-confirm')) {
                     document.getElementById('password-confirm').value = '';
@@ -855,38 +887,65 @@
 
 
         // 모달 제어
-        function showModal(msg, type) {
+        function showModal(msg, type, onConfirm = null) {
             const modal = document.getElementById('alert-modal');
             const iconDiv = document.getElementById('modal-icon');
+            const cancelBtn = document.getElementById('modal-cancel-btn'); // 취소 버튼 가져오기
+            
             document.getElementById('modal-message').innerText = msg;
             
+            // 1. 타입별 아이콘 및 취소 버튼 노출 여부 설정
             if(type === 'success') {
                 iconDiv.innerHTML = '<i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>';
+                if(cancelBtn) cancelBtn.classList.add('hidden'); // 일반 알림일 땐 취소 버튼 숨기기
+            } else if (type === 'confirm') {
+                // 로그아웃, 탈퇴 등 물어보는 창일 때
+                iconDiv.innerHTML = '<i data-lucide="help-circle" class="w-12 h-12 text-yellow-500"></i>';
+                if(cancelBtn) cancelBtn.classList.remove('hidden'); // 확인 창일 땐 취소 버튼 보이기
             } else {
-                iconDiv.innerHTML = '<i data-lucide="alert-circle" class="w-12 h-12 text-blue-500"></i>';
+                iconDiv.innerHTML = '<i data-lucide="alert-circle" class="w-12 h-12 text-red-500"></i>';
+                if(cancelBtn) cancelBtn.classList.add('hidden'); // 에러 알림일 땐 취소 버튼 숨기기
             }
+            
+            // 2. 콜백 함수를 전역 변수에 저장
+            modalCallback = onConfirm;
             
             modal.classList.remove('hidden');
             lucide.createIcons();
         }
 
+        // 단순 창을 닫는 함수 (취소 버튼이나 X 버튼에 연결)
         function closeModal() {
             document.getElementById('alert-modal').classList.add('hidden');
+            modalCallback = null; // 그냥 닫았으므로 콜백을 비워버림 (아무 일도 안 일어남)
+        }
+
+        // 모달의 '확인' 버튼을 클릭했을 때 실행할 함수
+        function confirmModal() {
+            // 1. 화면에서 모달창을 숨깁니다.
+            document.getElementById('alert-modal').classList.add('hidden');
+            
+            // 2. 만약 넘겨받은 실행 대상(함수)이 있다면 "확인"을 누른 이 시점에 실행합니다!
+            if (typeof modalCallback === 'function') {
+                modalCallback();
+                modalCallback = null; // 실행 후 박스 비우기
+            }
         }
 
         async function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")){
-                try {
+            showModal("로그아웃 하시겠습니까?", "confirm", async () => {
+                 try {
                     await axios.get("/logout");
                     sessionStorage.removeItem('savedUserId');
                     location.href = "login.html";
                 }catch (error) {
                     console.error("로그아웃 중 오류 발생:", error);
-                    alert("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.");
+                    showModal("로그아웃 처리 중 문제가 발생했습니다. 다시 시도해주세요.", error);
                 }
-            } 
+            });
         }
-                // 모달 열기
+        
+        // 모달 열기
         async function openDeleteModal() {
             document.getElementById('deleteModal').classList.remove('hidden');
             document.body.style.overflow = 'hidden'; // 배경 스크롤 방지
@@ -909,37 +968,40 @@
             const isConfirmed = document.getElementById('modalConfirm').checked;
             
             if (!isConfirmed) {
-                alert("탈퇴 동의 체크박스에 체크해주세요.");
+                showModal("탈퇴 동의 체크박스에 체크해주세요.", "error");
                 return;
             }
 
             if (!password.trim()) {
-                alert("비밀번호를 입력해주세요.");
+                showModal("비밀번호를 입력해주세요.", "error");
                 return;
             }
 
-            // 서버 연동 전 테스트 로직 (리액트 코드 기준)
-            if (confirm("정말로 계정을 삭제하시겠습니까?")) {
+            // 🌟 갱신된 로직: 모달의 [확인] 버튼을 눌렀을 때 실행될 비동기 로직을 세 번째 인자로 던집니다.
+            showModal("정말로 계정을 삭제하시겠습니까?", "confirm", async () => {
                 try {
-                    // 이제 서버에서 비번을 가져오지 않고, 입력한 비번을 서버로 던집니다.
-                    // 보안을 위해 POST 방식을 권장하지만, 현재 구조에 맞춰 GET/Query로 예시를 듭니다.
-                    let {data} = await axios.post("/delete_member", {
+                    // [확인]을 누르면 이 내부 코드가 실행되어 서버로 요청을 보냅니다.
+                    let { data } = await axios.post("/delete_member", {
                         id: savedUserId,
-                        input_pw: password  // 서버가 이 비번을 받아서 DB의 암호화된 값과 비교합니다.
+                        input_pw: password
                     });
+                    
                     console.log(data.msg);
+                    
                     if (data.msg) {
                         sessionStorage.removeItem("savedUserId");
-                        alert("회원 탈퇴가 완료되었습니다.");
-                        location.href = "main.html";
+                        
+                        // 탈퇴 완료 모달창의 확인을 누르면 메인 페이지로 이동하게끔 콜백 지정
+                        showModal("회원 탈퇴가 완료되었습니다.", "success", () => {
+                            location.href = "main.html";
+                        });
                     } else {
-                        alert("비밀번호가 일치하지 않습니다.");
+                        showModal("비밀번호가 일치하지 않습니다.", "error");
                     }
                 } catch (error) {
-                    // 서버에서 401(인증실패) 등을 보냈을 때 처리
-                    alert("비밀번호가 틀렸거나 탈퇴 처리 중 오류가 발생했습니다.");
+                    showModal("비밀번호가 틀렸거나 탈퇴 처리 중 오류가 발생했습니다.", "error");
                 }
-            }
+            });
         });
 
         // 페이지 오픈시 실행
@@ -966,5 +1028,6 @@
                 });
             }
         });
+
     </script>
 </html>

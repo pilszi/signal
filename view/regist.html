@@ -25,10 +25,9 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span id="user-greeting" class="hidden text-sm text-gray-600"><span id="user_name"></span>님 반갑습니다</span>
+                        <div id="user-greeting"></div>
                         <a href="profile.html" class="p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="user" class="w-5 h-5"></i></a>
                         <div id="authContainer">
-                            <!-- 로그인 상태에 따라 버튼이 들어갈 자리 -->
                         </div>
                     </div>
                 </div>
@@ -39,7 +38,7 @@
         <div class="min-h-screen flex items-center justify-center px-4 py-12">
             <div class="max-w-2xl w-full">
                 <div class="text-center mb-8">
-                    <a href="index.html" class="mb-4 inline-block">
+                    <a href="main.html" class="mb-4 inline-block">
                         <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
                             Signal
                         </span>
@@ -70,7 +69,12 @@
                                 <label class="block text-sm mb-2 font-medium">비밀번호 확인 <span class="text-red-500">*</span></label>
                                 <input type="password" id="confirmPassword" placeholder="••••••••" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
                             </div>
-                            <p id="password-message" class="text-xs mt-1 hidden"></p>
+                            <div class="flex flex-col gap-0.5">
+                                <p class="text-xs text-blue-600 leading-relaxed">
+                                    * 영문, 숫자를 포함한 8자리 이상으로 입력해주세요.
+                                </p>
+                                <p id="password-message" class="block text-xs mt-1 hidden"></p>
+                            </div>
                         </div>
 
                         <!-- 이름 / 연락처 -->
@@ -190,18 +194,6 @@
             if (window.lucide) lucide.createIcons();
         }
 
-        async function handleLogout() {
-            if(confirm("로그아웃 하시겠습니까?")){
-                try {
-                    await axios.get("/logout");
-                    sessionStorage.removeItem('savedUserId');
-                    location.href = "login.html";
-                } catch (e) {
-                    console.error("로그아웃 실패:", e);
-                }
-            }
-        }
-
         async function checkUsername() {
             const id = document.getElementById('id').value.trim().toLowerCase();
             const msgDiv = document.getElementById('id_msg');
@@ -229,6 +221,7 @@
 
             try {
                 let {data} = await axios.post("/regist/request_code", { email });
+                console.log(data);
                 if (data.res) {
                     document.getElementById('verification-area').classList.remove('hidden');
                     showModal('인증 코드가 입력하신 이메일로 발송되었습니다.');
@@ -351,17 +344,19 @@
             const name = document.getElementById('name').value;
             const phoneInput = document.getElementById('phone');
             const keywords = Array.from(document.querySelectorAll('.keyword-input')).map(i => i.value.trim()).filter(k => k);
+            const phoneNumber = phoneInput.value.replace(/-/g, "");
 
             if (!isUsernameChecked || isUsernameTaken) { showModal("아이디 중복확인을 완료해주세요."); return; }
             if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(pw)) {
                 showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.");
                 return;
             }
+            if (phoneNumber.length < 10) { showModal("연락처가 제대로 입력되지 않았습니다."); return; }
             if (pw !== confirmPw) { showModal("비밀번호가 일치하지 않습니다."); return; }
             if (!emailVerified) { showModal("이메일 인증을 완료해주세요."); return; }
             if (keywords.length === 0) { showModal("최소 하나 이상의 관심 키워드를 입력해주세요."); return; }
 
-            save({ id, pw, email, phone_number: phoneInput.value.replace(/-/g, ""), keyword: keywords, user_name: name });
+            save({ id, pw, email, phone_number: phoneNumber, keyword: keywords, user_name: name });
         });
     </script>
 </body>
