@@ -17,58 +17,14 @@ from utils import is_noise_article
 es = Elasticsearch(["http://100.123.232.79:9200"])
 INDEX_NAME = "news_origin"
 
+# naver.py의 흐름
+# run_naver_collect() -> bulk_search_naver_news() -> process_single_article() -> get_detailed_news()
 
-def get_detailed_news(url):
-    """네이버 뉴스 본문 및 상세 수집 """
-    # 네이버 뉴스 링크(n.news.naver.com)가 아니면 본문 수집이 어려우므로 패스
-    if "news.naver.com" not in url:
-        return None
-    try:
-        user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
-        ]
-        headers = {"User-Agent": random.choice(user_agents)}
-
-        res = requests.get(url, headers=headers, timeout=10)  # 타임아웃 단축
-        if "captcha" in res.text.lower():
-            print("🚨 [위기] 네이버 봇 탐지에 걸렸습니다! 잠시 쉬어야 합니다.")
-        res.raise_for_status()  # 응답 에러 시 바로 except로 이동
-        soup = BeautifulSoup(res.text, "html.parser")
-
-        # 이미지, 언론사, 본문 추출
-        image_tag = soup.find("meta", property="og:image")
-        main_image = image_tag["content"] if image_tag else None
-
-        # 언론사 이름 추출
-        press_name = None
-        logo_tag = soup.select_one(".media_end_head_top_logo img")
-        if logo_tag:
-            press_name = logo_tag.get("title") or logo_tag.get("alt")
-
-        if not press_name:
-            site_meta = soup.find("meta", property="og:site_name")
-            press_name = site_meta["content"] if site_meta else "언론사 미상"
-
-        # 본문 셀렉터 최신화
-        content_tags = ["#newsct_article", "#dic_area", "#articleBodyContents", "#article_body", ".article_body"]
-        full_content = None
-        for tag in content_tags:
-            content = soup.select_one(tag)
-            if content:
-                full_content = content.get_text(strip=True)
-                break
-
-        # 결측치 체크
-        if not main_image or not press_name or not full_content:
-            return None
-
-        return {"main_image": main_image, "press_name": press_name, "content": full_content}
-
-    except Exception as e:
-        logging.warning(f"⚠️ 상세 페이지 수집 에러 ({url}): {e}")
-        return None
-
+def run_naver_collect():
+    """main.py의 스케줄러와 연결되는 네이버 뉴스 수집 메인 함수"""
+    print(f"📡 [네이버 뉴스 수집 시작] {datetime.now().strftime('%H:%M:%S')}")
+    # 실제 수집 로직인 bulk_search_naver_news를 호출합니다.
+    return bulk_search_naver_news()
 
 
 
@@ -133,11 +89,11 @@ def bulk_search_naver_news():
                     already_exists += 1
                     continue
 
-                    if is_noise_article(clean_title, "", item['link'], check_length=False):
-                        continue
+                if is_noise_article(clean_title, "", item['link'], check_length=False):
+                    continue
 
-                    # 중복이 아닌 기사만 작업 목록에 추가
-                    tasks.append(item)
+                # 중복이 아닌 기사만 작업 목록에 추가
+                tasks.append(item)
 
             # API 과부하 방지를 위한 미세 대기
             time.sleep(0.1)
@@ -182,6 +138,12 @@ def process_single_article(item):
         # 3. 날짜 파싱 (Elasticsearch 저장용 ISO 포맷 변환)
         try:
             dt_obj = date_parser.parse(item['pubDate'])
+
+            # [추가] 2026년 이전 기사는 수집 제외
+            if dt_obj.year < 2026:
+                logging.info(f"⏭️ [날짜 스킵] 오래된 기사: {dt_obj.year}년 - {clean_title[:20]}...")
+                return False
+
             final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
         except Exception as date_err:
             logging.warning(f"⚠️ 날짜 파싱 에러: {date_err}")
@@ -215,10 +177,64 @@ def process_single_article(item):
         return False
 
 
-def run_naver_collect():
-    """main.py의 스케줄러와 연결되는 네이버 뉴스 수집 메인 함수"""
-    print(f"📡 [네이버 뉴스 수집 시작] {datetime.now().strftime('%H:%M:%S')}")
-    # 실제 수집 로직인 bulk_search_naver_news를 호출합니다.
-    return bulk_search_naver_news()
+
+def get_detailed_news(url):
+    """네이버 뉴스 본문 및 상세 수집 """
+    # 네이버 뉴스 링크(n.news.naver.com)가 아니면 본문 수집이 어려우므로 패스
+    if "news.naver.com" not in url:
+        return None
+    try:
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+        ]
+        headers = {"User-Agent": random.choice(user_agents)}
+
+        res = requests.get(url, headers=headers, timeout=10)  # 타임아웃 단축
+        if "captcha" in res.text.lower():
+            print("🚨 [위기] 네이버 봇 탐지에 걸렸습니다! 잠시 쉬어야 합니다.")
+        res.raise_for_status()  # 응답 에러 시 바로 except로 이동
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        # 이미지, 언론사, 본문 추출
+        image_tag = soup.find("meta", property="og:image")
+        main_image = image_tag["content"] if image_tag else None
+
+        # 언론사 이름 추출
+        press_name = None
+        logo_tag = soup.select_one(".media_end_head_top_logo img")
+        if logo_tag:
+            press_name = logo_tag.get("title") or logo_tag.get("alt")
+
+        if not press_name:
+            site_meta = soup.find("meta", property="og:site_name")
+            press_name = site_meta["content"] if site_meta else "언론사 미상"
+
+        # 본문 셀렉터 최신화
+        content_tags = ["#newsct_article", "#dic_area", "#articleBodyContents", "#article_body", ".article_body"]
+        full_content = None
+        for tag in content_tags:
+            content = soup.select_one(tag)
+            if content:
+                full_content = content.get_text(strip=True)
+                break
+
+        # 결측치 체크
+        if not main_image or not press_name or not full_content:
+            return None
+
+        return {"main_image": main_image, "press_name": press_name, "content": full_content}
+
+    except Exception as e:
+        logging.warning(f"⚠️ 상세 페이지 수집 에러 ({url}): {e}")
+        return None
+
+
+
+
+
+
+
+
 
 
