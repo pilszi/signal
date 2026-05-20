@@ -626,7 +626,7 @@
         // 모두 읽음
         async function allRead() {
             noti = noti.map(n => ({...n, is_read: 1}));
-            await axios.get("/noti/read_all?id="+savedUserId);
+            await axios.post("/noti/read_all?id="+savedUserId);
             updateNotifUI();
         }
 
