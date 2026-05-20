@@ -419,8 +419,8 @@
                 // 회원 계정일 경우
                 } else {
                     userGreeting.innerHTML = `
-                        <a class="font=bold text-sm text-gray-600">
-                            <span class="text-gray-800">${savedUserId} 님 반갑습니다</span>
+                        <a class="text-sm text-gray-600">
+                            <span class="font-bold text-gray-800">${savedUserId}</span>님 반갑습니다
                         </a>
                         `
                 }
@@ -651,6 +651,7 @@
                 "phone" : data.phone_number,
                 "keywords" : data.keyword
             };
+
             document.getElementById('display-name').innerText = data.user_name;
             document.getElementById('display-email').innerText = data.email;
             name.value = userData.name;

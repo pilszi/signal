@@ -206,24 +206,6 @@
                     <div class="flex items-center gap-3">
                         <!-- 로그인한 사용자에게만 보일 스팬 (초기엔 숨김) -->
                         <div id="user-greeting"></div>
-                        <!-- 알림 컴포넌트 -->
-                        <div class="notif-container" id="notifContainer">
-                            <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
-                            <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
-                                <i data-lucide="bell" class="w-5 h-5"></i>
-                                <!-- 알림 숫자 배지 -->
-                                 <!-- 초기 상태는 숨김 처리 -->
-                                <span class="notif-badge" id="notifBadge" style="display: none;"></span>
-                            </button>
-
-                            <!-- 드롭다운 메뉴 (기본 숨김) -->
-                            <div class="notif-dropdown hidden" id="notifDropdown">
-                                <div class="notif-header">
-                                    <span class="header-count" id="notifCountText"></span>                                  
-                                </div>
-                                 <div id="notifList"></div>
-                            </div>
-                        </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600">
                             <i data-lucide="user" class="w-5 h-5"></i>
                         </a>
@@ -428,7 +410,7 @@
                             로그인 내역
                         </h2>
 
-                        <div id="login_log" class="grid md:grid-cols-2 gap-4 text-sm">
+                        <div id="login_log" class="space-y-3 text-sm">
                         </div>
                     </div>
 
