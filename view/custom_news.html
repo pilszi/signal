@@ -614,12 +614,11 @@
 
             return `
                 <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
-                    <a href=${news.url} target="_blank">
                     <img src="${news.main_image}"
                         onerror="this.onerror=null; this.src='/static/img/signal_image.png';"
                         alt="news"
                         class="w-full h-48 object-cover">
-                    </a>
+                    
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-2">
                             <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level] || 'bg-gray-100'}">
@@ -631,7 +630,7 @@
                             <span class="text-sm text-gray-500 h-8">${news.press_name}</span>
                             <span class="text-xs text-gray-400 h-8">${displayDate}</span>
                             </div>
-                        <a href=${news.url} target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
+                        <a target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
                     </div>
                     ${newBadge}
                 </div>
@@ -744,18 +743,28 @@
 
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
         async function logNewsClick(articleUrl) {
+            window.open(articleUrl, '_blank');
+            // 비회원은 로그를 쌓지 않음
+            if (!savedUserId) return;
 
-            // 로그인하지 않은 비회원은 로그를 쌓지 않거나 예외 처리
-            if (savedUserId){
-                // 2. 서버로 POST 요청 전송
+            try {
+                // 1. 서버로 POST 요청 전송 (비동기로 백그라운드에서 처리)
                 await axios.post("/news_view", {
                     id: savedUserId,
                     url: articleUrl
                 });
-                // console.log("열람 로그 전송 완료");
-                setTimeout(() => {
-                    window.location.reload();
-                }, 100); // 0.1초 뒤 새로고침
+
+                // 🌟 [핵심] 전체 데이터(allSignals)에서 방금 클릭한 기사를 찾아 읽음(is_read) 처리
+                const clickedNews = allSignals.find(news => news.url === articleUrl);
+                if (clickedNews) {
+                    clickedNews.is_read = true; // 혹은 1 (백엔드 데이터 포맷에 맞춤)
+                }
+
+                // 🌟 [핵심] 페이지 새로고침 없이, 현재 필터 상태를 유지한 채 정렬만 새로고침!
+                render();
+
+            } catch (error) {
+                console.error("열람 로그 전송 실패:", error);
             }
         }
 
