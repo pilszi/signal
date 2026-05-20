@@ -137,16 +137,17 @@ def process_single_article(item):
 
         # 3. 날짜 파싱 (Elasticsearch 저장용 ISO 포맷 변환)
         try:
-            dt_obj = date_parser.parse(item['pubDate'])
+            logging.info(f"🔍 [DEBUG] 파싱 시도 날짜: {item['pubDate']}")
+            dt_obj = date_parser.parse(item['pubDate'], fuzzy=True)
 
             # [추가] 2026년 이전 기사는 수집 제외
             if dt_obj.year < 2026:
-                logging.info(f"⏭️ [날짜 스킵] 오래된 기사: {dt_obj.year}년 - {clean_title[:20]}...")
+                logging.info(f"⏭️ [날짜 스킵] 2026년 이전 기사 ({dt_obj.year}년): {clean_title[:20]}")
                 return False
 
             final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
-        except Exception as date_err:
-            logging.warning(f"⚠️ 날짜 파싱 에러: {date_err}")
+        except Exception as e:
+            logging.error(f"❌ 날짜 파싱 실패: {item['pubDate']} | 에러: {e}")
             return False
 
         # 4. 국가 및 키워드 분석 (AI/Rule 기반)

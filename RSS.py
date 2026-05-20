@@ -197,22 +197,22 @@ def fetch_and_save(data):
         raw_date = exact_date or rss_pub_date
 
         if not raw_date:
+            logging.info(f"⏭️ [날짜 스킵] 날짜 정보 없음: {article.title[:20]}")
             return "FAILED"
 
         try:
-            if isinstance(raw_date, str):
-                dt_obj = date_parser.parse(raw_date)
-            else:
-                dt_obj = raw_date
+            dt_obj = date_parser.parse(str(raw_date), fuzzy=True)
 
-            # [추가] 2026년 이전 기사 차단
+            # 2026년 이전 기사 차단
             if dt_obj.year < 2026:
                 logging.info(f"⏭️ [날짜 스킵] 오래된 글로벌 기사: {dt_obj.year}년")
                 return "FAILED"
-
             final_pub_date = dt_obj.strftime('%Y-%m-%dT%H:%M:%S')
-        except:
+
+        except Exception as e:
+            logging.warning(f"❌ 날짜 파싱 중 에러 발생 ({raw_date}): {e}")
             return "FAILED"
+
 
         doc = {
             'title_en': article.title,

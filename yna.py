@@ -110,12 +110,22 @@ def article_process(keywords, total_pages):
 
             for p in range(1, total_pages + 1):
                 articles = article_crawling(driver, p, key)
-                if articles:
+                if isinstance(articles, list) and len(articles) > 0:
                     # article_save가 리턴하는 {success, failed, skipped}를 받음
                     res = article_save(articles)
-                    final_stats["success"] += res.get("success", 0)
-                    final_stats["failed"] += res.get("failed", 0)
-                    final_stats["skipped"] += res.get("skipped", 0)
+
+                    # res가 딕셔너리인지 확인하여 안전하게 더함
+                    if isinstance(res, dict):
+                        final_stats["success"] += res.get("success", 0)
+                        final_stats["failed"] += res.get("failed", 0)
+                        final_stats["skipped"] += res.get("skipped", 0)
+                    else:
+                        # 만약 res가 숫자(int)라면 success에만 더함
+                        # (혹시라도 예전 버전과 꼬일까 봐 넣는 안전장치)
+                        if isinstance(res, int):
+                            final_stats["success"] += res
+                        logger.warning(f"⚠️ article_save 반환값이 예상과 다릅니다: {type(articles)}")
+
                 time.sleep(1)  # 키워드 간 짧은 휴식
     except Exception as e:
         logger.error(f"❌ [YNA] 수집 중 치명적 오류 발생: {e}")
@@ -261,11 +271,13 @@ def article_save(news_list):
             ]
             success, failed = helpers.bulk(es, actions, raise_on_error=False)
             logging.info(f"✅ 연합뉴스 저장 완료: 신규 {success}건")
+            return {"success": success, "failed": failed, "skipped": 0}
         except Exception as e:
             logging.error(f"ES 저장 에러: {e}")
+            return {"success": 0, "failed": len(news_list), "skipped": 0}
         finally:
             close_es(es)
-    return {}
+    return {"success": 0, "failed": 0, "skipped": 0}
 
 
 # 스케줄 알람: 시스템이 알아서 정해진 시간에 run_yna_collect를 호출하도록 명령을 내리는 것
