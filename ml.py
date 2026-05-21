@@ -301,12 +301,12 @@ async def get_ai_prediction_report(risk_level, title, keywords, scores, bert_top
         )
     score_block = "\n".join(score_lines) if score_lines else "  - 지표 데이터 없음"
 
-    # ── 4. BERT 판정 근거 블록 생성 (심각 판정 근거 노출) ──────────
-    if bert_top_features:
-        bert_block = (
-            "BERT 모델이 '심각' 등급을 판정한 주요 근거 토큰/피처:\n"
-            + ", ".join(bert_top_features[:5])
-        )
+    # ── 4. BERT 판정 근거 블록 생성 (강력한 방어 로직) ──────────
+    # bert_top_features가 list인지, 그리고 내용이 있는지 확실히 확인
+    if isinstance(bert_top_features, list) and len(bert_top_features) > 0:
+        # 안전하게 슬라이싱
+        features = bert_top_features[:5]
+        bert_block = "BERT 모델이 '심각' 등급을 판정한 주요 근거 토큰/피처:\n" + ", ".join(map(str, features))
     else:
         bert_block = "BERT 판정 근거: 모델 내부 판단 (피처 정보 미전달)"
 
