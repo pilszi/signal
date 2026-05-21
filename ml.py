@@ -8,9 +8,6 @@ import re
 import json
 from db import SessionLocal
 import asyncio
-import ollama
-import config
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from elasticsearch import Elasticsearch
@@ -18,7 +15,6 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # [내 모듈 임포트]
 from config import Config
-from db import get_db
 from logger import get_logger
 import utils
 
@@ -51,14 +47,11 @@ except Exception as e:
     err_msg = traceback.format_exc()
     logger.error(f"❌ [모델 로드 에러] 예상치 못한 오류 발생:\n{err_msg}")
 
-es_url = Config.ES_HOST
-if f":{Config.ES_PORT}" not in es_url:
-    es_url = f"{es_url}:{Config.ES_PORT}"
-# Elasticsearch 연결
+# es 설정
 es = Elasticsearch(
-    es_url,
+    f"{Config.ES_HOST}:{Config.ES_PORT}",
     basic_auth=(Config.ES_USER, Config.ES_PWD) if Config.ES_USER else None,
-    request_timeout=30 # 타임아웃 방지
+    request_timeout=30
 )
 
 
@@ -596,10 +589,7 @@ async def run_analysis():
             await update_es_status(_id, True)
             continue  # 다음 기사로 바로 넘어감
 
-        refined_keywords = utils.find_target_country(data['title'], data['content'])
-        # print(refined_keywords)   # 디버깅
-        # print(type(refined_keywords))
-        # print(type(refined_keywords[0]))
+        refined_keywords = utils.extract_keywords(data['title'], data['content'])
         refined_country = utils.find_target_country(data['title'], data['content'])
 
         # [1] 사전 가중 점수 계산
@@ -836,8 +826,9 @@ async def run_analysis():
     return processed_results # 루프가 다 끝나면 결과 리스트 반환
 
 
-# news_labeling 인덱스에서 최근 분석 완료된 기사 10건을 내려받아 /api/risk-signals 요청으로 넘겨주는 조회 전용 함수
-def get_latest_signals():
+# news_labeling 인덱스에서 최근 분석 완료된 기사 10건을 내려받아
+# /api/risk-signals 요청으로 넘겨주는 조회 전용 함수
+def get_latest_signals(size=10):
     """
     ES3 인덱스에서 라벨링이 완료된 모든 데이터를 가져와서 main으로 보내주는 함수
     """
@@ -846,7 +837,7 @@ def get_latest_signals():
             "sort": [
                 {"analyzed_at": {"order": "desc"}}
             ],
-            "size": 10
+            "size": size
         }
         res = es.search(index="news_labeling", body=query)
         hits = res['hits']['hits']

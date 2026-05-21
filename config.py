@@ -19,7 +19,6 @@ else:
     print("❌ .env 파일을 찾을 수 없습니다. 경로를 다시 확인해주세요.")
 
 
-
 def get_env(key: str, default=None, required=True):
     """환경변수 안전하게 가져오기"""
     value = os.getenv(key, default)
@@ -27,8 +26,6 @@ def get_env(key: str, default=None, required=True):
         raise ValueError(f"❌ 환경변수 누락: {key}")
     return value
 
-
-load_dotenv()
 
 
 class Config:
@@ -66,31 +63,14 @@ class Config:
 
         return genai.Client(api_key=api_key)
 
+
     # --- 4. brevo api 설정 (이메일 발송 보안 설정) ---
-    BREVO_API_KEY = get_env("BREVO_API_KEY")
-    SENDER_EMAIL = get_env("SENDER_EMAIL")
-    SENDER_NAME = get_env("SENDER_NAME", default="Signal", required=False)
-
-
-    # --- 5. vapid 설정 (웹 푸시 보안 설정)
-    VAPID_PRIVATE_KEY = get_env("VAPID_PRIVATE_KEY")
-    VAPID_PUBLIC_KEY = get_env("VAPID_PUBLIC_KEY")
-    ADMIN_EMAIL = get_env("ADMIN_EMAIL")
-
-
-    # --- 4. 위안화 환율 API 설정 (ExchangeRate-API) ---
-    CNY_API_KEYS = [
-        get_env("CNY_API_KEY_1"),
-        get_env("CNY_API_KEY_2", required=False),
-    ]
-    CNY_API_KEYS = [k for k in CNY_API_KEYS if k]
-
-
+    BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+    SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+    SENDER_NAME = os.getenv("SENDER_NAME")
 
 
     # --- 5. 데이터베이스 및 저장소 설정 ---
-    # "http://100.123.232.79:9200"
-    # 환경변수에서 'http://localhost:9200' 형태로 오든 'localhost'로 오든 대응 가능하게 설정
     _raw_es_host = get_env("ES_HOST", default="100.123.232.79", required=False)
 
     # http://가 포함되어 있지 않다면 붙여주기
@@ -98,28 +78,21 @@ class Config:
         ES_HOST = f"http://{_raw_es_host}"
     else:
         ES_HOST = _raw_es_host
-
     ES_PORT = get_env("ES_PORT", default="9200", required=False)
 
     # 최종적으로 ml.py에서 사용할 때 주소 형식을 안전하게 만듦
-    @property
-    def ES_URL(self):
-        # 만약 ES_HOST에 이미 포트가 포함되어 있다면 그대로 반환, 없다면 포트 결합
-        if f":{self.ES_PORT}" in self.ES_HOST:
-            return self.ES_HOST
-        return f"{self.ES_HOST}:{self.ES_PORT}"
+    @classmethod
+    def get_es_url(cls):
+        if f":{cls.ES_PORT}" in cls.ES_HOST:
+            return cls.ES_HOST
+        return f"{cls.ES_HOST}:{cls.ES_PORT}"
 
     # 인증 정보 (환경변수에 있다면 가져오고 없으면 None)
     ES_USER = get_env("ES_USER", default=None, required=False)
     ES_PWD = get_env("ES_PWD", default=None, required=False)
 
 
-
-
-    # --- 7. 스케줄러 설정 ---
-    SCHEDULE_INTERVAL_MINUTES = 15
-
-    # --- 8. G20기준 국가 및 도시 매핑 데이터 ---
+    # --- 6. G20기준 국가 및 도시 매핑 데이터 ---
     G20_COUNTRY_MAP = {
         # --- [한자 약어 대응] ---
         "韓": "Korea",
@@ -134,7 +107,6 @@ class Config:
         "印": "India",
         "越": "Vietnam",
         "北": "North Korea",
-
 
         # --- [동아시아 및 주변국] ---
         "대한민국": "Korea", "한국": "Korea", "남한": "Korea", "우리나라": "Korea",
@@ -173,7 +145,6 @@ class Config:
         "필리핀": "Philippines",
         "호주": "Australia", "오스트레일리아": "Australia",
 
-
         # --- [아메리카/아프리카 - 자원 및 금융] ---
         "캐나다": "Canada",
         "멕시코": "Mexico",
@@ -192,9 +163,6 @@ class Config:
         "남미": "Latin America", "라틴아메리카": "Latin America",
         "오세아니아": "Oceania",
         "뉴질랜드": "New Zealand", "노르웨이": "Norway", "포르투갈": "Portugal",
-
-        # 약어 대응 강화
-        "남공": "South Africa", "우즈벡": "Uzbekistan",
     }
 
     # 지역 연합
@@ -490,12 +458,9 @@ class Config:
     # 추천 / 순위 / TOP / 키워드
     RECOMMENDATION_KEYWORDS = [
         "추천", "BEST", "베스트", "TOP",
-        "랭킹",
-        "총정리", "모음", "리스트",
-        "핫한", "인기",
-        "알아두면 좋은", "필수", "꿀팁",
-        "가지 방법",
-        "사야", "투자 추천"
+        "랭킹","총정리", "모음", "리스트",
+        "핫한", "인기","알아두면 좋은", "필수", "꿀팁",
+        "가지 방법","사야", "투자 추천",
         "좋은 주식", "지금 살까", "지금 구매",
         "buy", "sell", "good stock", "is it good",
         "target price", "목표주가", "상승 여력",
@@ -613,13 +578,8 @@ class Config:
         "위키트리", "지디넷코리아", "국제신문", "대전일보", "아시아투데이", "동행미디어", "머니투데이",
         "기자", "특파원", "보도", "기사", "사진", "제공", "자료", "이미지", "캡처", "연합인포맥스",
         "뉴스1", "파이낸셜뉴스", "헤럴드경제", "전자신문", "이데일리", "아시아경제", "뉴스핌", "쿠키뉴스",
-        "오마이뉴스", "속보", "단독", "인터뷰", "브리핑", "현장", "취재", "영상", "생중계", "홈페이지"
-
-        # 사람 이름
-        "이주희", "김열", "김혁", "이영재"
-        
-        # 깨진 키워드
-        "석비", "서관"
+        "오마이뉴스", "속보", "단독", "인터뷰", "브리핑", "현장", "취재", "영상", "생중계",
+        "이주희", "김열", "김혁", "이영재", "석비", "서관"
     ]
     # 불용어, 노이즈 통합 관리
     TOTAL_FILTERS = set(STOPWORDS + NOISE_WORDS)
@@ -904,9 +864,6 @@ class Config:
         "OpenAI": "United States", "연준": "United States",
     }
 
-    # brevo 이메일 발송 변수
-    BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-    SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-    SENDER_NAME = os.getenv("SENDER_NAME")
+
 
 

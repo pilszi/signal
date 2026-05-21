@@ -1,41 +1,16 @@
-import json
-import requests
 from db import SessionLocal
 import yfinance as yf
 import pandas as pd
 import time
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
-from config import Config
 from logger import get_logger
 from sqlalchemy import text
 import random
-# 전역 변수 유지
-cny_key_index = 0
+
 
 logger = get_logger(__name__)
 
-def get_cny_rate_with_rotation():
-    """위안화 API 로테이션 수집 (금액 반환)"""
-    global cny_key_index
-    for _ in range(len(Config.CNY_API_KEYS)):
-        api_key = Config.CNY_API_KEYS[cny_key_index]
-        url = f"https://v6.exchangerate-api.com/v6/{api_key}/pair/CNY/KRW"
-        try:
-            response = requests.get(url, timeout=10)
-            data = response.json()
-            if data.get('result') == 'success':
-                rate = data['conversion_rate']
-                logger.info(f"✅ [위안화 API] 키 인덱스 {cny_key_index} 사용 | 결과: {rate}")
-                return rate
-            else:
-                logger.warning(f"⚠️ [위안화 API] 실패: {data.get('error-type')}")
-                continue
-        except Exception as e:
-            logger.error(f"❌ [위안화 API] 통신 에러: {e}")
-        cny_key_index = (cny_key_index + 1) % len(Config.CNY_API_KEYS)
-
-    return None
 
 # 환율/원자재 라벨링 1: 지표 실시간 수치 가져와서 db에 저장 -> 그 다음 main
 def collect_market_data_job():
@@ -63,35 +38,36 @@ def collect_market_data_job():
                     price = None
 
                     if t == "CNY=X":
-                        # 방법 1: 안정적인 CNY=X 심볼 직접 다운로드
-                        data = yf.download("CNY=X", period="1d", interval="1m", progress=False)
-                        if not data.empty:
-                            # 1위안당 달러를 가져온 것일 수 있으므로(심볼따라 다름),
-                            # 만약 값이 너무 작다면(예: 0.1~0.2) 달러/원(USDKRW)을 곱해서 계산합니다.
-                            cny_usd = float(data['Close'].iloc[-1].values[0]) if hasattr(data['Close'].iloc[-1],
-                                                                                         'values') else float(
-                                data['Close'].iloc[-1])
+                        try:
+                            # 1순위: CNYKRW=X 직접 수집 (1위안 = ?원)
+                            data = yf.download("CNYKRW=X", period="1d", interval="1m", progress=False)
+                            if not data.empty:
+                                price = float(data['Close'].iloc[-1].values[0]) if hasattr(
+                                    data['Close'].iloc[-1], 'values') else float(data['Close'].iloc[-1])
+                                logger.info(f"💾 [CNYKRW=X 직접] 위안화 환율: {price:.4f}")
 
-                            # 만약 CNY=X가 1달러당 위안(약 7.2)이라면:
-                            # 원화 환율을 계산해야 하므로 USD/KRW를 가져와야 함
-                            data_krw = yf.download("USDKRW=X", period="1d", interval="1m", progress=False)
-                            usd_krw = float(data_krw['Close'].iloc[-1].values[0]) if hasattr(data_krw['Close'].iloc[-1],
-                                                                                             'values') else float(
-                                data_krw['Close'].iloc[-1])
-
-                            # 공식: (USD/KRW) / (USD/CNY) = CNY/KRW
-                            price = usd_krw / cny_usd
-                            logger.info(f"💾 [직접 계산] 위안화 환율 (CNY=X 사용): {price:.4f}")
-
-                        else:
-                            # 방법 2: 실패 시 예전처럼 CNYKRW=X 시도
-                            data_backup = yf.download("CNYKRW=X", period="1d", interval="1m", progress=False)
-                            if not data_backup.empty:
-                                price = float(data_backup['Close'].iloc[-1].values[0]) if hasattr(
-                                    data_backup['Close'].iloc[-1], 'values') else float(data_backup['Close'].iloc[-1])
-                                logger.info(f"💾 [백업 심볼 사용] 위안화 환율: {price:.4f}")
                             else:
-                                logger.info(f"  ⚠️ [데이터없음] 위안화 데이터 수집 실패")
+                                # 2순위: USDKRW / USDCNY 계산
+                                data_usdkrw = yf.download("USDKRW=X", period="1d", interval="1m", progress=False)
+                                data_usdcny = yf.download("USDCNY=X", period="1d", interval="1m", progress=False)
+
+                                if not data_usdkrw.empty and not data_usdcny.empty:
+                                    usd_krw = float(data_usdkrw['Close'].iloc[-1].values[0]) if hasattr(
+                                        data_usdkrw['Close'].iloc[-1], 'values') else float(
+                                        data_usdkrw['Close'].iloc[-1])
+                                    usd_cny = float(data_usdcny['Close'].iloc[-1].values[0]) if hasattr(
+                                        data_usdcny['Close'].iloc[-1], 'values') else float(
+                                        data_usdcny['Close'].iloc[-1])
+
+                                    # 1위안당 원화 = (1달러당 원화) / (1달러당 위안화)
+                                    price = usd_krw / usd_cny
+                                    logger.info(
+                                        f"💾 [계산 방식] USDKRW({usd_krw:.2f}) / USDCNY({usd_cny:.4f}) = {price:.4f}")
+                                else:
+                                    logger.warning("⚠️ [위안화] 모든 수집 방법 실패")
+
+                        except Exception as e:
+                            logger.error(f"❌ [위안화 수집 오류] {e}")
 
                     else:
                         # 나머지 지표들은 기존 로직대로 yfinance 다운로드
@@ -149,19 +125,15 @@ def collect_market_data_job():
         f"{datetime.now().strftime('%H:%M:%S')} 기준 "
         f"11종 지표 업데이트 완료"
     )
-# --- 스케줄러 설정 ---
-
-scheduler = BackgroundScheduler()
-# 60분(hours=1) 간격으로 실행
-random_second = random.randint(0, 59)
-scheduler.add_job(collect_market_data_job,"cron", minute="0", second=random_second, id='indicator_crawling')
 
 if __name__ == "__main__":
     # 실행 즉시 한 번 수집 시작
     collect_market_data_job()
 
-    # 스케줄러 시작
-    scheduler.start()
+    scheduler = BackgroundScheduler()
+    random_second = random.randint(0, 59)    # 60분(hours=1) 간격으로 실행
+    scheduler.add_job(collect_market_data_job, "cron", minute="0", second=random_second, id='indicator_crawling')
+    scheduler.start() # 스케줄러 시작
     print("⏰ APScheduler 가동 중... (Ctrl+C로 종료)")
 
     try:
