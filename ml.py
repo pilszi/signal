@@ -51,7 +51,6 @@ except Exception as e:
     err_msg = traceback.format_exc()
     logger.error(f"❌ [모델 로드 에러] 예상치 못한 오류 발생:\n{err_msg}")
 
-
 es_url = Config.ES_HOST
 if f":{Config.ES_PORT}" not in es_url:
     es_url = f"{es_url}:{Config.ES_PORT}"
@@ -62,6 +61,9 @@ es = Elasticsearch(
     request_timeout=30 # 타임아웃 방지
 )
 
+
+# news_labeling 인덱스에서 어제 날짜에 같은 키워드 기사가 있는지 확인
+# 반복 뉴스에 대한 중복 패널티 적용 여부 결정
 async def check_yesterday_existence(keywords):
     """어제 날짜에 같은 키워드 조합의 기사가 있었는지 ES 조회"""
     try:
@@ -89,6 +91,7 @@ async def check_yesterday_existence(keywords):
         logger.error(f"Error checking yesterday news: {e}")
         return False
 
+# 정규표현식으로 불필요한 텍스트 제거 -> Config.junk_patterns
 def clean_text(text):
     """분석에 방해되는 광고 및 안내 문구 제거"""
     # 1. 만화, 운세, 눈TV 등 불필요한 문구 제거
@@ -98,6 +101,7 @@ def clean_text(text):
     return text.strip()
 
 
+# 특정 구분자 이후의 텍스트 잘라내기 -> Config.delimiters
 def clip_junk_after(text):
     # 1. 텍스트가 없으면 그대로 반환 (에러 방지)
     if not text: return ""
@@ -107,6 +111,8 @@ def clip_junk_after(text):
             text = text.split(d)[0]
     return text.strip()
 
+
+# 512자 제한이 있는 BERT에 넣기 전에 긴 본문을 앞/중간/끝 세 구간에서 균등하게 추출
 def get_balanced_text(text, max_len=512):
     """긴 본문에서 앞, 중간, 뒤를 골고루 추출해 512자 내외로 만듦"""
     if not text or len(text) <= max_len:
@@ -121,73 +127,14 @@ def get_balanced_text(text, max_len=512):
 
     return first + " " + middle + " " + last
 
-# ==========================================
-# 2 분석 핵심 로직 (BERT, Z-Score, 제미나이)
-# ==========================================
-# 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
-# 라벨링 학습한 bert가 긍정/부정 판단 - (위에서 tokenizer 가져온 이후 점수 매김)
-def get_bert_score(analysis_text):
-    """모델이 조금이라도 한쪽으로 기울면 점수를 확실히 밀어주는 버전"""
-    try:
-        inputs = tokenizer(
-            analysis_text,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=512
-        ).to(device)
 
-        with torch.no_grad():
-            outputs = bert_model(**inputs)
-
-        probs = F.softmax(outputs.logits, dim=-1)
-        # 학습 라벨 순서: 0:중립, 1:긍정, 2:부정
-        neu, pos, neg = probs[0].tolist()
-
-        has_danger_word = False
-        is_safe_in_bert = False
-
-        # 리스크 단어 존재 여부 확인
-        for word, score in Config.DANGER_DICTIONARY.items():
-            if word in analysis_text:
-                if score < 0:  # 음수 단어가 하나라도 있으면 위험 감지
-                    has_danger_word = True
-                elif score > 0:  # 양수 단어가 하나라도 있으면 안전(방어) 감지
-                    is_safe_in_bert = True
-
-        # [수정 로직] 가장 높은 확률을 가진 라벨로 점수 확정
-        # 1. 긍정(pos)이 가장 높을 때 -> 확실한 플러스(+)
-                # 모델의 1차 판단
-        if pos > neu and pos > neg:
-            val = 0.85 if pos > 0.6 else 0.6
-
-            # [핵심 로직] 위험 단어가 있는데 "완화/지원" 같은 방어 단어가 없다면 긍정 차단
-            if has_danger_word and not is_safe_in_bert:
-                return -0.2
-            return val
-
-            # 2. 부정(neg)이 가장 높을 때
-        elif neg > neu and neg > pos:
-            return -0.85 if neg > 0.6 else -0.6
-
-            # 3. 중립이거나 혼전일 때
-        else:
-            val = (pos * 1.0) + (neg * -1.0)
-            # 중립 구간에서도 위험 단어만 있고 방어 단어가 없으면 점수 하향
-            if has_danger_word and not is_safe_in_bert and val > 0:
-                return -0.3
-            return val
-
-    except Exception as e:
-        logger.error(f"BERT 오류: {e}")
-    return 0.0
 
 # 기사 라벨링 3 - [리스크 사전 라벨링]: 가중치 스코어링
 # 사전 기반 위험도 측정 및 문맥 추출 - (utils.py에서 extract_keywords함수를 한 이후 실행)
 def get_weighted_keyword_score(title, content):
     """
-    4.1 요구사항: 제목 가중치(1.5배), 본문 등장 횟수 반영,
-    bert가 읽기 전 키워드 포함 앞뒤 1문장 추출 (bert 분석용 텍스트 생성)
+    Config.DANGER_DICTIONARY를 순회하며 제목/본문의 위험 단어 등장 빈도로 사전 기반 점수
+    동시에 위험 단어 주변 문장을 추출해서 BERT가 읽을 analysis_text를 만들어줌
     """
     dict_score = 0
     relevant_sentences = set()  # 중복 문장 방지를 위해 set 사용
@@ -224,87 +171,227 @@ def get_weighted_keyword_score(title, content):
 
     return round(final_dict_score, 4), analysis_text
 
+# ==========================================
+# 2 분석 핵심 로직 (BERT, 제미나이)
+# ==========================================
+# 기사 라벨링 4 - [감성 라벨링]: 문맥으로 기사 라벨링
+# 라벨링 학습한 bert가 긍정/부정 판단 - (get_weighted_keyword_score 이후 점수 매김)
+def get_bert_score(analysis_text, title=""):
+    """
+    get_weighted_keyword_score가 만든 텍스트를 받아서 BERT 모델로 긍정/부정/중립 확률을 계산
+    추가로 제목까지 받아서 DANGER_DICTIONARY 기준으로 판정에 기여한 단어들을 top_features로 수집해 점수와 함께 반환
+    튜플 반환으로 바뀜
+    """
+    try:
+        inputs = tokenizer(
+            analysis_text,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=512
+        ).to(device)
+
+        with torch.no_grad():
+            outputs = bert_model(**inputs)
+
+        probs = F.softmax(outputs.logits, dim=-1)
+        neu, pos, neg = probs[0].tolist()
+
+        has_danger_word = False
+        is_safe_in_bert = False
+
+        # 기존 로직 유지하면서 기여 단어 수집
+        danger_words_found = []   # 위험 단어
+        safe_words_found = []     # 방어 단어
+
+        for word, score in Config.DANGER_DICTIONARY.items():
+            if word in analysis_text or word in title:
+                if score < 0:
+                    has_danger_word = True
+                    danger_words_found.append((word, score))
+                elif score > 0:
+                    is_safe_in_bert = True
+                    safe_words_found.append((word, score))
+
+        # 기여도 높은 순으로 정렬 후 상위 5개
+        danger_words_found.sort(key=lambda x: x[1])        # 가장 음수인 것부터
+        safe_words_found.sort(key=lambda x: x[1], reverse=True)  # 가장 양수인 것부터
+
+        top_features = {
+            "model_probs": {"긍정": round(pos, 3), "부정": round(neg, 3), "중립": round(neu, 3)},
+            "danger_words": [w for w, _ in danger_words_found[:3]],
+            "safe_words": [w for w, _ in safe_words_found[:3]],
+        }
+
+        # 기존 점수 계산 로직 그대로 유지
+        if pos > neu and pos > neg:
+            val = 0.85 if pos > 0.6 else 0.6
+            if has_danger_word and not is_safe_in_bert:
+                return -0.2, top_features
+            return val, top_features
+        elif neg > neu and neg > pos:
+            val = -0.85 if neg > 0.6 else -0.6
+            return val, top_features
+        else:
+            val = (pos * 1.0) + (neg * -1.0)
+            if has_danger_word and not is_safe_in_bert and val > 0:
+                return -0.3, top_features
+            return val, top_features
+
+    except Exception as e:
+        logger.error(f"BERT 오류: {e}")
+    return 0.0, {}
+
+
 
 # 제미나이 프롬프트
-async def get_ai_prediction_report(risk_level, title, keywords, scores):
-    # 💡 [추가] keywords가 문자열(str)로 들어오면 리스트로 바꿔주는 방어 로직
-    if isinstance(keywords, str):
-        # 만약 "키워드1, 키워드2" 형태라면 분리하고, 아니면 단일 리스트로 만듦
-        keywords = [k.strip() for k in keywords.split(',')] if ',' in keywords else [keywords]
+# BERT 점수, 지표 점수, 키워드, BERT 판정 근거를 받아서 Gemini API에 프롬프트를 보내고 예측 리포트 JSON을 받아옴
+# API 키 로테이션과 429 에러 재시도 로직
+async def get_ai_prediction_report(risk_level, title, keywords, scores, bert_top_features=None):
+    """
+    Parameters:
+        risk_level      : "심각" | "주의" | "안정"
+        title           : 기사 제목 (str)
+        keywords        : 핵심 키워드 리스트 또는 콤마 구분 문자열
+        scores          : {"sent": float, "ex": float, "ma": float} 형태의 지표 딕셔너리
+        bert_top_features: BERT 판정에 기여한 상위 토큰/피처 리스트 (없으면 None)
+    """
 
-    # 이제 안전하게 상위 2개를 뽑습니다.
-    # 만약 keywords가 ['Unknown'] 이라면 kw_str은 "Unknown"이 됩니다.
-    kw_filtered = [k for k in keywords if k and k.lower() != 'unknown']  # 의미 없는 단어 제거
-     # 키워드 상위 2개를 뽑아 문장에 자연스럽게 삽입
+    # ── 1. keywords 정규화 ──────────────────────────────────────────
+    if isinstance(keywords, str):
+        keywords = [k.strip() for k in keywords.split(',')] if ',' in keywords else [keywords]
+    kw_filtered = [k for k in keywords if k and k.lower() != 'unknown']
     kw_str = ", ".join(kw_filtered[:2]) if kw_filtered else "주요 지표"
     subject = title[:20] + "..." if len(title) > 20 else title
 
+    # ── 2. 안정·주의 단계는 경량 응답  ──────────────────
     if risk_level == "주의":
         return {
             "prediction": f"⚠️ {subject} 이슈로 인한 시장 변동성 확대 및 심리 위축 예상",
-            "reason": f"현재 [{kw_str}] 등 리스크 요인이 관찰되고 있습니다. 시장의 변동성이 커질 수 있는 상태이므로, 관련 동향을 예의주시하며 투자 및 의사결정에 주의하시기 바랍니다."
+            "reason": (
+                f"현재 [{kw_str}] 등 리스크 요인이 관찰되고 있습니다. "
+                "시장의 변동성이 커질 수 있는 상태이므로, "
+                "관련 동향을 예의주시하며 투자 및 의사결정에 주의하시기 바랍니다."
+            )
         }
     elif risk_level == "안정":
         return {
             "prediction": f"✅ {subject} 상황에도 불구하고 지표 안정세 및 완만한 흐름 전망",
-            "reason": f"분석 결과 [{kw_str}]를(을) 포함한 전반적인 시장 지표가 큰 위협 없이 안정적인 흐름을 보이고 있습니다. 당분간은 현재의 완만한 상태가 유지될 것으로 예상됩니다."
+            "reason": (
+                f"분석 결과 [{kw_str}]를(을) 포함한 전반적인 시장 지표가 "
+                "큰 위협 없이 안정적인 흐름을 보이고 있습니다. "
+                "당분간은 현재의 완만한 상태가 유지될 것으로 예상됩니다."
+            )
         }
+
+    # ── 3. 지표 해설 블록 생성 (수치 불투명성 해소) ────────────────
+    # sent: -1 ~ +1, 0 미만이면 부정 심리 / ex: 0~1, 0.8 이상이면 환율 고위험
+    # ma:   0~1, 0.8 이상이면 거시경제 고위험
+    THRESHOLDS = {
+        "sent": {"label": "시장 심리 지수",   "unit": "(-1=매우부정 ~ +1=매우긍정)", "danger": 0.0,  "direction": "below"},
+        "ex":   {"label": "외환 변동성 위험", "unit": "(0=안전 ~ 1=최고위험)",       "danger": 0.8,  "direction": "above"},
+        "ma":   {"label": "거시경제 위험",    "unit": "(0=안전 ~ 1=최고위험)",       "danger": 0.8,  "direction": "above"},
+    }
+
+    score_lines = []
+    for key, meta in THRESHOLDS.items():
+        val = scores.get(key, "N/A")
+        if val == "N/A":
+            continue
+        if meta["direction"] == "below":
+            status = "⚠️ 위험" if val < meta["danger"] else "✅ 정상"
+        else:
+            status = "⚠️ 위험" if val > meta["danger"] else "✅ 정상"
+        score_lines.append(
+            f"  - {meta['label']} ({key}): {val:.4f} {meta['unit']} → {status} "
+            f"[임계값: {'초과' if meta['direction']=='above' else '미만'} {meta['danger']} 시 위험]"
+        )
+    score_block = "\n".join(score_lines) if score_lines else "  - 지표 데이터 없음"
+
+    # ── 4. BERT 판정 근거 블록 생성 (심각 판정 근거 노출) ──────────
+    if bert_top_features:
+        bert_block = (
+            "BERT 모델이 '심각' 등급을 판정한 주요 근거 토큰/피처:\n"
+            + ", ".join(bert_top_features[:5])
+        )
+    else:
+        bert_block = "BERT 판정 근거: 모델 내부 판단 (피처 정보 미전달)"
+
+    # ── 5. 멀티토픽 감지 힌트 (기사 연결 고리 강화) ────────────────
+    # 키워드가 3개 이상이면 복수 토픽 가능성을 프롬프트에 명시
+    multi_topic_hint = ""
+    if len(kw_filtered) >= 3:
+        multi_topic_hint = (
+            f"\n⚠️ 이 기사는 [{', '.join(kw_filtered[:5])}] 등 복수의 토픽을 포함할 수 있습니다. "
+            "분석 시 가장 리스크가 높은 주제에 집중하되, "
+            "분석 범위를 명확히 명시해 주십시오."
+        )
+
+    # ── 6. 최종 프롬프트 ────────────────────────────────────────────
     prompt = f"""
-        [Role]
-        데이터에 근거하여 경제 위기 상황을 냉철하게 분석하고,
-        사용자가 취해야 할 행동을 따뜻하게 조언해주는 경제 전략가
+    [Role]
+    계량적 경제 데이터를 근거로 위기를 진단하고, 시간축 기반의 구체적 예측을 제시하는
+    냉철한 경제 전략 애널리스트.
+    
+    [Input Data]
+    - 기사 제목: {title}
+    - 핵심 키워드: {', '.join(kw_filtered)}{multi_topic_hint}
+    - 위험 등급: {risk_level}
+    - 정량 지표 (임계값 포함):
+    {score_block}
+    - 모델 판정 근거:
+      {bert_block}
+    
+    [작성 가이드라인 - 필수 준수]
+    1. 비유(예: 황금알을 낳는 거위 등)는 절대 사용하지 마십시오.
+    2. '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함된 사실 위주로 서술하십시오.
+    3. 예측 근거는 논리적 인과관계(A → B → C)로 작성하십시오.
+    4. 반드시 단기(1~3개월)와 중기(3~6개월) 시간 축을 구분하여 예측하십시오.
+       예시: "90일 유예 종료 시점(8월)에 관세가 재인상될 경우, 원/달러 환율은 다시 1,400원대 상승 압력을 받을 수 있습니다."
+    5. prediction 항목은 현황 재서술이 아니라 '앞으로 일어날 일'을 한 줄로 요약하십시오.
+    6. 분석 범위가 기사의 특정 토픽에 한정될 경우, reason 서두에 "본 분석은 [토픽명] 이슈에 한정합니다."라고 명시하십시오.
+    7. 말투는 간결하고 전문적인 서술체를 사용하십시오.
+       - 허용: "~될 것으로 판단됩니다", "~을 권고드립니다"
+       - 금지: "마음을 굳건히 하시고", "충분히 이겨내실 수 있습니다" 등 감성적 위로 표현
+    
+    [출력 형식 (JSON, 반드시 순수 JSON만 출력)]
+    {{
+      "prediction": "🚨 [앞으로 발생할 핵심 리스크를 시간 축과 함께 한 줄 예측 — 현황 재서술 금지]",
+      "reason": "1. [사건의 핵심 내용]: 분석 범위 명시 후, 주체·사건·수치 기반 현황 요약.\\n2. [향후 변화 및 파급 효과]: 단기(1~3개월) 및 중기(3~6개월) 시나리오를 인과관계로 서술.\\n3. [행동 조언 및 대응]: 모니터링 지표, 헤징 전략, 투자 포지셔닝 등 구체적 대응 방안 제시."
+    }}
+    """
 
-        [Input Data]
-        - 기사 제목: {title}
-        - 핵심 키워드: {keywords}
-        - 위험 지수 및 지표: {scores}
-
-        [작성 가이드라인 - 필수 준수]
-        1. '비유(예: 황금알을 낳는 거위, 폭풍우 속의 배 등)'는 절대 사용하지 마십시오.
-        2. 기사 제목과 키워드를 바탕으로 '누가(주체)', '무엇을(사건)', '얼마나(규모/수치)'가 포함되도록 사실 위주로 요약하십시오.
-        3. 예측 근거는 논리적 인과관계(A로 인해 B가 발생하고, 결과적으로 C가 우려됨)로 작성하십시오.
-        4. 이 사건 이후 발생할 2차 파장이나 예상되는 변화를 예측하여 작성하십시오(Short-term/Mid-term).
-        5. 말투는 정중하고 둥근 대화체를 사용하되, 마지막에는 반드시 사용자가 참고할 만한 실질적인 대응 방안이나 관전 포인트를 추천하십시오.
-
-        [출력 형식 (JSON)]
-        {{
-          "prediction": "🚨 [기사 내 핵심 사건과 그로 인한 직접적인 리스크를 한 줄로 요약]",
-          "reason": "1. [사건의 핵심 내용]: 기사 속 주체와 행동, 구체적 수치를 바탕으로 현재 상황을 요약해 주세요.\\n2. [향후 변화 및 파급 효과]: 이 사건이 앞으로 시장이나 기업 가치에 미치는 구체적 영향을 예측해 주세요.\\n3. [행동 조언 및 대응]: 사용자가 앞으로 주의 깊게 살펴야 할 지표나 권장하는 대응 방안을 구체적으로 제안해 주세요."
-        }}
-        """
+    # ── 7. API 호출 및 재시도 로직  ──────────────────────
     for attempt in range(len(Config.GEMINI_API_KEYS)):
         try:
-            # 요청 전 간격을 무료 티어 권장 속도에 맞추기
             await asyncio.sleep(5)
             client = Config.get_next_client()
-            response = client.models.generate_content(model=Config.GEMINI_MODEL_ID, contents=prompt)
+            response = client.models.generate_content(
+                model=Config.GEMINI_MODEL_ID,
+                contents=prompt
+            )
             res_text = response.text.strip()
             json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
             return json.loads(json_match.group()) if json_match else json.loads(res_text)
 
         except Exception as e:
             err_msg = str(e)
-
-            # 429(할당량 초과) 발생 시 로직 강화
             if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                # 구글이 요청한 대로 최소 30~40초는 쉬어줘야 IP 차단을 피합니다.
                 wait_time = 45
-                print(
-                    f"🚦 [Quota] 모든 키 소진 가능성. {wait_time}초 대기 후 키 교체... (현재 시도: {attempt + 1}/{len(Config.GEMINI_API_KEYS)})")
+                logger.error(
+                    f"🚦 [Quota] 키 소진. {wait_time}초 대기 후 교체... "
+                    f"(시도: {attempt + 1}/{len(Config.GEMINI_API_KEYS)})"
+                )
                 await asyncio.sleep(wait_time)
-                continue  # 다음 키로 시도
-
-            # 다른 일반적인 에러라면 짧게 쉬고 다음 키로
-            print(f"⚠️ Gemini 일반 에러: {err_msg}")
+                continue
+            logger.error(f"⚠️ Gemini 일반 에러: {err_msg}")
             await asyncio.sleep(2)
             continue
 
-    # 모든 키를 다 돌았는데도 실패했다면?
-    # 에러를 던져서 멈추게 하지 말고, '기본값'을 리턴해서 시스템을 살립니다.
-    print("🚨 [Critical] 모든 Gemini 키의 할당량이 소진되었습니다. 기본값으로 대체합니다.")
+    logger.info("🚨 [Critical] 모든 Gemini 키 소진. 기본값으로 대체합니다.")
     return {
         "prediction": f"분석 일시 지연 ({title[:20]}...)",
-        "reason": "AI 서비스 할당량 초과로 인해 상세 분석 리포트를 생성할 수 없습니다. 위험 등급 점수를 참고해 주세요."
+        "reason": "AI 서비스 할당량 초과로 인해 상세 분석을 생성할 수 없습니다. 위험 등급 점수를 참고해 주십시오."
     }
 
 # ==========================================
@@ -312,6 +399,10 @@ async def get_ai_prediction_report(risk_level, title, keywords, scores):
 # ==========================================
 # 환율/원자재 라벨링 기준
 def calculate_indicator_score(today_return, return_history_30d):
+    """
+    단일 지표(환율 또는 원자재 하나)의 오늘 값과 과거 14일 데이터로 Z-Score를 계산해서 0~1 사이 위험 점수로 변환
+    Z-Score가 클수록(오늘 값이 평균에서 멀수록) 점수가 낮아져 위험 신호가 됨
+    """
     if not return_history_30d: return 1.0
     try:
         today_return = float(today_return)
@@ -338,7 +429,8 @@ def calculate_indicator_score(today_return, return_history_30d):
         return 1.0
 
 
-# (환율/원자재)그룹 점수를 각각 낼 때 사용
+# 환율 4개, 원자재 7개처럼 같은 그룹에 속한 지표 점수들을 평균 내서 그룹 대표 점수 만들어냄
+# ex_score와 ma_score 계산에 사용됨
 def aggregate_indicator(scores):
     valid = [max(0.0, float(s)) for s in scores if s is not None]
     if not valid: return 1.0
@@ -360,6 +452,7 @@ async def run_analysis():
     3. 뉴스 점수 + 지표 점수를 가중 합산하여 최종 리스크 등급(안정/주의/심각) 결정
     4. Gemini AI를 통한 예측 리포트 생성 및 최종 결과를 news_labeling 인덱스에 저장
     5. 분석 완료된 원본 뉴스의 처리 상태(is_processed) 업데이트
+    DB에서 지표 로드 → ES에서 미처리 뉴스 조회 → 노이즈 필터링 → 점수 계산 → 등급 판정 → Gemini 리포트 생성 → ES 저장
     """
     logger.info("--------------------------------------------------")
     logger.info("🔍 [분석 엔진] 실전 분석 사이클 시작")
@@ -542,7 +635,7 @@ async def run_analysis():
         # ----------------------------------------------------------
         # 1. BERT 분석 먼저 실행 (기준점 확보)
         balanced_text = get_balanced_text(cleaned_text)
-        ai_score = get_bert_score(balanced_text)
+        ai_score, bert_top_features = get_bert_score(balanced_text, title=data['title'])
 
         # 변수 초기화
         penalty_score = 0
@@ -608,8 +701,6 @@ async def run_analysis():
         # 1. 지표 순수 점수 계산
         raw_indicator_score = (ex_score * 0.5) + (ma_score * 0.5)
 
-
-
         # [B] 점수 통합 (질문하신 0.9 / 0.7 로직이 여기 합쳐졌습니다)
         if is_sports:
             # 스포츠는 지표 무시하고 AI 점수 기반 하한선 보정
@@ -656,7 +747,9 @@ async def run_analysis():
         try:
             ai_rep = await get_ai_prediction_report(
                 risk_lv, data['title'], refined_keywords,
-                {"sent": final_sent_score, "ex": ex_score, "ma": ma_score})
+                {"sent": final_sent_score, "ex": ex_score, "ma": ma_score},
+                bert_top_features=bert_top_features
+            )
 
         except Exception as e:
             # 429 에러(할당량 초과)가 발생한 경우
@@ -743,7 +836,7 @@ async def run_analysis():
     return processed_results # 루프가 다 끝나면 결과 리스트 반환
 
 
-# 오늘의 뉴스
+# news_labeling 인덱스에서 최근 분석 완료된 기사 10건을 내려받아 /api/risk-signals 요청으로 넘겨주는 조회 전용 함수
 def get_latest_signals():
     """
     ES3 인덱스에서 라벨링이 완료된 모든 데이터를 가져와서 main으로 보내주는 함수
@@ -772,6 +865,9 @@ def get_latest_signals():
         logger.error(f"❌ ES 데이터 조회 중 오류 발생: {e}")
         return []
 
+# news_origin의 is_processed 필드를 True로 업데이트
+# 이미 처리된 기사가 다음 배치에서 다시 분석되지 않도록 막음
+# main.py의 run_analysis_and_save에 쓰임
 async def update_es_status(doc_id, status: bool, refresh=False):
     try:
         es.update(
@@ -783,6 +879,8 @@ async def update_es_status(doc_id, status: bool, refresh=False):
     except Exception as e:
         logger.error(f"ES 상태 업데이트 실패 ({doc_id}): {e}")
 
+
+
 if __name__ == "__main__":
     async def main_loop():
         while True:
@@ -790,8 +888,6 @@ if __name__ == "__main__":
             await run_analysis()
             logger.info("💤 10분 대기 후 다음 배치 시작...")
             await asyncio.sleep(600)  # 10분 대기
-
-
     try:
         asyncio.run(main_loop())
     except KeyboardInterrupt:
