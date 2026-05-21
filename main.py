@@ -1,7 +1,5 @@
 import json
 import sys
-import os
-import subprocess
 from datetime import datetime, timedelta
 import math
 import random
@@ -29,13 +27,12 @@ if sys.platform == 'win32':
 # -------------------------------
 
 # [내부 모듈 임포트]
+from config import Config
 from logger import get_logger
 from dataReqType.regist import RegistModel
 from db import get_db
 from hash import hash_password, verify_password
-from config import Config
-from utils import prepare_heatmap_data, save_analysis_result
-
+from utils import save_analysis_result
 
 # 파일 연동 (수집 및 분석 모듈)
 import naver
@@ -53,9 +50,15 @@ TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아�
 global_scheduler = AsyncIOScheduler()
 
 # es 설정
-es = Elasticsearch(["http://100.123.232.79:9200"])
-# es = Elasticsearch(['http://localhost:9200'])
+es_url = Config.ES_HOST
+if f":{Config.ES_PORT}" not in es_url:
+    es_url = f"{es_url}:{Config.ES_PORT}"
 
+es = Elasticsearch(
+    es_url,
+    basic_auth=(Config.ES_USER, Config.ES_PWD) if Config.ES_USER else None,
+    request_timeout=30
+)
 
 
 # ==========================================
@@ -113,7 +116,7 @@ async def run_analysis_and_save():
                     kw.strip().lower()
                     for kw in res.get('keywords', [])
                 ]
-                # logger.info(f"📰 기사 키워드: {news_keywords}")
+
                 if news_keywords:
                     match_sql = sqlalchemy.text("""
                                     SELECT DISTINCT 
@@ -128,7 +131,7 @@ async def run_analysis_and_save():
                     matched_users = []
                     for user in all_users:
                         user_keyword = user.keyword.strip().lower()
-                        # logger.info(f"👤 사용자 키워드: {user_keyword}")
+
 
                         # 완전 일치
                         if user_keyword in news_keywords:
@@ -332,30 +335,7 @@ def regist(info: RegistModel, req: Request, db: Session = Depends(get_db)):
     return
 
 
-# 회원가입 인증번호 요청
-@app.post("/request_auth")
-def request_auth(email: str):
-    import random
-    # 1. 6자리 랜덤 번호 생성
-    auth_code = str(random.randint(100000, 999999))
-
-    # 여기에 인증번호 호출 코드를 넣기
-    notifier.send_emergency_email(
-        to_email=email,
-        ai_report={'prediction': auth_code},
-        news_url=None,
-        risk_level="AUTH",
-        keywords_str=None,
-        title="회원가입 인증번호"
-    )
-
-    # 이후 생성된 코드를 DB나 세션에 저장하여 검증
-    return {"msg": "인증번호가 발송되었습니다."}
-
-
-
-
-# 회원가입 1단계: 이메일 발송 요청
+# 회원가입 1단계: 인증번호 이메일 발송 요청
 @app.post("/regist/request_code")
 def regist_request_code(info: Dict[str, str], req: Request):
     email = info.get("email")
@@ -878,8 +858,8 @@ def signal_log(id: str, db: Session = Depends(get_db)):
         JOIN signal_message sm ON al.signal_no = sm.signal_no
         JOIN member_info m ON al.member_no = m.member_no
         LEFT JOIN member_keyword mk ON m.member_no = mk.member_no 
-            AND (sm.prediction LIKE CONCAT('%', mk.keyword, '%') 
-                 OR sm.prediction_reason LIKE CONCAT('%', mk.keyword, '%'))
+            AND (sm.prediction = mk.keyword
+                 OR sm.prediction_reason = mk.keyword)
         WHERE m.id = :user_id
         GROUP BY sm.signal_no
         ORDER BY sm.signal_time DESC LIMIT 100
