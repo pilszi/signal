@@ -290,6 +290,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 # 세션 유지 시간 30분으로 연장
 app.add_middleware(SessionMiddleware, secret_key="secret", max_age=1800)
+# 페이지 새로고침 할 때마다 max_age 초기화
+@app.middleware("http")
+async def extend_session_max_age(req: Request, call_next):
+    if req.session:
+        req.session["last_time"] = int(time.time())
+    response = await call_next(req)
+    return response
+# 세션 유지 시간 60분(1시간)
+app.add_middleware(SessionMiddleware, secret_key="secret", max_age=3600)
 app.mount("/view", StaticFiles(directory="view"), name="view")
 
 
@@ -471,15 +480,18 @@ def session_out(req: Request, db: Session = Depends(get_db)):
     if not login_id:
         try:
             logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                        WHERE status = 1 AND login_time <= NOW() - INTERVAL 30 MINUTE""")
+                                        WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
             result = db.execute(logout_sql)
             db.commit()
             count = result.rowcount
             logger.info(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
+            logger.info(f'세션만료 1시간이 지나 로그아웃 처리한 계정 갯수 = {count}')
         except Exception as e:
             logger.info(f'세션만료 오류 : {e}')
             db.rollback()
     return
+    else:
+        return {"res": False}
 
 @app.get("/profile")
 def get_profile(id: str, db: Session = Depends(get_db)):

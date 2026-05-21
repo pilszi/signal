@@ -357,50 +357,6 @@
 
     </body>
     <script>
-        // 지역 키워드 발생 시 불이 들어올 국가 리스트
-        const REGION_MAP = {
-        "EU": {
-            label: "EU",
-            countries: ["France", "Germany", "Italy", "Spain", "Netherlands"]
-        },
-        "ASEAN": {
-            label: "ASEAN",
-            countries: ["Vietnam", "Indonesia", "Thailand", "Philippines"]
-        },
-        "Middle East": {
-            label: "Middle East",
-            countries: ["Israel", "Iran", "Saudi Arabia", "UAE"]
-        },
-        "East Asia": {
-            label: "East Asia",
-            countries: ["Korea", "China", "Japan", "Taiwan", "North Korea"]
-        },
-        "Strait of Hormuz": {
-            label: "Strait of Hormuz",
-            countries: ["Iran", "UAE", "Oman", "Saudi Arabia"]
-        },
-        "Red Sea": {
-            label: "Red Sea",
-            countries: ["Egypt", "Saudi Arabia", "Yemen"]
-        },
-        "South China Sea": {
-            label: "Middle East",
-            countries: ["China", "Philippines", "Vietnam", "Malaysia"]
-        },
-        "G20": {
-            label: "G20",
-            countries: ["United States", "China", "Japan", "Germany", "United Kingdom",
-                          "France", "Italy", "Canada", "South Korea", "India",
-                          "Russia", "Brazil", "Australia", "Indonesia", "Mexico",
-                          "Saudi Arabia", "Turkey", "South Africa", "Argentina"]
-        },
-        "Global": {
-            label: "Global",
-            countries: ["United States", "China", "Japan", "Germany", "France",
-                        "United Kingdom", "Russia", "India", "Brazil"]
-        },
-    };
-
         // 영어로 표시용 정규화 함수
         function normalizeCountry(name) {
             if (!name) return "Global";
@@ -409,8 +365,6 @@
 
             return "Global";
         }
-
-
 
         // --- 1. 전역 상태 관리 ---
         let allSignals = [];      // 하단 뉴스 그리드용 (전체 뉴스)
@@ -435,6 +389,37 @@
 
 
         let dateFilter = "";
+
+        function getCleanImageUrl(url) {
+            const defaultImg = '/static/img/signal_image.png';
+
+            if (!url || typeof url !== 'string' || url.trim() === '') return defaultImg;
+            let finalUrl = url.trim();
+
+            // 1. [핵심] 유명 뉴스/이미지 도메인은 확장자 체크 없이 즉시 통과
+            // yimg(야후), mktw(마켓워치), pstatic/naver(네이버), cloudfront(CDN) 등
+            const trustedDomains = /yimg\.com|mktw\.net|pstatic\.net|naver\.net|newsimg|cloudfront\.net|api\/res/i;
+
+            if (trustedDomains.test(finalUrl)) {
+                return finalUrl;
+            }
+
+            // 2. 중복 프로토콜 수정 (https://https://... 방지)
+            const protocol = 'https://';
+            if (finalUrl.split(protocol).length > 2) {
+                finalUrl = protocol + finalUrl.split(protocol).pop();
+            }
+
+            // 3. 일반적인 이미지 확장자 체크 (.jpg, .png 등)
+            const isImage = /\.(jpg|jpeg|png|gif|webp|bmp)($|\?)/i.test(finalUrl);
+
+            if (isImage) {
+                return finalUrl;
+            }
+
+            // 위 조건에 모두 해당하지 않으면 기본 이미지 반환
+            return defaultImg;
+        }
 
         // 히트맵 데이터를 분석하여 지도에 색상을 입히는 함수
         function updateHeatmap(data) {
@@ -468,47 +453,58 @@
             });
         }
 
+
         // 페이지 오픈시 실행
         document.addEventListener('DOMContentLoaded', async() => {
-            axios.get("/session_out");
-            updateNavbar();
-            // 1. 국가명 매핑 먼저
-            await loadCountryMap();
+            // 현재 브라우저의 파일명만 추출
+            const currentPath = window.location.pathname.split("/").pop() || "main.html";
+            const navItems = document.querySelectorAll('.nav-item');
+
+            navItems.forEach(item => {
+                // href 속성값에서 파일명만 가져와서 비교
+                const itemHref = item.getAttribute('href').split("/").pop();
+
+                if (currentPath === itemHref) {
+                    if (item.querySelector('i')) {
+                        item.classList.replace('text-gray-600', 'text-blue-600');
+                        item.classList.add('bg-blue-50');
+                    } else {
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
+                    }
+                }
+            });
             // 2. 지도 생성
             await initMap();
             // 3. 데이터 가져오기 + heatmap 적용
             await fetchMainData();
-
+            // 세션만료 계정 로그아웃 처리 요청
+            await checkSession();
+            await updateNotifUI();
+            
             // 4. 나머지 ui
+            updateNavbar();
             renderExchangeRates();
             initCalendar();
             lucide.createIcons();
-
-            await updateNotifUI();
-
             renderNews();
             renderPagination();
-
             updateStation();
             updateRefreshTime();
             scheduleNextUpdate();
-
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    executeScrollToCard();
-                });
-            });
+            if (window.lucide) lucide.createIcons();
         });
-
+        
         async function fetchMainData(date = null) {
             try {
                 let newsUrl = "/public_signals" + (date ? `?date=${date}` : "");
 
                 // 4개의 API를 호출하므로 4개의 변수로 받습니다.
-                const [newsRes, indicatorRes, countryRes] = await Promise.all([
+                const [newsRes, indicatorRes, countryRes, country] = await Promise.all([
                     axios.get(newsUrl),
                     axios.get('/api/market-indicators'),
-                    axios.get('/main/country')
+                    axios.get('/main/country'),
+                    axios.get("/main/countryMap")
                 ]);
                 console.log(newsRes, indicatorRes, countryRes);
 
@@ -533,6 +529,15 @@
                 // 3. 환율 데이터 렌더링
                 if (indicatorRes.data.status === "success") {
                     renderExchangeRates(indicatorRes.data.data);
+                }
+                // 4. 국가 한글명/영문명 매칭
+                if (country.data && country.data.res) {
+                    country.data.res.forEach(country => {
+                        // 한글 → 영문
+                        countryMap[country.country_kr_name] = country.country_en_name;
+                        // 영문 → 한글
+                        countryMap[country.country_en_name] = country.country_kr_name;
+                    });
                 }
 
             } catch (error) {
@@ -760,7 +765,6 @@
             }
         }
 
-        
         // 아이템 삭제
         async function deleteItem(e, signal_no) {
             e.stopPropagation();
@@ -1124,10 +1128,7 @@
                         ? news.published_date.split('T')[0]
                         : "";
 
-                const imageUrl =
-                    news.main_image && news.main_image !== ""
-                        ? news.main_image
-                        : "https://via.placeholder.com/400x320?text=Signal+News";
+                const imageUrl = getCleanImageUrl(news.main_image);
 
                 return `
                 <a href="${news.url}" target="_blank">
@@ -1367,28 +1368,36 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "main.html";
-            const navItems = document.querySelectorAll('.nav-item');
+        function jumperToLogin(timerId) {
+            clearTimeout(timerId);
+            location.href = "login.html";
+        }
 
-            navItems.forEach(item => {
-                // href 속성값에서 파일명만 가져와서 비교
-                const itemHref = item.getAttribute('href').split("/").pop();
+        function bindConfirmBtn(timerId) {
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            if (confirmBtn) {
+                confirmBtn.onclick = () => jumperToLogin(timerId);
+            }
+        }
 
-                if (currentPath === itemHref) {
-                    if (item.querySelector('i')) {
-                        item.classList.replace('text-gray-600', 'text-blue-600');
-                        item.classList.add('bg-blue-50');
-                    } else {
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
-                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
-                    }
+        async function checkSession() {
+            try {
+                let { data } = await axios.get("/session_out");
+                console.log("세션 체크 결과:", data);
+                if (data && data.res) {
+                    sessionStorage.removeItem('savedUserId');
+                    showModal("유효시간 만료로 로그아웃 되었습니다.", 'error');                    
+                    const timer = setTimeout(() => jumperToLogin(timer), 1500);
+                    bindConfirmBtn(timer);
+                    return false; 
                 }
-            });
+                return true;                 
+            } catch (error) {
+                console.error("세션 서버 통신 중 에러 발생:", error);
+                return false; 
+            }
+        }
 
-            if (window.lucide) lucide.createIcons();
-        });
 
         async function handleLogout() {
             showModal("로그아웃 하시겠습니까?", "confirm", async () => {
@@ -1414,22 +1423,6 @@
                 dropdown.classList.add('hidden');
             }
         });
-
-        async function loadCountryMap() {
-            let {data} = await axios.get("/main/countryMap");
-            // console.log(data.res);
-
-            data.res.forEach(country => {
-                // 한글 → 영문
-                countryMap[country.country_kr_name] = country.country_en_name;
-
-                // 영문 → 한글
-                countryMap[country.country_en_name] = country.country_kr_name;
-            });
-
-            // console.log(countryMap);
-
-        }
 
         // 히트맵 갱신 시간 함수 - 매일 자정 / 정오 시간으로 갱신
         function updateRefreshTime() {
@@ -1475,142 +1468,6 @@
                 // 두 번째 타이머: 그 이후부터는 정확히 12시간(43,200,000ms)마다 반복 실행
                 setInterval(updateRefreshTime, 12 * 60 * 60 * 1000);
             }, timeUntilNextUpdate);
-        }
-
-
-
-        // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
-        async function executeScrollToCard() {
-            const hash = window.location.hash;
-            console.log(hash);
-            if (!hash || !hash.startsWith('#signal-')) return;
-
-            const targetId = hash.replace('#signal-', '');
-            // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
-            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
-            const existsInFiltered = filteredNews.find(s => String(s.signal_no) === String(targetId));
-
-            console.log("🔍 [진단] 타겟:", targetId);
-            console.log("🔍 전체 데이터에 존재?", !!existsInAll);
-            console.log("🔍 필터링 데이터에 존재?", !!existsInFiltered);
-            // ----------------------------------------------------------------
-            // 1. 데이터가 로드될 때까지 0.1초씩 재시도 (비동기 데이터 보호)
-            if (!allSignals || allSignals.length === 0) {
-                setTimeout(executeScrollToCard, 100);
-                return;
-            }
-
-            // renderNews와 동일한 데이터 흐름 사용
-            const uniqueSignals = Array.from(
-                new Map(allSignals.map(item => [item.url, item])).values()
-            );
-
-            const sortedSignals = uniqueSignals.sort((a, b) => {
-
-                if (a.risk_score !== b.risk_score) {
-                    return a.risk_score - b.risk_score;
-                }
-
-                return new Date(b.published_date) - new Date(a.published_date);
-            });
-
-            // 실제 렌더링 기준 데이터에서 위치 찾기
-            let targetIndex = sortedSignals.findIndex(
-                s => String(s.signal_no) === String(targetId)
-            );
-
-            // 💥 핵심 패치
-            if (targetIndex === -1) {
-                console.log("⚠️ 현재 필터에 없음 → 전체 보기로 자동 복구");
-
-
-                // 버튼 UI도 전체 상태로 복구
-                document.querySelectorAll('#filter-container button').forEach(btn => {
-                    const btnText = btn.innerText;
-
-                    if (btnText === '전체') {
-                        btn.className =
-                            "px-4 py-2 rounded-lg bg-gray-900 text-white font-bold shadow-md transition-all";
-                    } else if (btnText.includes('심각')) {
-                        btn.className =
-                            "px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors";
-                    } else if (btnText.includes('주의')) {
-                        btn.className =
-                            "px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-colors";
-                    } else if (btnText.includes('안정')) {
-                        btn.className =
-                            "px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors";
-                    }
-                });
-
-                applyFilters();
-
-                const filteredUniqueSignals = Array.from(
-                    new Map(filteredNews.map(item => [item.url, item])).values()
-                );
-
-                const filteredSortedSignals = filteredUniqueSignals.sort((a, b) => {
-
-                    if (a.risk_score !== b.risk_score) {
-                        return a.risk_score - b.risk_score;
-                    }
-
-                    return new Date(b.published_date) - new Date(a.published_date);
-                });
-
-                targetIndex = filteredSortedSignals.findIndex(
-                    s => String(s.signal_no) === String(targetId)
-                );
-            }
-
-            if (targetIndex !== -1) {
-                const targetPage = Math.ceil((targetIndex + 1) / SIGNALS_PER_PAGE);
-
-                // 페이지 이동 필요 시
-                if (currentPage !== targetPage) {
-                    currentPage = targetPage;
-                    renderNews();
-                    renderPagination();
-
-                    await new Promise(resolve =>
-                        requestAnimationFrame(() =>
-                            requestAnimationFrame(resolve)
-                        )
-                    );
-                }
-
-                // DOM 렌더링 완료 후 카드 찾기
-                const targetCard = document.getElementById(`signal-${targetId}`);
-
-                if (targetCard) {
-                    targetCard.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'center'
-                    });
-
-                    targetCard.classList.add(
-                        'ring-4',
-                        'ring-blue-500',
-                        'shadow-[0_0_25px_rgba(59,130,246,0.8)]',
-                        'transition-all',
-                        'duration-500'
-                    );
-
-                    setTimeout(() => {
-                        targetCard.classList.remove(
-                            'ring-4',
-                            'ring-blue-500',
-                            'shadow-[0_0_25px_rgba(59,130,246,0.8)]'
-                        );
-
-                        history.replaceState(null, null, window.location.pathname);
-
-                        hasPendingScroll = false;
-                    }, 2000);
-                } else {
-                    console.log("❌ 카드 DOM 못 찾음:", targetId);
-                }
-            }
         }
 
         // 모달 제어

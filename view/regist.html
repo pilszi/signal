@@ -89,12 +89,12 @@
                         </div>
 
                         <!-- 이메일 인증 -->
-                        <div>
+                        <div>                            
                             <label class="block text-sm mb-2 font-medium">이메일 <span class="text-red-500">*</span></label>
                             <div class="flex gap-2 mb-2">
-                                <input type="email" id="email" placeholder="example@email.com" class="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                                <button type="button" id="send-code-btn" onclick="sendVerificationCode()" class="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2">
-                                    <i data-lucide="mail" class="w-4 h-4"></i> 인증코드
+                                <input type="email" id="email" placeholder="example@email.com" class="flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors" required>
+                                <button type="button" id="send-code-btn" onclick="sendVerificationCode()" class="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap">
+                                    <i data-lucide="mail" class="w-4 h-4"></i> <span id="send-btn-text">인증코드</span>
                                 </button>
                             </div>
                             <div id="verification-area" class="hidden">
@@ -225,34 +225,46 @@
             }
             lucide.createIcons();
         }
-        // 메일 전송 함수
+        
+        // 인증코드 메일 전송 함수
         async function sendVerificationCode() {
-            const email = document.getElementById('email').value.trim();
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showModal("올바른 이메일 형식을 입력해주세요."); return; }
-
+            const emailInput = document.getElementById('email');
+            const sendBtnText = document.getElementById('send-btn-text');
+            
+            // 💡 [추가] 이미 인증코드를 보낸 상태에서 '재입력'을 누른 경우 처리
+            if (emailInput.readOnly) {
+                emailInput.readOnly = false;
+                emailInput.classList.remove('bg-gray-100', 'text-gray-500', 'cursor-not-allowed');
+                sendBtnText.innerText = "인증코드";
+                // 인증 코드 입력 영역도 다시 숨기기 (선택 사항)
+                document.getElementById('verification-area').classList.add('hidden');
+                return;
+            }
+            const email = emailInput.value.trim();
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { 
+                showModal("올바른 이메일 형식을 입력해주세요."); 
+                return; 
+            }
             try {
-                let {data} = await axios.post("/regist/request_code", { email });
-                console.log(data);
-                if (data.res) {
-
+                let { data } = await axios.post("/regist/request_code", { email });
+                console.log(data);                
+                if (data.res) {                
                     verificationExpired = false;
-
-                    document.getElementById('verification-area').classList.remove('hidden');
-
+                    emailInput.readOnly = true;
+                    emailInput.classList.add('bg-gray-100', 'text-gray-500', 'cursor-not-allowed');
+                    
+                    // 🎯 [센스] 버튼 텍스트를 '재입력'으로 변경해서 유저가 수정할 수 있는 길을 열어둠
+                    sendBtnText.innerText = "재입력";
+                    document.getElementById('verification-area').classList.remove('hidden');                    
                     // 버튼 다시 활성화
                     const verifyBtn = document.getElementById('verify-btn');
-
                     verifyBtn.disabled = false;
-
-                    verifyBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-
+                    verifyBtn.classList.remove('opacity-50', 'cursor-not-allowed');                    
                     // 입력창 초기화
-                    document.getElementById('verificationCode').value = '';
-
+                    document.getElementById('verificationCode').value = '';                    
                     // 3분 타이머 시작
                     startVerificationTimer(data.expires_in || 180);
-
-                    showModal('인증 코드가 입력하신 이메일로 발송되었습니다.');
+                    showModal('인증 코드가 입력하신 이메일로 발송되었습니다.');                    
                 } else {
                     showModal(data.msg || "인증 코드 발송에 실패했습니다.");
                 }
@@ -260,6 +272,7 @@
                 showModal("서버 통신 중 오류가 발생했습니다.");
             }
         }
+
         // 백엔드 세션과 교차 매핑하여 검증하는 함수
         async function verifyCode() {
             const inputCode = document.getElementById('verificationCode').value.trim();
