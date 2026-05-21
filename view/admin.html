@@ -827,40 +827,55 @@
         
         // 로그 상세보기(팝업) 함수
         function showLogDetail(log_id) {
-            const log = adminLog.find(x => x.log_id === log_id)
-            const diff = getChangedOnly(
-                log.before_data,
-                log.after_data
-            );
+            const log = adminLog.find(x => x.log_id === log_id);
 
-            // 2. 객체를 [Key, Value] 배열로 쪼갠 뒤, 문장으로 합치기
-            document.getElementById("detail_before").textContent = 
-            
-            document.getElementById("detail_id").textContent =
-                log.target_id || "-";
+            // 기본 텍스트 정보 매칭
+            document.getElementById("detail_id").textContent = log.target_id || "-";
+            document.getElementById("detail_title").textContent = log.title || "-";
+            document.getElementById("detail_content").textContent = log.content || "-";
+            document.getElementById("detail_created_at").textContent = log.created_at || "-";   
 
-            document.getElementById("detail_title").textContent =
-                log.title || "-";
+            const beforeObj = typeof log.before_data === 'string' ? JSON.parse(log.before_data) : log.before_data;
+            const afterObj = typeof log.after_data === 'string' ? JSON.parse(log.after_data) : log.after_data;
 
-            document.getElementById("detail_content").textContent =
-                log.content || "-";
+            let beforeText = "";
+            let afterText = "";
 
-            document.getElementById("detail_created_at").textContent =
-                log.created_at || "-";   
+            // 1. Before 데이터 화면 출력 제어
+            if (!beforeObj) {
+                beforeText = "변경 전 데이터 없음"; // 또는 "" (빈 칸)
+            } else if (!afterObj) {
+                // 만약 데이터가 삭제(Delete)된 로그라면 beforeObj의 전체 내용을 보여줌
+                beforeText = Object.entries(beforeObj).map(([key, value]) => `${key}: ${value}`).join("\n");
+            }
 
-            document.getElementById("detail_before").textContent = 
-                Object.entries(diff.before).map(([key, value]) => 
+            // 2. After 데이터 화면 출력 제어
+            if (!afterObj) {
+                afterText = "변경 후 데이터 없음"; // 또는 "" (빈 칸)
+            } else if (!beforeObj) {
+                // 만약 최초 생성(Create) 로그라면 afterObj의 전체 내용을 깨끗하게 보여줌 (undefined 제거!)
+                afterText = Object.entries(afterObj).map(([key, value]) => `${key}: ${value}`).join("\n");
+            }
+
+            // 3. 둘 다 데이터가 존재할 때만 비로소 diff(변경점) 함수를 가동! (Update 로그)
+            if (beforeObj && afterObj) {
+                const diff = getChangedOnly(beforeObj, afterObj);
+                
+                beforeText = Object.entries(diff.before).map(([key, value]) => 
                     `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
-                    ).join("\n");            
-       
-            document.getElementById("detail_after").textContent =
-                Object.entries(diff.after).map(([key, value]) => 
-                    `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
-                    ).join("\n");   
+                ).join("\n");
 
-            document
-                .getElementById("logDetailModal")
-                .classList.remove("hidden");
+                afterText = Object.entries(diff.after).map(([key, value]) => 
+                    `${key}: ${Array.isArray(value) ? value.join(", ") : value}`
+                ).join("\n");
+            }
+
+            // 최종적으로 화면에 텍스트 주입
+            document.getElementById("detail_before").textContent = beforeText;
+            document.getElementById("detail_after").textContent = afterText;
+
+            // 모달 열기
+            document.getElementById("logDetailModal").classList.remove("hidden");
         }
 
         // 팝업 닫기
@@ -910,9 +925,22 @@
             ]);
 
             for (const key of keys) {
-                if (before?.[key] !== after?.[key]) {
-                    changedBefore[key] = before?.[key];
-                    changedAfter[key] = after?.[key];
+                const val1 = before?.[key];
+                const val2 = after?.[key];
+
+                // 🎯 [핵심 패치] 둘 다 배열(Array)인 경우 예외 처리
+                if (Array.isArray(val1) && Array.isArray(val2)) {
+                    // 배열을 문자열(예: "금,러시아")로 변환해서 내용물이 같은지 비교합니다.
+                    // 만약 내용물이 같다면 변경되지 않은 것이므로, 아래의 if문(저장 로직)을 패스하고 다음 키로 넘어갑니다!
+                    if (val1.join(",") === val2.join(",")) {
+                        continue; 
+                    }
+                }
+
+                // 일반적인 데이터 혹은 내용물이 다른 배열은 여기서 걸러져 로그에 쌓입니다.
+                if (val1 !== val2) {
+                    changedBefore[key] = val1;
+                    changedAfter[key] = val2;
                 }
             }
 

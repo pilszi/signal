@@ -327,6 +327,8 @@ def regist(info: RegistModel, req: Request, db: Session = Depends(get_db)):
     # 가입 성공 시 인증 관련 세션 파기하여 깔끔하게 정리
     req.session.pop("regist_auth", None)
     db.commit()
+    save_admin_log(db=db, log_type='join', title='신규회원', target_id=info.id, content='신규 회원 가입',
+                   after_data={"id": info.id, "user_name": info.user_name, "phone_number": info.phone_number,"email": info.email})
     return
 
 
@@ -523,9 +525,15 @@ def update_profile(info: Dict[str, Any], db: Session = Depends(get_db)):
     """회원 정보 수정 (키워드 포함)"""
 
     # 1. 회원 번호 확인
-    id_sql = sqlalchemy.text("SELECT member_no FROM member_info WHERE id = :id")
-    member_no = db.execute(id_sql, {"id": info["id"]}).mappings().fetchone()["member_no"]
-
+    id_sql = sqlalchemy.text("""SELECT
+                                    member_no
+                                    ,user_name
+                                    ,phone_number
+                                    ,email
+                                FROM member_info WHERE id = :id""")
+    res = db.execute(id_sql, {"id": info["id"]}).mappings().fetchone()
+    pw = ''
+    n_pw = ''
     # 2. 기본 정보 및 비밀번호 수정
     if info.get("pw"):
         new_pw = hash_password(info["pw"])
@@ -535,6 +543,8 @@ def update_profile(info: Dict[str, Any], db: Session = Depends(get_db)):
             db.execute(sql,
                    {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"], "pw": new_pw})
             db.commit()
+            pw = "보안상 조회불가"
+            n_pw = "변경 완료"
         except Exception as e:
             logger.info(f'회원 정보 수정 오류 : {e}')
             db.rollback()
@@ -543,22 +553,27 @@ def update_profile(info: Dict[str, Any], db: Session = Depends(get_db)):
         try:
             db.execute(sql, {"id": info["id"], "email": info["email"], "phone_number": info["phone_number"]})
             db.commit()
+            pw = "보안상 조회불가"
+            n_pw = "보안상 조회불가"
         except Exception as e:
             logger.info(f'회원 정보 수정 오류 : {e}')
             db.rollback()
 
     # 키워드 갱신
-    bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": member_no}).mappings().fetchall()
+    bef_key = db.execute(sqlalchemy.text("""SELECT keyword FROM member_keyword WHERE member_no = :member_no"""), {"member_no": res["member_no"]}).mappings().fetchall()
     bef_keyword = []
     for k in bef_key:
         bef_keyword.append(k["keyword"])
-    db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": member_no})
+    db.execute(sqlalchemy.text("DELETE FROM member_keyword WHERE member_no = :member_no"), {"member_no": res["member_no"]})
     key_insert = 0
     for key in info.get("keyword", []):
         ins_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES(:member_no, :keyword)")
-        res = db.execute(ins_sql, {"member_no": member_no, "keyword": key})
-        key_insert += res.rowcount
+        key_res = db.execute(ins_sql, {"member_no": res["member_no"], "keyword": key})
+        key_insert += key_res.rowcount
     db.commit()
+    save_admin_log(db=db, log_type='update', title='정보수정요청' ,target_id=info["id"], content='계정 정보 수정완료',
+                   before_data={"member_no": res["member_no"], "pw": pw, "email": res["email"], "phone_number": res["phone_number"], "keyword": bef_keyword},
+                   after_data={"member_no": res["member_no"], "pw": n_pw, "email": info["email"], "phone_number": info["phone_number"], "keyword": info["keyword"]})
     return {"updated_keywords": key_insert}
 
 
@@ -1212,7 +1227,9 @@ async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends
                 log_type='find',
                 title='비밀번호 변경 완료',
                 content=f'비밀번호 재설정 최종 성공 : {user_id}',
-                target_id=user_id
+                target_id=user_id,
+                before_data={"비밀번호": "보안상 조회 불가"},
+                after_data={"비밀번호": "변경완료"}
             )
 
         # 재설정 완료 시 세션 파기
