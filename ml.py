@@ -285,7 +285,7 @@ async def get_ai_prediction_report(risk_level, title, keywords, scores):
         except Exception as e:
             err_msg = str(e)
 
-            # [수정 2] 429(할당량 초과) 발생 시 로직 강화
+            # 429(할당량 초과) 발생 시 로직 강화
             if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
                 # 구글이 요청한 대로 최소 30~40초는 쉬어줘야 IP 차단을 피합니다.
                 wait_time = 45

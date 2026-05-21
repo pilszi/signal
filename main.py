@@ -113,7 +113,7 @@ async def run_analysis_and_save():
                     kw.strip().lower()
                     for kw in res.get('keywords', [])
                 ]
-                # logger.info(f"📰 기사 키워드: {news_keywords}")
+
                 if news_keywords:
                     match_sql = sqlalchemy.text("""
                                     SELECT DISTINCT 
@@ -128,7 +128,7 @@ async def run_analysis_and_save():
                     matched_users = []
                     for user in all_users:
                         user_keyword = user.keyword.strip().lower()
-                        # logger.info(f"👤 사용자 키워드: {user_keyword}")
+
 
                         # 완전 일치
                         if user_keyword in news_keywords:
