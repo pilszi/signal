@@ -301,9 +301,15 @@
                             <div id="password-change-area" class="hidden pt-4 border-t">
                                 <label class="flex items-center gap-2 text-sm font-medium mb-2 text-gray-700">
                                     <i data-lucide="key" class="w-4 h-4 text-gray-400"></i> 비밀번호 변경 (선택사항)
+                                    <p class="text-xs text-blue-600 leading-relaxed">
+                                        * 영문, 숫자를 포함한 8자리 이상으로 입력해주세요.
+                                    </p>
                                 </label>
                                 <input type="password" id="password" placeholder="새 비밀번호 입력" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
                                 <input type="password" id="password-confirm" placeholder="새 비밀번호 확인" class="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <div>
+                                    <p id="password-message" class="block text-xs mt-1 hidden"></p>
+                                </div>
                             </div>
 
                             <!-- 저장 버튼 (수정 모드 시 노출) -->
@@ -398,6 +404,29 @@
         let noti = [];
         let modalCallback = null;
 
+        // 데이터 호출 함수
+        async function fetchMainData() {
+            try {
+                // [병렬 호출로 속도 최적화]
+                const [userProfile, notiRes] = await Promise.all([
+                    axios.get('/profile?id=' + savedUserId),
+                    axios.get("/noti/signal?id=" + savedUserId)
+                ]);
+
+                userData = {
+                    "name" : (userProfile.data && userProfile.data.user_name) ? userProfile.data.user_name : '',
+                    "email" : (userProfile.data && userProfile.data.email) ? userProfile.data.email : '',
+                    "phone" : (userProfile.data && userProfile.data.phone_number) ? userProfile.data.phone_number : '',
+                    "keywords" : (userProfile.data && userProfile.data.keyword) ? userProfile.data.keyword : []
+                };
+                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+                console.log(userData, noti);
+            } catch (error) {
+                // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
+                console.error("데이터 동기화 실패:", error);
+            }
+        }
+
         // Navbar 상태 업데이트
         function updateNavbar() {
             const authContainer = document.getElementById('authContainer');
@@ -490,24 +519,17 @@
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
-            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
-            
-            const {data} = await axios.get("/noti/signal?id="+savedUserId);
-            console.log(data);
-            noti = data.noti;
-            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
-            if (!savedUserId || savedUserId === "guest") {
-                badge.style.display = 'none'; // 배지 숨김
-                countText.innerText = '0개의 새 알림';
-                list.innerHTML = `
-                    <div style="padding: 40px; text-align: center;">
-                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                    </div>`;
+            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
+                console.log("로그인되지 않음, 데이터 동기화 생략");
                 return;
             }
-            
+
+            if (!noti || !Array.isArray(noti)) {
+                noti = [];
+            }
             const unreads = noti.filter(n => !n.is_read);
-            
+
             // 새 알림이 있을 때만 배지 표시
             if (unreads.length > 0) {
                 badge.innerText = unreads.length;
@@ -557,7 +579,7 @@
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -571,7 +593,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-gray-500">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -592,9 +614,9 @@
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
-        async function readItem(id) {
+        async function readItem(signal_no) {
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -602,16 +624,16 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
             location.href = 'signal_log.html';
         }
 
         // 아이템 삭제
-        async function deleteItem(e, id) {
+        async function deleteItem(e, signal_no) {
             e.stopPropagation();
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -619,16 +641,24 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
         }
 
         // 모두 읽음
         async function allRead() {
             noti = noti.map(n => ({...n, is_read: 1}));
-            await axios.get("/noti/read_all?id="+savedUserId);
-            updateNotifUI();
+            const signalNoList = noti.map(n => n.signal_no);
+            try {
+                let { data } = await axios.post("/noti/read_all", {"userId": savedUserId, "signal_nos": signalNoList});
+                if (data.res) {
+                    await updateNotifUI();
+                }
+            } catch (err) {
+                console.error("전체 알림 읽음 처리 통신 오류:", err);
+            }
         }
+
 
         function formatPhoneNumber(phoneNumber) {
             return phoneNumber
@@ -643,17 +673,9 @@
             const phone = document.getElementById('form-phone');
             const keyword = document.getElementById('keyword-view');
 
-            let {data} = await axios.get('/profile?id='+savedUserId);
-            console.log(data);
-            userData = {
-                "name" : data.user_name,
-                "email" : data.email,
-                "phone" : data.phone_number,
-                "keywords" : data.keyword
-            };
 
-            document.getElementById('display-name').innerText = data.user_name;
-            document.getElementById('display-email').innerText = data.email;
+            document.getElementById('display-name').innerText = userData.name;
+            document.getElementById('display-email').innerText = userData.email;
             name.value = userData.name;
             email.value = userData.email;
             phone.value = formatPhoneNumber(userData.phone);
@@ -834,19 +856,13 @@
 
             //  4. 비밀번호 입력이 있을 때만 유효성 검사 실시
             if (pw !== '') {
-                // [검사 1] 일치 여부
-                if (pw !== pwConfirm) {
-                    showModal("비밀번호가 일치하지 않습니다.", "error");
-                    return;
-                }
-
                 // [검사 2] 8자 이상, 영문/숫자 혼합
                 const pwRegex = /^(?=.*[a-zA-Z])(?=.*\d).{8,}$/;
                 if (!pwRegex.test(pw)) {
                     showModal("비밀번호는 8자 이상이며, 영문과 숫자를 모두 포함해야 합니다.", "error");
                     return;
                 }
-            }
+            } 
 
             // 데이터 업데이트 진행
             userData.email = email;
@@ -1004,9 +1020,42 @@
             });
         });
 
+        // 비밀번호 확인 함수
+        function checkPasswordMatch() {
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('password-confirm');
+            const messageTag = document.getElementById('password-message');
+
+            if (!passwordInput || !confirmInput || !messageTag) return;
+
+            const pswd = passwordInput.value;
+            const confirmPswd = confirmInput.value;
+
+            if (pswd.trim() !== '' || confirmPswd !== '') {
+                passwordInput.required = true;
+                confirmInput.required = true;
+            } else {
+                passwordInput.required = false;
+                confirmInput.required = false;
+            }
+            
+            if (!pswd || !confirmPswd) { messageTag.classList.add('hidden'); return; }
+            messageTag.classList.remove('hidden');
+            if (pswd === confirmPswd) {
+                messageTag.textContent = "비밀번호가 일치합니다.";
+                messageTag.className = "text-xs mt-1 text-green-600";
+                confirmInput.classList.add('border-green-500'); confirmInput.classList.remove('border-red-500');
+            } else {
+                messageTag.textContent = "비밀번호가 일치하지 않습니다.";
+                messageTag.className = "text-xs mt-1 text-red-600";
+                confirmInput.classList.add('border-red-500'); confirmInput.classList.remove('border-green-500');
+            }
+        }
+
         // 페이지 오픈시 실행
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             axios.get("/session_out");
+            await fetchMainData();
             updateNavbar();
             renderProfile();
             lucide.createIcons();
@@ -1027,6 +1076,14 @@
                     userData.phone = this.value; // 실시간 데이터 동기화
                 });
             }
+            const passwordInput = document.getElementById('password');
+            const confirmInput = document.getElementById('password-confirm');
+            
+            if (passwordInput || confirmInput) {
+                passwordInput.addEventListener('input', checkPasswordMatch);
+                confirmInput.addEventListener('input', checkPasswordMatch);
+            }
+
         });
 
     </script>

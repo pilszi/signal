@@ -868,7 +868,7 @@ def signal_log(id: str, db: Session = Depends(get_db)):
                  OR sm.prediction_reason LIKE CONCAT('%', mk.keyword, '%'))
         WHERE m.id = :user_id
         GROUP BY sm.signal_no
-        ORDER BY sm.signal_time DESC
+        ORDER BY sm.signal_time DESC LIMIT 100
     """)
 
     # 쿼리 실행 및 맵핑 결과 획득
@@ -915,6 +915,7 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
             JOIN alarm_log t2 ON t1.signal_no = t2.signal_no
             JOIN member_info t3 ON t2.member_no = t3.member_no
             WHERE t3.id = :id
+            AND t2.alarm_view = 0
             AND t1.risk_level = '심각'
             ORDER BY t1.signal_time DESC
             LIMIT 10
@@ -927,7 +928,6 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
             # DB의 datetime 객체를 프론트엔드가 다루기 좋게 문자열로 포맷팅
             time_str = n["time"].strftime("%Y-%m-%d %H:%M") if n.get("time") else ""
             notis.append({
-                "id": n["signal_no"], # 구형 프론트엔드 호환용
                 "signal_no": n["signal_no"], # 신형 스크립트 매핑용 (moveToSignalLog 사용)
                 "type": "emergency",
                 "risk_level": n.get("risk_level", "심각"),
@@ -959,37 +959,26 @@ def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
     return {"res": True}
 
 
-# X 버튼 클릭 시: 알림판에서만 제외 (DB 데이터는 보존)
-@app.post("/noti/delete")
-def noti_delete(info: Dict[str, Any], db: Session = Depends(get_db)):
-    """ 사용자가 X 버튼을 눌러 알림판에서 숨김 처리 (Hard Delete ➔ Soft Hide) """
-
-    # alarm_view 상태만 1로 바꿉니다.
-    sql = sqlalchemy.text("""
-        UPDATE alarm_log t1 
-        JOIN member_info t2 ON t1.member_no = t2.member_no
-        SET t1.alarm_view = 1 
-        WHERE t1.signal_no = :signal_no AND t2.id = :id
-    """)
-    res = db.execute(sql, {"signal_no": info.get("id"), "id": info.get("user_id")})
-    logger.info(f"👀 알림 숨김(읽음) 처리 완료 = {res.rowcount}개")
-    db.commit()
-    return {"res": True}
-
-
 # 모든 알림토글 읽음 요청
 @app.post("/noti/read_all")
 def noti_raed_all(info: Dict[str, Any], db: Session = Depends(get_db)):
     """ 하단 '모두 읽음으로 표시' 클릭 시 드롭다운 일괄 드롭 """
-    user_id = info.get("user_id")
+    user_id = info.get("userId")
+    signal_no_list = info.get("signal_nos")
+    logger.info(f'userId = {user_id} / signal_no_list = {signal_no_list}')
+    if not signal_no_list:
+        return {"res": True}
 
     sql = sqlalchemy.text("""
             UPDATE alarm_log t1 
             JOIN member_info t2 ON t1.member_no = t2.member_no
             SET t1.alarm_view = 1 
-            WHERE t1.alarm_view = 0 AND t2.id = :id
+            WHERE t1.alarm_view = 0 
+            AND t2.id = :id
+            AND t1.signal_no IN :signal_nos
         """)
-    res = db.execute(sql, {"id": user_id})
+
+    res = db.execute(sql, {"userId": user_id, "signal_nos": signal_no_list})
     logger.info(f"🧹 {user_id}의 모든 알림 읽음 처리 완료 = {res.rowcount}개")
     db.commit()
     return {"res": True}
@@ -1202,7 +1191,7 @@ async def find_pw_verify(info: Dict[str, str], req: Request):
 # 3단계: 최종 비밀번호 변경
 @app.post("/find_pw/reset")
 async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends(get_db)):
-    logger.info(f'비밀번호 변경 info = {info}')
+    logger.info(f'비밀번호 변경 계정 = {info}')
     user_id = info.get("userId")
     new_pw = hash_password(info.get("password"))
     session_data = req.session.get("find_pw_auth")

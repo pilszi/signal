@@ -437,6 +437,12 @@
 
         // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
         function updateNotifUI_Static() {
+            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
+                console.log("로그인되지 않음, 데이터 동기화 생략");
+                return;
+            }
+            
             // 🛠️ [초정밀 방어선] 데이터가 가동되기 전 루프가 빗겨 맞더라도 에러 튕김을 원천 차단합니다.
             if (!noti || !Array.isArray(noti)) {
                 noti = [];
@@ -629,7 +635,7 @@
 
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id}, ${n.signal_no})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -643,7 +649,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -659,11 +665,11 @@
         }
 
         // signal_log.html 전용 readItem (최종 마감 버전)
-        async function readItem(id, signalNo) {
+        async function readItem(signalNo) {
 
             try {
                 // 1. 서버 읽음 처리
-                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": String(signalNo), "user_id": savedUserId });
 
                 noti = noti.map(n => String(n.signal_no) === String(signalNo) ? { ...n, is_read: 1 } : n);
                 updateNotifUI_Static();
@@ -686,7 +692,7 @@
         }
 
         // [세 페이지 공통] 타입 미스매치 버그가 완벽 해결된 실시간 삭제 카운터 함수
-        async function deleteItem(e, id) {
+        async function deleteItem(e, signal_no) {
             // 1. 부모 박스 클릭 이벤트 전파 차단
             e.stopPropagation();
 
@@ -697,7 +703,7 @@
             }
 
             noti = noti.filter(
-                n => String(n.id) !== String(id)
+                n => String(n.signal_no) !== String(id)
             );
 
             // 4. 안 읽은 알림 수 재계산
@@ -738,7 +744,7 @@
 
             // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
             try {
-                await axios.post("/noti/delete", { "id": id, "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": signal_no, "user_id": savedUserId });
             } catch (err) {
                 console.error("알림 숨김 처리 서버 통신 에러:", err);
             }
@@ -746,8 +752,10 @@
 
         // 5. 하단 모두 읽음 버튼 클릭 시: 비동기 POST 일괄 확인 완료 처리
         async function allRead() {
+            noti = noti.map(n => ({...n, is_read: 1}));
+            const signalNoList = noti.map(n => n.signal_no);
             try {
-                let { data } = await axios.post("/noti/read_all", { "user_id": savedUserId });
+                let { data } = await axios.post("/noti/read_all", {"userId": savedUserId, "signal_nos": signalNoList});
                 if (data.res) {
                     await refreshAllData();
                 }
@@ -755,6 +763,7 @@
                 console.error("전체 알림 읽음 처리 통신 오류:", err);
             }
         }
+
         // 🎯 [완전체] 데이터 추적 + 페이지네이션 전환 + 렌더링 동기화 완벽 결합
         async function executeScrollToCard() {
             console.log("🚨 executeScrollToCard 진입");
@@ -763,8 +772,8 @@
 
             const targetId = hash.replace('#signal-', '');
             // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
-            const existsInAll = allSignals.find(s => String(s.id) === String(targetId));
-            const existsInFiltered = filteredSignals.find(s => String(s.id) === String(targetId));
+            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
+            const existsInFiltered = filteredSignals.find(s => String(s.signal_no) === String(targetId));
 
             console.log("🔍 [진단] 타겟:", targetId);
             console.log("🔍 전체 데이터에 존재?", !!existsInAll);

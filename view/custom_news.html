@@ -307,48 +307,24 @@
             // 위 조건에 모두 해당하지 않으면 기본 이미지 반환
             return defaultImg;
         }
-
         async function fetchMainData() {
-            let {data} = await axios.get("/custom_news?id="+savedUserId);
-            console.log(data);
+            try {
+                // [병렬 호출로 속도 최적화]
+                const [signalsRes, notiRes] = await Promise.all([
+                    axios.get('/custom_news?id=' + savedUserId),
+                    axios.get("/noti/signal?id=" + savedUserId)
+                ]);
 
-            // 2. map 안에서 함수만 호출하면 끝!
-            allSignals = data.news.map(item => ({
-                ...item,
-                main_image: getCleanImageUrl(item.main_image)
-            }));
-
-            keyword = data.keyword;
+                // 2. 전체 로그 처리
+                allSignals = (signalsRes.data && signalsRes.data.news) ? signalsRes.data.news : [];
+                keyword = (signalsRes.data && signalsRes.data.keyword) ? signalsRes.data.keyword : [];
+                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+                console.log(keyword, allSignals, noti);
+            } catch (error) {
+                // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
+                console.error("데이터 동기화 실패:", error);
+            }
         }
-
-        document.addEventListener('DOMContentLoaded', async () => {
-            // 현재 브라우저의 파일명만 추출
-            const currentPath = window.location.pathname.split("/").pop() || "index.html";
-            const navItems = document.querySelectorAll('.nav-item');
-
-            navItems.forEach(item => {
-                // href 속성값에서 파일명만 가져와서 비교
-                const itemHref = item.getAttribute('href').split("/").pop();
-
-                if (currentPath === itemHref) {
-                    if (item.querySelector('i')) {
-                        item.classList.replace('text-gray-600', 'text-blue-600');
-                        item.classList.add('bg-blue-50');
-                    } else {
-                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
-                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
-                    }
-                }
-
-            });
-            axios.get("/session_out");
-            await fetchMainData();
-            updateNavbar();
-            updateNotifUI();
-            render();
-            renderPagination()
-            if (window.lucide) lucide.createIcons();
-        });
 
 
         // Navbar 상태 업데이트
@@ -443,22 +419,15 @@
             const badge = document.getElementById('notifBadge');
             const list = document.getElementById('notifList');
             const countText = document.getElementById('notifCountText');
-            // 1. 로그인 여부 확인 (React 코드의 로직 반영)
-
-            const {data} = await axios.get("/noti/signal?id="+savedUserId);
-            console.log(data);
-            noti = data.noti;
-            // 로그인 정보가 없거나 guest인 경우 알림 목록을 표시하지 않음
-            if (!savedUserId || savedUserId === "guest") {
-                badge.style.display = 'none'; // 배지 숨김
-                countText.innerText = '0개의 새 알림';
-                list.innerHTML = `
-                    <div style="padding: 40px; text-align: center;">
-                        <p style="color: #9ca3af; font-size: 14px;">로그인 후 알림을 확인하세요.</p>
-                    </div>`;
+            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
+                console.log("로그인되지 않음, 데이터 동기화 생략");
                 return;
             }
 
+            if (!noti || !Array.isArray(noti)) {
+                noti = [];
+            }
             const unreads = noti.filter(n => !n.is_read);
 
             // 새 알림이 있을 때만 배지 표시
@@ -511,7 +480,7 @@
                 // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
-                         onclick="readItem(${n.id}, ${n.signal_no})">
+                         onclick="readItem(${n.signal_no})">
                         <div class="w-10 h-10 ${bgColor} ${iconColor} rounded-lg flex items-center justify-center flex-shrink-0 border border-current/10">
                             <i data-lucide="${icon}" class="w-5 h-5"></i>
                         </div>
@@ -525,7 +494,7 @@
                             </div>
                         </div>
 
-                        <button onclick="deleteItem(event, ${n.id})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteItem(event, ${n.signal_no})" class="absolute right-2 top-4 p-1 text-gray-300 hover:text-red-500 transition-colors">
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
@@ -546,26 +515,26 @@
         }
 
         // 아이템 클릭 (읽음 처리 및 이동)
-        async function readItem(id, signalNo) {
+        async function readItem(signal_no) {
             try {
                 // 1. 서버에 읽음 상태 반영 (POST 규격)
-                await axios.post("/noti/read", { "id": String(id), "user_id": savedUserId });
+                await axios.post("/noti/read", { "id": String(signal_no), "user_id": savedUserId });
 
                 // 2. 로컬 알림 배열 실시간 동기화 (화면 UI 갱신용)
                 if (typeof noti !== 'undefined' && Array.isArray(noti)) {
-                    noti = noti.map(n => String(n.id) === String(id) ? { ...n, is_read: 1 } : n);
+                    noti = noti.map(n => String(n.signal_no) === String(signal_no) ? { ...n, is_read: 1 } : n);
                 }
 
 
                 // 3. [방어선] 현재 이미 시그널로그 페이지라면 페이지 리로드 없이 즉시 스크롤 작동
                 if (window.location.pathname.endsWith('signal_log.html')) {
-                    window.location.hash = `signal-${id}`;
+                    window.location.hash = `signal-${signal_no}`;
                     executeScrollToCard(); // 2번 함수 즉시 가동
                     if (typeof updateNotifUI_Static === 'function') updateNotifUI_Static();
                     if (typeof updateNotifUI === 'function') updateNotifUI();
                 } else {
                     // 다른 페이지(main, custom)에 있다면 해시 주소를 들고 강제 이동
-                    window.location.href = `signal_log.html#signal-${signalNo}`;
+                    window.location.href = `signal_log.html#signal-${signal_no}`;
 
                 }
             } catch (err) {
@@ -597,10 +566,10 @@
         }
 
         // 아이템 삭제
-        async function deleteItem(e, id) {
+        async function deleteItem(signal_no) {
             e.stopPropagation();
             noti = noti.map(n => {
-                if (n.id === id) {
+                if (n.signal_no === signal_no) {
                     // ID가 일치하면 읽음 처리된 복사본 반환
                     return { ...n, is_read: 1 };
                 } else {
@@ -608,15 +577,22 @@
                     return n;
                 }
             });
-            await axios.post("/noti/read", {"id": id, "user_id": savedUserId});
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
             updateNotifUI();
         }
 
         // 모두 읽음
         async function allRead() {
             noti = noti.map(n => ({...n, is_read: 1}));
-            await axios.get("/noti/read_all?id="+savedUserId);
-            updateNotifUI();
+            const signalNoList = noti.map(n => n.signal_no);
+            try {
+                let { data } = await axios.post("/noti/read_all", {"userId": savedUserId, "signal_nos": signalNoList});
+                if (data.res) {
+                    await updateNotifUI();
+                }
+            } catch (err) {
+                console.error("전체 알림 읽음 처리 통신 오류:", err);
+            }
         }
 
         // 3. 뉴스 카드 컴포넌트 (Template Function)
@@ -627,9 +603,9 @@
                 "심각": "bg-red-100 text-red-700"
             };
             // console.log(news);
-            const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
             // 🚨 [치명적 버그 해결] 날짜가 null이거나 없을 때 split 에러로 전체 화면이 얼어붙는 현상 완전 차단
             const displayDate = news.published_date ? news.published_date.split('T')[0] : "날짜 미상";
+            const displayScore = 100-Math.round(Math.abs((news.risk_score || 0) * 100));
             const displayKeyword = Array.isArray(news.keyword) ? news.keyword.join(', ') : (news.keyword || '일반');
             let newBadge = '';
             if (!news.is_read) {
@@ -638,12 +614,11 @@
 
             return `
                 <div class="bg-white rounded-xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow group cursor-pointer h-full relative" onclick="logNewsClick('${news.url}')">
-                    <a href=${news.url} target="_blank">
                     <img src="${news.main_image}"
                         onerror="this.onerror=null; this.src='/static/img/signal_image.png';"
                         alt="news"
                         class="w-full h-48 object-cover">
-                    </a>
+                    
                     <div class="p-5">
                         <div class="flex justify-between items-start mb-2">
                             <span class="px-2 py-1 text-xs font-semibold rounded ${riskColors[news.risk_level] || 'bg-gray-100'}">
@@ -655,7 +630,7 @@
                             <span class="text-sm text-gray-500 h-8">${news.press_name}</span>
                             <span class="text-xs text-gray-400 h-8">${displayDate}</span>
                             </div>
-                        <a href=${news.url} target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
+                        <a target="_blank" class="font-bold leading-tight group-hover:text-blue-600 transition-colors">${news.title}</a>
                     </div>
                     ${newBadge}
                 </div>
@@ -690,9 +665,11 @@
                         return -1; // a가 읽지 않은 상태면 앞으로 보냄
                     }
                 }
-                // 2. 리스크 점수 기준 정렬 (낮은 점수가 위로)
-                if (a.risk_score !== b.risk_score) {
-                    return a.risk_score - b.risk_score;
+                const scoreA = 100-Math.round(Math.abs((a.risk_score || 0) * 100));
+                const scoreB = 100-Math.round(Math.abs((b.risk_score || 0) * 100));
+                // 2. 리스크 점수 기준 정렬 (높은 점수가 위로)
+                if (scoreA !== scoreB) {
+                    return scoreB - scoreA;
                 }
                 // 3. 날짜 기준 정렬 (최신순)
                 const dateA = new Date(a.published_date);
@@ -766,18 +743,28 @@
 
         // 📡 기사 클릭 로그를 서버로 전송하는 함수
         async function logNewsClick(articleUrl) {
+            window.open(articleUrl, '_blank');
+            // 비회원은 로그를 쌓지 않음
+            if (!savedUserId) return;
 
-            // 로그인하지 않은 비회원은 로그를 쌓지 않거나 예외 처리
-            if (savedUserId){
-                // 2. 서버로 POST 요청 전송
+            try {
+                // 1. 서버로 POST 요청 전송 (비동기로 백그라운드에서 처리)
                 await axios.post("/news_view", {
                     id: savedUserId,
                     url: articleUrl
                 });
-                // console.log("열람 로그 전송 완료");
-                setTimeout(() => {
-                    window.location.reload();
-                }, 100); // 0.1초 뒤 새로고침
+
+                // 🌟 [핵심] 전체 데이터(allSignals)에서 방금 클릭한 기사를 찾아 읽음(is_read) 처리
+                const clickedNews = allSignals.find(news => news.url === articleUrl);
+                if (clickedNews) {
+                    clickedNews.is_read = true; // 혹은 1 (백엔드 데이터 포맷에 맞춤)
+                }
+
+                // 🌟 [핵심] 페이지 새로고침 없이, 현재 필터 상태를 유지한 채 정렬만 새로고침!
+                render();
+
+            } catch (error) {
+                console.error("열람 로그 전송 실패:", error);
             }
         }
 
@@ -882,6 +869,34 @@
             }
         }
 
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 현재 브라우저의 파일명만 추출
+            const currentPath = window.location.pathname.split("/").pop() || "index.html";
+            const navItems = document.querySelectorAll('.nav-item');
+
+            navItems.forEach(item => {
+                // href 속성값에서 파일명만 가져와서 비교
+                const itemHref = item.getAttribute('href').split("/").pop();
+
+                if (currentPath === itemHref) {
+                    if (item.querySelector('i')) {
+                        item.classList.replace('text-gray-600', 'text-blue-600');
+                        item.classList.add('bg-blue-50');
+                    } else {
+                        item.classList.remove('text-gray-600', 'hover:bg-gray-50');
+                        item.classList.add('bg-gradient-to-br', 'from-blue-600', 'to-blue-800', 'text-white');
+                    }
+                }
+
+            });
+            axios.get("/session_out");
+            await fetchMainData();
+            updateNavbar();
+            updateNotifUI();
+            render();
+            renderPagination()
+            if (window.lucide) lucide.createIcons();
+        });
     </script>
 
     <style>
