@@ -615,18 +615,21 @@
 
         // 아이템 클릭 (읽음 처리 및 이동)
         async function readItem(signal_no) {
-            noti = noti.map(n => {
-                if (n.signal_no === signal_no) {
-                    // ID가 일치하면 읽음 처리된 복사본 반환
-                    return { ...n, is_read: 1 };
-                } else {
-                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
-                    return n;
+            try {
+                // 1. 서버에 읽음 상태 반영
+                await axios.post("/noti/read", { "id": String(signal_no), "user_id": savedUserId });
+
+                // 2. 로컬 알림 배열 실시간 동기화
+                if (typeof noti !== 'undefined' && Array.isArray(noti)) {
+                    noti = noti.map(n => String(n.signal_no) === String(signal_no) ? { ...n, is_read: 1 } : n);
                 }
-            });
-            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
-            updateNotifUI();
-            location.href = 'signal_log.html';
+
+                // 3. 주저하지 않고 해시 주소를 들고 signal_log.html로 강제 리다이렉트!
+                window.location.href = `signal_log.html#signal-${signal_no}`;
+
+            } catch (err) {
+                console.error("알림 확인 통신 오류:", err);
+            }
         }
 
         // 아이템 삭제

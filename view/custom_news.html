@@ -517,30 +517,22 @@
         // 아이템 클릭 (읽음 처리 및 이동)
         async function readItem(signal_no) {
             try {
-                // 1. 서버에 읽음 상태 반영 (POST 규격)
+                // 1. 서버에 읽음 상태 반영
                 await axios.post("/noti/read", { "id": String(signal_no), "user_id": savedUserId });
 
-                // 2. 로컬 알림 배열 실시간 동기화 (화면 UI 갱신용)
+                // 2. 로컬 알림 배열 실시간 동기화
                 if (typeof noti !== 'undefined' && Array.isArray(noti)) {
                     noti = noti.map(n => String(n.signal_no) === String(signal_no) ? { ...n, is_read: 1 } : n);
                 }
 
+                // 3. 주저하지 않고 해시 주소를 들고 signal_log.html로 강제 리다이렉트!
+                window.location.href = `signal_log.html#signal-${signal_no}`;
 
-                // 3. [방어선] 현재 이미 시그널로그 페이지라면 페이지 리로드 없이 즉시 스크롤 작동
-                if (window.location.pathname.endsWith('signal_log.html')) {
-                    window.location.hash = `signal-${signal_no}`;
-                    executeScrollToCard(); // 2번 함수 즉시 가동
-                    if (typeof updateNotifUI_Static === 'function') updateNotifUI_Static();
-                    if (typeof updateNotifUI === 'function') updateNotifUI();
-                } else {
-                    // 다른 페이지(main, custom)에 있다면 해시 주소를 들고 강제 이동
-                    window.location.href = `signal_log.html#signal-${signal_no}`;
-
-                }
             } catch (err) {
                 console.error("알림 확인 통신 오류:", err);
             }
         }
+        
         // 주소창 뒤의 #signal-번호를 역추적해서 해당 카드로 부드럽게 스크롤하고 반짝임 효과를 주는 함수 (오류 파괴 버전)
         function executeScrollToCard() {
             const hash = window.location.hash;
@@ -566,7 +558,7 @@
         }
 
         // 아이템 삭제
-        async function deleteItem(signal_no) {
+        async function deleteItem(e, signal_no) {
             e.stopPropagation();
             noti = noti.map(n => {
                 if (n.signal_no === signal_no) {

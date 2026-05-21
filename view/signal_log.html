@@ -309,13 +309,13 @@
                     axios.get('/signal_log?id=' + savedUserId),
                     axios.get("/noti/signal?id=" + savedUserId)
                 ]);
-
+                
                 // 2. 전체 로그 처리
                 allSignals = (signalsRes.data && signalsRes.data.data) ? signalsRes.data.data : [];
 
                 // 3. 알림용 데이터 처리 (기존 로직 + 안전장치)
                 noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
-
+                console.log(allSignals, noti);
                 // 4. 렌더링 동기화
                 applyFilterAndRender(); // allSignals 기반으로 페이지 리스트 갱신
                 updateNotifUI_Static(); // noti 기반으로 알림 뱃지 및 드롭다운 갱신
@@ -467,7 +467,7 @@
                 countText.innerText = `${unreads.length}개의 새 알림`;
             }
 
-            renderList(document.getElementById('notifList'), noti);
+            renderList(document.getElementById('notifList'), unreads);
             renderSignalLogs();
             if (window.lucide) lucide.createIcons();
         }
@@ -666,23 +666,24 @@
 
         // signal_log.html 전용 readItem (최종 마감 버전)
         async function readItem(signalNo) {
-
             try {
-                // 1. 서버 읽음 처리
+                // 1. 서버 읽음 처리 (POST 규격)
                 await axios.post("/noti/read", { "id": String(signalNo), "user_id": savedUserId });
 
-                noti = noti.map(n => String(n.signal_no) === String(signalNo) ? { ...n, is_read: 1 } : n);
-                updateNotifUI_Static();
+                // 2. 상단 알림 바 배열(noti) 실시간 동기화 (noti는 키가 signal_no임)
+                if (typeof noti !== 'undefined' && Array.isArray(noti)) {
+                    noti = noti.map(n => String(n.signal_no) === String(signalNo) ? { ...n, is_read: 1 } : n);
+                }
+                if (typeof updateNotifUI_Static === 'function') updateNotifUI_Static();
 
                 // 3. 알림창 닫기
                 const dropdown = document.getElementById('notifDropdown');
                 if (dropdown) dropdown.classList.add('hidden');
 
-                // 3. 해시 변경 (주소창에 #signal-149가 뜸)
-                window.location.hash = `#signal-${signalNo}`;
-                hasPendingScroll = true;
-                if (typeof executeScrollToCard === 'function') {
-                    executeScrollToCard();
+                // 4. 주소창 해시 변경 및 분기 처리
+                if (window.location.pathname.endsWith('signal_log.html')) {
+                    window.location.hash = `#signal-${signalNo}`;
+                    executeScrollToCard(); // 같은 페이지면 즉시 실행
                 } else {
                     window.location.href = `signal_log.html#signal-${signalNo}`;
                 }
@@ -771,113 +772,98 @@
             if (!hash || !hash.startsWith('#signal-')) return;
 
             const targetId = hash.replace('#signal-', '');
-            // 💡 [추가] 156번이 전체 데이터에는 있는지, 필터 데이터에는 없는지 확인
-            const existsInAll = allSignals.find(s => String(s.signal_no) === String(targetId));
-            const existsInFiltered = filteredSignals.find(s => String(s.signal_no) === String(targetId));
 
-            console.log("🔍 [진단] 타겟:", targetId);
-            console.log("🔍 전체 데이터에 존재?", !!existsInAll);
-            console.log("🔍 필터링 데이터에 존재?", !!existsInFiltered);
-            console.log("🔍 현재 선택된 레벨(selectedLevel):", selectedLevel);
-            // ----------------------------------------------------------------
-            // 1. 데이터가 로드될 때까지 0.1초씩 재시도 (비동기 데이터 보호)
+            // [방어선 1] 데이터가 아직 프론트에 로드되지 않았다면 0.1초 후 재시도
             if (!allSignals || allSignals.length === 0) {
                 setTimeout(executeScrollToCard, 100);
                 return;
             }
 
-            // 2. 현재 필터에 없으면 자동으로 전체 보기로 복구
+            // 🎯 [핵심 패치] 데이터 형태에 맞춰 s.id로 검사합니다!
+            const existsInAll = allSignals.find(s => String(s.id) === String(targetId));
+            const existsInFiltered = filteredSignals.find(s => String(s.id) === String(targetId));
+
+            console.log("🔍 [진단] 타겟 고유ID:", targetId);
+            console.log("🔍 전체 데이터에 존재?", !!existsInAll);
+            console.log("🔍 필터링 데이터에 존재?", !!existsInFiltered);
+
+            // [방어선 2] 전체 데이터에도 없는 ID라면 무한 루프 방지를 위해 해시 지우고 종료
+            if (!existsInAll) {
+                console.log("❌ 존재하지 않는 알림 ID입니다.");
+                history.replaceState(null, null, window.location.pathname);
+                return;
+            }
+
+            // 현재 필터링된 배열에서 인덱스 찾기 (s.id 사용)
             let targetIndex = filteredSignals.findIndex(
                 s => String(s.id) === String(targetId)
             );
 
-            // 💥 핵심 패치
+            // 2. 현재 필터(심각/주의 등)에 가려져 안 보이는 상태라면 전체 보기로 강제 복구
             if (targetIndex === -1) {
                 console.log("⚠️ 현재 필터에 없음 → 전체 보기로 자동 복구");
-
                 selectedLevel = null;
 
-                // 버튼 UI도 전체 상태로 복구
+                // 필터 버튼들 스타일 초기화
                 document.querySelectorAll('#filter-container button').forEach(btn => {
                     const btnText = btn.innerText;
-
                     if (btnText === '전체') {
-                        btn.className =
-                            "px-4 py-2 rounded-lg bg-gray-900 text-white font-bold shadow-md transition-all";
+                        btn.className = "px-4 py-2 rounded-lg bg-gray-900 text-white font-bold shadow-md transition-all";
                     } else if (btnText.includes('심각')) {
-                        btn.className =
-                            "px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors";
+                        btn.className = "px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors";
                     } else if (btnText.includes('주의')) {
-                        btn.className =
-                            "px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-colors";
+                        btn.className = "px-5 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-colors";
                     } else if (btnText.includes('안정')) {
-                        btn.className =
-                            "px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors";
+                        btn.className = "px-5 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors";
                     }
                 });
 
-                applyFilterAndRender();
+                // 데이터 필터 해제 및 화면 리렌더링
+                if (typeof applyFilterAndRender === 'function') {
+                    applyFilterAndRender();
+                }
 
-                // 다시 타겟 찾기
+                // 복구된 배열에서 다시 인덱스 서칭 (s.id 사용)
                 targetIndex = filteredSignals.findIndex(
                     s => String(s.id) === String(targetId)
                 );
             }
 
+            // 3. 페이징 계산 및 스크롤 작동
             if (targetIndex !== -1) {
                 const targetPage = Math.ceil((targetIndex + 1) / SIGNALS_PER_PAGE);
 
-                // 페이지 이동 필요 시
+                // 다른 페이지에 숨어있다면 해당 페이지로 이동 후 리렌더링
                 if (currentPage !== targetPage) {
                     currentPage = targetPage;
-                    applyFilterAndRender();
+                    if (typeof applyFilterAndRender === 'function') applyFilterAndRender();
 
+                    // DOM이 완전히 그려질 때까지 하드웨어 렌더링 스케줄링 대기
                     await new Promise(resolve =>
-                        requestAnimationFrame(() =>
-                            requestAnimationFrame(resolve)
-                        )
+                        requestAnimationFrame(() => requestAnimationFrame(resolve))
                     );
                 }
 
-                // DOM 렌더링 완료 후 카드 찾기
+                // 🎯 [체크] signal_log.html의 알림 카드 HTML 그릴 때 id가 `id="signal-${s.id}"` 형태로 되어있어야 합니다!
                 const targetCard = document.getElementById(`signal-${targetId}`);
 
                 if (targetCard) {
-
                     setTimeout(() => {
+                        // 부드럽게 스크롤 이동
+                        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                        targetCard.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'center'
-                        });
+                        // 파란색 네온 이펙트 추가
+                        targetCard.classList.add('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]', 'transition-all', 'duration-500');
 
-                        targetCard.classList.add(
-                            'ring-4',
-                            'ring-blue-500',
-                            'shadow-[0_0_25px_rgba(59,130,246,0.8)]',
-                            'transition-all',
-                            'duration-500'
-                        );
-
+                        // 2초 뒤 원상복구 및 해시 삭제로 중복 실행 차단
                         setTimeout(() => {
-                            targetCard.classList.remove(
-                                'ring-4',
-                                'ring-blue-500',
-                                'shadow-[0_0_25px_rgba(59,130,246,0.8)]'
-                            );
-
-                            history.replaceState(
-                                null,
-                                null,
-                                window.location.pathname
-                            );
-
+                            targetCard.classList.remove('ring-4', 'ring-blue-500', 'shadow-[0_0_25px_rgba(59,130,246,0.8)]');
+                            history.replaceState(null, null, window.location.pathname);
                         }, 2000);
 
                     }, 300);
-
                 } else {
-                    console.log("❌ 카드 DOM 못 찾음:", targetId);
+                    console.log("❌ 카드 DOM을 찾지 못했습니다. ID 생성 규칙을 확인하세요 :", `signal-${targetId}`);
                 }
             }
         }
@@ -908,6 +894,11 @@
             if (window.lucide) lucide.createIcons();
 
             // 🎯 페이지 로드 시 해시가 있으면 추적 스크롤 가동!
+            if (window.location.hash && window.location.hash.startsWith('#signal-')) {
+                executeScrollToCard();
+            }            
+        });
+        window.addEventListener('hashchange', () => {
             executeScrollToCard();
         });
 

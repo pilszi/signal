@@ -484,7 +484,6 @@ def logout(req: Request, db: Session = Depends(get_db)):
 @app.get('/session_out')
 def session_out(db: Session = Depends(get_db)):
     count = 0
-
     try:
         logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
                                     WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
@@ -954,7 +953,7 @@ def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
                         WHERE t1.signal_no = :signal_no AND t2.id = :id
         """)
     res = db.execute(sql, {"signal_no": info["id"], "id": info["user_id"]})
-    logger.info(f'👉 알림 확인 업데이트 완료 = {res.rowcount}개')
+    logger.info(f'👉 알림 확인 업데이트 완료 = {info["id"]}/ {res.rowcount}개')
     db.commit()
     return {"res": True}
 
@@ -978,7 +977,7 @@ def noti_raed_all(info: Dict[str, Any], db: Session = Depends(get_db)):
             AND t1.signal_no IN :signal_nos
         """)
 
-    res = db.execute(sql, {"userId": user_id, "signal_nos": signal_no_list})
+    res = db.execute(sql, {"id": user_id, "signal_nos": signal_no_list})
     logger.info(f"🧹 {user_id}의 모든 알림 읽음 처리 완료 = {res.rowcount}개")
     db.commit()
     return {"res": True}
