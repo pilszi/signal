@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import math
 import random
 import asyncio
+import time
 from typing import Dict, Any
 import traceback
 import sqlalchemy
@@ -464,18 +465,20 @@ def logout(req: Request, db: Session = Depends(get_db)):
 
 # session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
 @app.get('/session_out')
-def session_out(db: Session = Depends(get_db)):
+def session_out(req: Request, db: Session = Depends(get_db)):
     count = 0
-    try:
-        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                    WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
-        result = db.execute(logout_sql)
-        db.commit()
-        count = result.rowcount
-        logger.info(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
-    except Exception as e:
-        logger.info(f'세션만료 오류 : {e}')
-        db.rollback()
+    login_id = req.session.get('login_id')
+    if not login_id:
+        try:
+            logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
+                                        WHERE status = 1 AND login_time <= NOW() - INTERVAL 30 MINUTE""")
+            result = db.execute(logout_sql)
+            db.commit()
+            count = result.rowcount
+            logger.info(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
+        except Exception as e:
+            logger.info(f'세션만료 오류 : {e}')
+            db.rollback()
     return
 
 @app.get("/profile")
