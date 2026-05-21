@@ -526,7 +526,7 @@
         // 회원 검색 필터링 함수
         document.getElementById("searchId")
             .addEventListener("input", function () {
-
+                
                 const keyword = this.value.toLowerCase();
 
                 const filteredUsers = userData.filter(user => {
@@ -767,10 +767,10 @@
             let html = `
                 <div class="flex justify-between py-3 px-4 text-sm font-semibold text-gray-500 bg-gray-100/50">
                     <span>회원정보 알림</span><button type="button" onclick="toggleSignalList(this, 'user_list_container')" class="text-xs text-blue-500 hover:text-blue-700 font-normal focus:outline-none">
-                        접기
+                        펼치기
                     </button>
                 </div>
-                <div id="user_list_container" class="transition-all duration-300">
+                <div id="user_list_container" class="hidden transition-all duration-300">
             `;
 
             html += adminLog.map(log => `
@@ -804,10 +804,10 @@
             let html = `
                 <div class="flex justify-between py-3 px-4 text-sm font-semibold text-gray-500 bg-gray-100/50">
                     <span>시그널 알림</span><button type="button" onclick="toggleSignalList(this, 'signal_list_container')" class="text-xs text-blue-500 hover:text-blue-700 font-normal focus:outline-none">
-                        접기
+                        펼치기
                     </button>
                 </div>
-                <div id="signal_list_container" class="transition-all duration-300">
+                <div id="signal_list_container" class="hidden transition-all duration-300">
             `;
             html += warnningLog.map(log =>
                `
