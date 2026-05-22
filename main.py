@@ -238,57 +238,56 @@ async def run_analysis_and_save():
 # 1. 서버 생애주기(Lifespan) 설정
 # ==========================================
 # 서버 시작 시 순차적으로 실행될 초기화 함수 정의
-# executor = ThreadPoolExecutor(max_workers=5)
-# async def run_initial_batch(scheduler):
-#     loop = asyncio.get_event_loop()
-#     try:
-#         logger.info("🎬 [초기화 시퀀스] 1단계: 뉴스 수집 시작")
-#
-#         # 동기 수집 함수들을 스레드 풀에서 실행
-#         await loop.run_in_executor(executor, naver.run_naver_collect)
-#         await loop.run_in_executor(executor, yna.run_yna_collect)
-#         await loop.run_in_executor(executor, RSS.run_reuters_collect)
-#         await loop.run_in_executor(executor, indicator.collect_market_data_job)
-#
-#         logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행")
-#         # 수집된 데이터를 번역해서 news_origin으로 넘김
-#         await loop.run_in_executor(executor, translator_worker.process_translation)
-#
-#         logger.info("🎬 [초기화 시퀀스] 3단계: 분석 및 저장 가동")
-#         await run_analysis_and_save()
-#
-#         logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
-#     except Exception as e:
-#         logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
-#
-#
-# # 실행시킬 스케줄러 함수
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
-#     global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
-#     global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
-#     global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
-#     global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
-#     global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
-#     global_scheduler.add_job(run_analysis_and_save,'interval',minutes=10,id='ml_analysis',max_instances=1,replace_existing=True)
-#     # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
-#     asyncio.create_task(run_initial_batch(global_scheduler))
-#
-#     global_scheduler.start()
-#     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
-#
-#     yield
-#
-#     # --- 서버 종료 시 정리 로직 ---
-#     logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")
-#     global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
-#     executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
+executor = ThreadPoolExecutor(max_workers=5)
+async def run_initial_batch(scheduler):
+    loop = asyncio.get_event_loop()
+    try:
+        logger.info("🎬 [초기화 시퀀스] 1단계: 뉴스 수집 시작")
+
+        # 동기 수집 함수들을 스레드 풀에서 실행
+        await loop.run_in_executor(executor, naver.run_naver_collect)
+        await loop.run_in_executor(executor, yna.run_yna_collect)
+        await loop.run_in_executor(executor, RSS.run_reuters_collect)
+        await loop.run_in_executor(executor, indicator.collect_market_data_job)
+
+        logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행")
+        # 수집된 데이터를 번역해서 news_origin으로 넘김
+        await loop.run_in_executor(executor, translator_worker.process_translation)
+
+        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 및 저장 가동")
+        await run_analysis_and_save()
+
+        logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
+    except Exception as e:
+        logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
+
+
+# 실행시킬 스케줄러 함수
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
+    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
+    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
+    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
+    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
+    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
+    global_scheduler.add_job(run_analysis_and_save,'interval',minutes=10,id='ml_analysis',max_instances=1,replace_existing=True)
+    # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
+    asyncio.create_task(run_initial_batch(global_scheduler))
+
+    global_scheduler.start()
+    logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
+
+    yield
+
+    # --- 서버 종료 시 정리 로직 ---
+    logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")
+    global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
+    executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
 
 
 # FastAPI 앱 초기화
-# app = FastAPI(lifespan=lifespan)
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 # 페이지 새로고침 할 때마다 max_age 초기화
 @app.middleware("http")
 async def extend_session_max_age(req: Request, call_next):
