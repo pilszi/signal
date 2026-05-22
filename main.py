@@ -238,58 +238,57 @@ async def run_analysis_and_save():
 # 1. 서버 생애주기(Lifespan) 설정
 # ==========================================
 # 서버 시작 시 순차적으로 실행될 초기화 함수 정의
-executor = ThreadPoolExecutor(max_workers=5)
-async def run_initial_batch(scheduler):
-    loop = asyncio.get_event_loop()
-    try:
-        logger.info("🎬 [초기화 시퀀스] 1단계: 뉴스 수집 시작")
-
-        # 동기 수집 함수들을 스레드 풀에서 실행
-        await loop.run_in_executor(executor, naver.run_naver_collect)
-        await loop.run_in_executor(executor, yna.run_yna_collect)
-        await loop.run_in_executor(executor, RSS.run_reuters_collect)
-        await loop.run_in_executor(executor, indicator.collect_market_data_job)
-
-        logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행")
-        # 수집된 데이터를 번역해서 news_origin으로 넘김
-        await loop.run_in_executor(executor, translator_worker.process_translation)
-
-        logger.info("🎬 [초기화 시퀀스] 3단계: 분석 및 저장 가동")
-        await run_analysis_and_save()
-
-        logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
-    except Exception as e:
-        logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
-
-
-# 실행시킬 스케줄러 함수
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
-    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
-    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
-    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
-    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
-    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
-    global_scheduler.add_job(run_analysis_and_save,'interval',minutes=10,id='ml_analysis',max_instances=1,replace_existing=True)
-    # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
-    asyncio.create_task(run_initial_batch(global_scheduler))
-
-    global_scheduler.start()
-    logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
-
-    yield
-
-    # --- 서버 종료 시 정리 로직 ---
-    logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")
-    global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
-    executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
+# executor = ThreadPoolExecutor(max_workers=5)
+# async def run_initial_batch(scheduler):
+#     loop = asyncio.get_event_loop()
+#     try:
+#         logger.info("🎬 [초기화 시퀀스] 1단계: 뉴스 수집 시작")
+#
+#         # 동기 수집 함수들을 스레드 풀에서 실행
+#         await loop.run_in_executor(executor, naver.run_naver_collect)
+#         await loop.run_in_executor(executor, yna.run_yna_collect)
+#         await loop.run_in_executor(executor, RSS.run_reuters_collect)
+#         await loop.run_in_executor(executor, indicator.collect_market_data_job)
+#
+#         logger.info("🎬 [초기화 시퀀스] 2단계: 번역 작업 수행")
+#         # 수집된 데이터를 번역해서 news_origin으로 넘김
+#         await loop.run_in_executor(executor, translator_worker.process_translation)
+#
+#         logger.info("🎬 [초기화 시퀀스] 3단계: 분석 및 저장 가동")
+#         await run_analysis_and_save()
+#
+#         logger.info("✅ [초기화 시퀀스] 모든 공정(수집-번역-분석) 완료!")
+#     except Exception as e:
+#         logger.error(f"❌ 초기화 시퀀스 중 오류 발생: {e}")
+#
+#
+# # 실행시킬 스케줄러 함수
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
+#     global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
+#     global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
+#     global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
+#     global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
+#     global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
+#     global_scheduler.add_job(run_analysis_and_save,'interval',minutes=10,id='ml_analysis',max_instances=1,replace_existing=True)
+#     # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
+#     asyncio.create_task(run_initial_batch(global_scheduler))
+#
+#     global_scheduler.start()
+#     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
+#
+#     yield
+#
+#     # --- 서버 종료 시 정리 로직 ---
+#     logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")
+#     global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
+#     executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
 
 
 # FastAPI 앱 초기화
-app = FastAPI(lifespan=lifespan)
-# 세션 유지 시간 30분으로 연장
-app.add_middleware(SessionMiddleware, secret_key="secret", max_age=1800)
+# app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 # 페이지 새로고침 할 때마다 max_age 초기화
 @app.middleware("http")
 async def extend_session_max_age(req: Request, call_next):
@@ -475,23 +474,22 @@ def logout(req: Request, db: Session = Depends(get_db)):
 # session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
 @app.get('/session_out')
 def session_out(req: Request, db: Session = Depends(get_db)):
-    count = 0
+    try:
+        logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
+                                        WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
+        result = db.execute(logout_sql)
+        db.commit()
+        count = result.rowcount
+        logger.info(f'세션만료 1시간이 지나 로그아웃 처리한 계정 갯수 = {count}')
+    except Exception as e:
+        logger.info(f'세션만료 오류 : {e}')
+        db.rollback()
     login_id = req.session.get('login_id')
     if not login_id:
-        try:
-            logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
-                                        WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
-            result = db.execute(logout_sql)
-            db.commit()
-            count = result.rowcount
-            logger.info(f'1시간이 지나 로그아웃 된 계정 갯수 = {count}')
-            logger.info(f'세션만료 1시간이 지나 로그아웃 처리한 계정 갯수 = {count}')
-        except Exception as e:
-            logger.info(f'세션만료 오류 : {e}')
-            db.rollback()
-    return
+        return {"res": True}
     else:
         return {"res": False}
+
 
 @app.get("/profile")
 def get_profile(id: str, db: Session = Depends(get_db)):
@@ -685,7 +683,7 @@ def country(db: Session = Depends(get_db)):
                 END
                 AND 
                 t2.signal_time < CASE 
-                WHEN HOUR(NOW()) >= 12 THEN CURDATE() + INTERVAL 12 HOUR    -- 오늘 오후라면 오늘 정오까지
+                WHEN HOUR(NOW()) >= 12 THEN CURDATE() + INTERVAL 12 HOUR        -- 오늘 오후라면 오늘 정오까지
                     ELSE CURDATE()                                              -- 오늘 오전이라면 오늘 자정까지
                 END
             GROUP BY t1.country_no, t3.country_en_name
@@ -1102,7 +1100,7 @@ def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
     sql = sqlalchemy.text("""SELECT id, create_at FROM member_info WHERE user_name = :name AND email = :email""")
     res = db.execute(sql, {"name": info["name"], "email": info["email"]}).mappings().fetchall()
     # logger.info(f'id 찾기 결과 = {res}')
-    save_admin_log(db=db, log_type='find', title='아이디 요청', content=f'아이디 찾기 요청 : {info["name"]}')
+    save_admin_log(db=db, log_type='find', title='아이디 요청', content=f'{info["name"]} 님의 아이디 찾기 요청')
     return {"res": res}
 
 
@@ -1128,7 +1126,7 @@ async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depe
         db=db,
         log_type='find',
         title='비밀번호 요청',
-        content=f'비밀번호 찾기 인증코드 요청 : {user_id}',
+        content=f'{user_id} 님의 비밀번호 찾기 인증코드 요청',
         target_id=user_id
     )
 
@@ -1221,7 +1219,7 @@ async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends
                 db=db,
                 log_type='find',
                 title='비밀번호 변경 완료',
-                content=f'비밀번호 재설정 최종 성공 : {user_id}',
+                content=f'비밀번호 재설정 최종 성공',
                 target_id=user_id,
                 before_data={"비밀번호": "보안상 조회 불가"},
                 after_data={"비밀번호": "변경완료"}
@@ -1309,7 +1307,10 @@ def login_log(id:str, db: Session = Depends(get_db)):
 @app.get("/admin/admin_log")
 def admin_log(db: Session = Depends(get_db)):
     """ 최근 7일간의 신규 회원 생성 및 탈퇴, 정보 수정 내역 알림 로그 """
-    sql = sqlalchemy.text("""SELECT * FROM admin_logs WHERE created_at >= NOW() - INTERVAL 7 DAY ORDER BY created_at DESC""")
+    sql = sqlalchemy.text("""SELECT
+                                log_id ,title ,target_id ,log_type
+                                ,content ,before_data ,after_data ,created_at
+                            FROM admin_logs WHERE created_at >= NOW() - INTERVAL 7 DAY ORDER BY created_at DESC""")
     res = db.execute(sql).mappings().fetchall()
     logger.info(res)
     return {"res": res}

@@ -316,7 +316,7 @@
                                         </div>
 
                                         <div>
-                                            <div class="text-gray-500">제목</div>
+                                            <div class="text-gray-500">로그 타입</div>
                                             <div id="detail_title" class="font-medium"></div>
                                         </div>
 
@@ -423,9 +423,9 @@
         let userData = [];
         let currentLogPage = 1;
         const logPerPage = 10;
-        let allLogs = [];
-        let adminLog = [];
-        let warnningLog = [];
+        let loginLogs = [];
+        let adminLogs = [];
+        let warnningLogs = [];
 
         document.addEventListener('DOMContentLoaded', async () => {
             axios.get("/session_out");
@@ -439,9 +439,15 @@
         });
 
         async function fetchMainData() {
-            let {data}= await axios.get("/admin/user_list");
-            userData = data.user;
-            console.log(userData);
+            const [userInfo, signalLog, userLog] = await Promise.all([
+                    axios.get("/admin/user_list"),
+                    axios.get("/admin/alarm_log"),
+                    axios.get("/admin/admin_log")
+                ]);
+            userData = userInfo.data.user;
+            warnningLogs = signalLog.data.res;
+            adminLogs =  userLog.data.res;
+            console.log(userData, warnningLogs, adminLogs);
         }
 
         // Navbar 상태 업데이트
@@ -759,9 +765,9 @@
 
         // 회원 알림 로그
         async function admin_log() {
-            const {data} = await axios.get("/admin/admin_log");
-            console.log(data.res);
-            adminLog = data.res;
+            // const {data} = await axios.get("/admin/admin_log");
+            // console.log(data.res);
+            // adminLog = data.res;
             const user_log = document.getElementById('user_log');
 
             let html = `
@@ -773,10 +779,10 @@
                 <div id="user_list_container" class="hidden transition-all duration-300">
             `;
 
-            html += adminLog.map(log => `
+            html += adminLogs.map(log => `
                 <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors" onclick='showLogDetail(${log.log_id})'>
                     <div class="flex justify-between items-start">
-                        <h4 class="font-bold text-[17px] text-gray-900">${log.title}</h4>
+                        <h4 class="font-bold text-[17px] text-gray-900">${log.log_type}</h4>
                         <span class="text-sm text-gray-400 font-normal">${timeAgo(log.created_at)}</span>
                     </div>
                     <p class="text-gray-600 mt-1 text-[15px]">
@@ -790,9 +796,9 @@
         }
 
         async function signalLog () {
-            const {data} = await axios.get("/admin/alarm_log");
-            console.log(data.res);
-            warnningLog = data.res;
+            // const {data} = await axios.get("/admin/alarm_log");
+            // console.log(data.res);
+            // warnningLog = data.res;
             const signal_log = document.getElementById('signal_log');
 
             const riskMap = {
@@ -809,7 +815,7 @@
                 </div>
                 <div id="signal_list_container" class="hidden transition-all duration-300">
             `;
-            html += warnningLog.map(log =>
+            html += warnningLogs.map(log =>
                `
                 <div class="p-4 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-100 last:border-none" onclick='signalDetail(${log.signal_no})'>
                     <div class="flex justify-between items-start">
@@ -827,11 +833,11 @@
         
         // 로그 상세보기(팝업) 함수
         function showLogDetail(log_id) {
-            const log = adminLog.find(x => x.log_id === log_id);
+            const log = adminLogs.find(x => x.log_id === log_id);
 
             // 기본 텍스트 정보 매칭
             document.getElementById("detail_id").textContent = log.target_id || "-";
-            document.getElementById("detail_title").textContent = log.title || "-";
+            document.getElementById("detail_title").textContent = log.log_type || "-";
             document.getElementById("detail_content").textContent = log.content || "-";
             document.getElementById("detail_created_at").textContent = log.created_at || "-";   
 
@@ -952,7 +958,7 @@
 
         // signal 알림 상세보기 함수
         function signalDetail(signal) {
-            const log = warnningLog.find(x => x.signal_no === signal)
+            const log = warnningLogs.find(x => x.signal_no === signal)
             const userNoEl = document.getElementById("user_no");
             const moreBtnEl = document.getElementById("more_btn");
 

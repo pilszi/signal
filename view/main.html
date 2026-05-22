@@ -463,9 +463,6 @@
 
         // 페이지 오픈시 실행
         document.addEventListener('DOMContentLoaded', async() => {
-            const isUserValid = await checkSession();
-            if (!isUserValid) return;
-
             // 현재 브라우저의 파일명만 추출
             const currentPath = window.location.pathname.split("/").pop() || "main.html";
             const navItems = document.querySelectorAll('.nav-item');
@@ -490,6 +487,7 @@
             await fetchMainData();
             // 4. 상단 알림 데이터 가져오기
             await updateNotifUI();
+            await checkSession();
 
             // 5. 나머지 ui
             updateNavbar();
@@ -969,8 +967,6 @@
             renderPagination();
         }
 
-
-
         // 검색어 초기화 함수
         function resetFilters() {
             searchQuery = '';
@@ -1258,10 +1254,7 @@
             initCalendar();
         }
 
-
-
         function selectDate(day) {
-
             const year = calendarMonth.getFullYear();
             const month = String(calendarMonth.getMonth() + 1).padStart(2, '0');
             const date = String(day).padStart(2, '0');
@@ -1315,17 +1308,13 @@
         function renderPagination() {
             let targetData = [];
             const isFilterActive = (searchQuery || startDate || endDate || selectedCountry);
-
             if (isFilterActive) {
                 targetData = filteredNews;
             }else{
                 targetData = allSignals
             }
-
-
             const paginationContainer = document.getElementById('pagination');
             if (!paginationContainer) return;
-
             // URL 기준 중복 제거
             const uniqueSignals = Array.from(
                 new Map(targetData.map(item => [item.url, item])).values()
@@ -1336,13 +1325,11 @@
                 paginationContainer.innerHTML = '';
                 return;
             }
-
             let html = `
                 <button onclick="handlePageChange(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
                     <i data-lucide="chevron-left" class="w-5 h-5"></i>
                 </button>
             `;
-
             for (let i = 1; i <= totalPages; i++) {
                 html += `
                     <button onclick="handlePageChange(${i})" class="px-4 py-2 rounded-lg border ${currentPage === i ? 'bg-blue-600 text-white' : 'hover:bg-gray-50'}">
@@ -1350,41 +1337,33 @@
                     </button>
                 `;
             }
-
             html += `
                 <button onclick="handlePageChange(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
                     <i data-lucide="chevron-right" class="w-5 h-5"></i>
                 </button>
             `;
-
             paginationContainer.innerHTML = html;
             lucide.createIcons(); // 아이콘 재생성
         }
 
         // 이벤트 핸들러
         function handlePageChange(page) {
-
             let targetData;
-
             // 필터 활성 여부 확인
             const isFilterActive =
                 searchQuery || startDate || endDate || selectedCountry;
-
             // 필터가 켜져 있으면 filteredNews 사용
             if (isFilterActive) {
                 targetData = filteredNews;
             } else {
                 targetData = allSignals;
             }
-
             // URL 기준 중복 제거
             const uniqueSignals = Array.from(
                 new Map(targetData.map(item => [item.url, item])).values()
             );
-
             const totalPages = Math.ceil(uniqueSignals.length / SIGNALS_PER_PAGE);
             if (page < 1 || page > totalPages) return;
-
             currentPage = page;
             renderNews();
             renderPagination();
@@ -1392,9 +1371,9 @@
         }
 
         async function checkSession() {
-            const wasLoggedIn = sessionStorage.getItem('savedUserId');
-            if (!wasLoggedIn) {
-                return true;
+            const currentUserId = sessionStorage.getItem('savedUserId');
+            if (!currentUserId) {
+                return true; 
             }
             try {
                 let { data } = await axios.get("/session_out");
@@ -1413,17 +1392,11 @@
                             location.reload();
                         });
                     }
-                    return false;
                 }
-                return true;
             } catch (error) {
                 console.error("세션 서버 통신 중 에러 발생:", error);
-                return true;
             }
         }
-
-            if (window.lucide) lucide.createIcons();
-        });
 
         async function handleLogout() {
             showModal("로그아웃 하시겠습니까?", "confirm", async () => {
