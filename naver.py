@@ -7,7 +7,7 @@ import logging
 import html
 from utils import find_target_country, extract_keywords, generate_article_id
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from elasticsearch import Elasticsearch
 import random
 from dateutil import parser as date_parser
@@ -33,6 +33,7 @@ def bulk_search_naver_news():
     newly_saved = 0
     already_exists = 0
     tasks = []  # 상세 수집 대상 기사들을 담을 리스트
+    start_date_obj = (datetime.now() - timedelta(days=2))
 
     # 전략 키워드 중 랜덤하게 일부만 선택 (API 할당량 및 속도 관리)
     all_flat_keywords = [kw for sublist in Config.STRATEGIC_KEYWORDS.values() for kw in sublist]
@@ -95,16 +96,20 @@ def bulk_search_naver_news():
 
                 # 날짜 필터링
                 raw_pub_date = item.get('pubDate', '').strip()
-
                 # 1차 문자열 필터
                 if "2026" not in raw_pub_date:
                     continue
 
                 # 2차 날짜 필터링
                 try:
-                    dt_obj = date_parser.parse(item['pubDate'], fuzzy=True)
+                    dt_obj = date_parser.parse(raw_pub_date, fuzzy=True)
 
-                    if dt_obj.year < 2026:
+                    if dt_obj.tzinfo is not None and start_date_obj.tzinfo is None:
+                        start_date_obj = start_date_obj.replace(tzinfo=dt_obj.tzinfo)
+                    elif dt_obj.tzinfo is None and start_date_obj.tzinfo is not None:
+                        dt_obj = dt_obj.replace(tzinfo=start_date_obj.tzinfo)
+
+                    if dt_obj < start_date_obj:
                         continue
 
                     # 재사용 위해 저장

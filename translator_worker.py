@@ -17,6 +17,7 @@ from utils import extract_keywords, find_target_country, generate_article_id
 # pytz를 지우고 zoneinfo를 사용합니다. (Python 3.9+ 표준)
 from zoneinfo import ZoneInfo
 from datetime import timezone
+import pytz
 
 # 로그 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -26,13 +27,13 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 okt = Okt()
 es = Elasticsearch(
-    ["http://localhost:9200"],
+    ["http://100.123.232.79:9200"],
     request_timeout=30,
     retry_on_timeout=True
 )
 
-TARGET_INDICES = ["news_en1000"]
-DEST_INDEX = "news_origin1000"
+TARGET_INDICES = ["news_en"]
+DEST_INDEX = "news_origin"
 
 
 def translate_chunk(chunk):
@@ -205,10 +206,6 @@ def process_translation():
         if not found_job_in_this_turn:
             logging.info("모든 번역 작업이 완료되었습니다.")
             return
-
-
-
-
 
 if __name__ == "__main__":
     process_translation()

@@ -5,7 +5,7 @@ import traceback
 from elasticsearch import Elasticsearch, helpers
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 from selenium.webdriver.chromium.options import ChromiumOptions
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -145,7 +145,7 @@ def article_crawling(driver, p: int, keyword):
     article_list = []
     es = get_es()  # 중복 체크용
 
-    start_date = "20260101"
+    start_date = (datetime.now() - timedelta(days=2)).strftime("%Y%m%d")
     end_date = datetime.now().strftime("%Y%m%d")
     url = (
         f'https://www.yna.co.kr/search/index'

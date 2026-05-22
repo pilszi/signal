@@ -488,7 +488,7 @@ async def run_analysis():
             indicator_stats[i] = 1.0
 
     # [STEP 2] ES에서 미처리 뉴스 가져오기
-    search_query = {"query": {"term": {"is_processed": False}}, "size": 20}
+    search_query = {"query": {"term": {"is_processed": False}}, "size": 150}
     raw_news = es.search(index="news_origin", body=search_query)
     docs = raw_news['hits']['hits']
     logger.info(f"📰 [ES] 분석 대기 중인 신규 기사: {len(docs)}건 발견")
@@ -733,7 +733,7 @@ async def run_analysis():
 
         # [E] 최종 가두기 및 등급 판정
         total = max(0.0, min(1.0, total))
-        risk_lv = "심각" if total <= 0.25 else "주의" if total <= 0.63 else "안정"
+        risk_lv = "심각" if total <= 0.16 else "주의" if total <= 0.63 else "안정"
         # ----------------------------------------------------------
         # 제미나이 리포트
         try:
@@ -768,8 +768,7 @@ async def run_analysis():
             "url": data.get('url', ''),
             "press_name": data.get('press_name', ''),
             "main_image": data.get('main_image', ''),
-            "prediction": ai_rep['prediction'],
-            "prediction_result": ai_rep.get('prediction', '분석 결과 생성 중입니다.'),
+            "prediction": ai_rep.get('prediction', '분석 결과 생성 중입니다.'),
             "prediction_reason": ai_rep.get('reason', '세부 분석 내용을 생성할 수 없습니다.'),
             "risk_level": risk_lv,
             "debug_text": balanced_text, # 모델이 분석하는 본문
@@ -777,7 +776,7 @@ async def run_analysis():
                 "total": round(total, 4),
                 "sentiment_score": round(final_sent_score, 4),
                 "exchange_score": float(ex_score),
-                "exchange_details": exchange_prices,
+                # "exchange_details": exchange_prices,
                 "raw_material_score": {
                     "gold": float(indicator_stats.get(5, 1.0)),
                     "silver": float(indicator_stats.get(6, 1.0)),

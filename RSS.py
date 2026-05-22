@@ -1,8 +1,5 @@
 import time
 import random
-import re
-import datetime
-import json
 import hashlib
 import sys
 import logging
@@ -34,7 +31,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from bs4 import BeautifulSoup
 from utils import get_real_url
 from zoneinfo import ZoneInfo
-from datetime import timezone, timedelta
+from datetime import timezone, timedelta, datetime
 
 # --- 1. 초기 설정 및 최적화된 소스 ---
 
@@ -105,7 +102,8 @@ def run_reuters_collect():
 def crawl_job(keywords):
     logging.info("🌍 [GLOBAL-RSS] === 글로벌 뉴스 수집 프로세스 시작 ===")
     link_data = {}
-
+    start_date_obj = datetime.now() - timedelta(days=2)
+    logging.info(start_date_obj)
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
@@ -118,8 +116,19 @@ def crawl_job(keywords):
                 try:
                     dt_obj = date_parser.parse(str(raw_pub_date), fuzzy=True)
 
-                    if dt_obj.year < 2026:
+                    # timezone 없는 데이터는 폐기
+                    if dt_obj.tzinfo is None:
+                        logging.warning(f"⚠️ timezone 없는 RSS 기사 스킵: {raw_pub_date}")
                         continue
+
+                    dt_utc = dt_obj.astimezone(timezone.utc)
+
+                    start_utc = datetime.now(timezone.utc) - timedelta(days=2)
+
+                    if dt_utc < start_utc:
+                        continue
+
+                    entry['parsed_pub_date'] = dt_utc
 
                 except Exception as e:
                     logging.warning(f"⚠️ RSS 날짜 파싱 실패: {raw_pub_date} | {e}")
