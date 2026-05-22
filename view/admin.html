@@ -665,22 +665,23 @@
             const pagedLogs = allLogs.slice(startIndex, endIndex);
 
             let html = `
-                <div class="flex justify-between py-3 border-b text-sm font-semibold text-gray-500">
-                    <span>로그인</span>
-                    <span>로그아웃</span>
-                    <span>IP</span>
+                <div class="grid grid-cols-3 py-1 border-b text-sm font-semibold text-gray-500">
+                    <span class="text-left">로그인</span>
+                    <span class="text-center">로그아웃</span>
+                    <span class="text-right">IP</span>
                 </div>
-            `;
+            `;  
 
+            // [수정] 데이터 행도 헤더와 완벽히 일치하는 그리드 구조를 가집니다.
             html += pagedLogs.map(log => `
-                        <div class="flex justify-between py-0.5 border-b text-sm">
-                            <span>${log.login_time}</span>
-                            <span>${log.logout_time || '<span class="text-blue-500 font-bold text-[12px]">접속중</span>'}</span>
-                            <span class="text-gray-500">${log.login_ip}</span>
-                        </div>
-                    `).join("");
+                <div class="grid grid-cols-3 py-0.1 border-b text-sm items-center">
+                    <span class="text-left text-gray-700">${log.login_time}</span>
+                    <span class="text-center">${log.logout_time || '<span class="text-blue-500 font-bold text-[12px]">접속중</span>'}</span>
+                    <span class="text-right text-gray-500 font-mono">${log.login_ip}</span>
+                </div>
+            `).join("");
 
-                    // 3. 페이지네이션 컨트롤(버튼) 추가
+            // 3. 페이지네이션 컨트롤(버튼) 추가 (기존 구조 유지)
             const totalPages = Math.ceil(allLogs.length / logPerPage);
             
             html += `
