@@ -1061,7 +1061,7 @@
             }
             try {
                 let { data } = await axios.get("/session_out");
-                console.log("세션 체크 결과:", data);
+                // console.log("세션 체크 결과:", data);
                 if (data && data.res) {
                     sessionStorage.removeItem('savedUserId');
                     showModal("유효시간 만료로 로그아웃 되었습니다.", 'error');                    
