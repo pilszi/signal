@@ -196,14 +196,17 @@
                 </div>
             </div>
         </div>
-        <nav class="border-b bg-white sticky top-0 z-50">
+        <nav class="border-b bg-white sticky top-0 z-50 w-full min-w-[840px]">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-between items-center h-20">
                     <div class="flex items-center gap-8">
+                        <!-- href에서 / 제거 -->
                         <a href="main.html" class="flex items-center gap-2">
-                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Signal</span>
+                            <span class="font-bold text-3xl bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent pb-1">
+                                Signal
+                            </span>
                         </a>
-                        <div class="hidden md:flex gap-1">
+                        <div class="flex gap-1 flex-shrink-0">
                             <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
                             <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
                             <a href="signal_log.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">시그널 로그</a>
@@ -222,8 +225,8 @@
                                     <span class="header-count" id="notifCountText"></span>
                                 </div>
                                 <div id="notifList"></div>
-                            </div>
                         </div>
+                    </div>
                         <a href="profile.html" class="nav-item p-2 rounded-lg hover:bg-gray-100 text-blue-600"><i data-lucide="user" class="w-5 h-5"></i></a>
                         <div id="authContainer"></div>
                     </div>
@@ -287,8 +290,6 @@
                 noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
                 console.log(allSignals, noti);
                 // 4. 렌더링 동기화
-                applyFilterAndRender(); // allSignals 기반으로 페이지 리스트 갱신
-                updateNotifUI_Static(); // noti 기반으로 알림 뱃지 및 드롭다운 갱신
 
             } catch (error) {
                 // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
@@ -328,7 +329,7 @@
             const startIndex = (currentPage - 1) * SIGNALS_PER_PAGE;
             const currentSignals = filteredSignals.slice(startIndex, startIndex + SIGNALS_PER_PAGE);
 
-            if (currentSignals.length === 0) {
+            if (!currentSignals || currentSignals.length === 0) {
                 listContainer.innerHTML = `
                     <div class="bg-white p-20 rounded-xl text-center text-gray-400 border border-dashed">
                         일치하는 시그널 로그가 없습니다.
@@ -383,41 +384,34 @@
             if (window.lucide) lucide.createIcons();
     }
 
-
         // 7. 알림 UI 업데이트 (데이터 호출 없이 UI만 갱신)
         function updateNotifUI_Static() {
-            // 💡 1. 로그인 상태 확인 (비회원 예외 처리)
+            const badge = document.getElementById('notifBadge');
+            const list = document.getElementById('notifList');
+            const countText = document.getElementById('notifCountText');
             if (!savedUserId || savedUserId === "guest" || savedUserId === "null" || savedUserId === "undefined") {
                 console.log("로그인되지 않음, 데이터 동기화 생략");
                 return;
             }
-            
-            // 🛠️ [초정밀 방어선] 데이터가 가동되기 전 루프가 빗겨 맞더라도 에러 튕김을 원천 차단합니다.
+
             if (!noti || !Array.isArray(noti)) {
                 noti = [];
             }
-
-            const badge = document.getElementById('notifBadge');
-
-            // 이제 noti가 무조건 배열임이 보장되므로 .filter()가 절대 죽지 않습니다.
             const unreads = noti.filter(n => !n.is_read);
 
+            // 새 알림이 있을 때만 배지 표시
             if (unreads.length > 0) {
-                if (badge) {
-                    badge.innerText = unreads.length;
-                    badge.style.display = 'flex';
-                }
+                badge.innerText = unreads.length;
+                badge.style.display = 'flex'; // 로그인 + 새 알림 있음 -> 표시
             } else {
-                if (badge) badge.style.display = 'none';
+                badge.style.display = 'none'; // 로그인 + 새 알림 없음 -> 숨김
             }
 
-            const countText = document.getElementById('notifCountText');
-            if (countText) {
-                countText.innerText = `${unreads.length}개의 새 알림`;
-            }
+            // 드롭다운 내부 문구 업데이트
+            countText.innerText = `${unreads.length}개의 새 알림`;
 
-            renderList(document.getElementById('notifList'), unreads);
-            if (window.lucide) lucide.createIcons();
+            // 알림 리스트 렌더링 로직 (기존과 동일)
+            renderList(list, noti);
         }
 
         // HTML과 연결되는 유일한 필터 함수
@@ -552,17 +546,16 @@
         // 2. 알림 드롭다운 카드 내부 디자인 렌더링
         function renderList(container, notiList) {
             if (!container) return;
-
-            if (notiList.length === 0) {
-                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
+            if (!notiList || notiList.length === 0) {
+                container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
+                // 스크롤바 설정
                 container.style.maxHeight = 'none';
                 container.style.overflowY = 'visible';
                 return;
             }
-
-            // 알림이 5개 이상 쌓일 때만 내부 스크롤바 활성화하여 레이아웃 붕괴 방지
+            // signal noti 스크롤바 설정(noti가 5개 이상일 때만 생성)
             if (notiList.length >= 5) {
-                container.style.maxHeight = '420px';
+                container.style.maxHeight = '450px'; // 5개 정도가 보일 적당한 높이
                 container.style.overflowY = 'auto';
             } else {
                 container.style.maxHeight = 'none';
@@ -570,17 +563,20 @@
             }
 
             container.innerHTML = notiList.map(n => {
+                // 1. 아이콘을 담을 변수 선언
+                let iconTag = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+                // 🔥  유형별 아이콘 및 스타일 설정
                 let icon = "bell";
                 let iconColor = "text-gray-400";
                 let bgColor = "bg-gray-100";
 
-                // 위험 수위가 '심각'인 비상용 시그널 처리
                 if (n.type === 'emergency') {
-                    icon = "alert-triangle";
-                    iconColor = "text-red-500";
-                    bgColor = "bg-red-50";
+                    icon = "alert-triangle"; iconColor = "text-red-500"; bgColor = "bg-red-50";
+                } else {
+                    icon = "user"; iconColor = "text-gray-600"; bgColor = "bg-gray-200";
                 }
 
+                // 3. 생성된 iconTag를 템플릿 리터럴에 삽입
                 return `
                     <div class="notif-item p-4 border-b flex gap-3 relative hover:bg-gray-50 transition-colors ${n.is_read ? '' : 'unread'}"
                          onclick="readItem(${n.signal_no})">
@@ -642,56 +638,18 @@
 
         // [세 페이지 공통] 타입 미스매치 버그가 완벽 해결된 실시간 삭제 카운터 함수
         async function deleteItem(e, signal_no) {
-            // 1. 부모 박스 클릭 이벤트 전파 차단
             e.stopPropagation();
-
-            // 2. 화면에서 카드 레이아웃 즉시 파기
-            const targetItem = e.target.closest('.notif-item');
-            if (targetItem) {
-                targetItem.remove();
-            }
-
-            noti = noti.filter(
-                n => String(n.signal_no) !== String(id)
-            );
-
-            // 4. 안 읽은 알림 수 재계산
-            const unreads = noti.filter(n => !n.is_read);
-
-            // 5. 알림창 드롭다운 헤더 텍스트 실시간 동기화 ("X개의 새 알림")
-            const countText = document.getElementById('notifCountText');
-            if (countText) {
-                countText.innerText = `${unreads.length}개의 새 알림`;
-            }
-
-            // 6. 종 모양 배지 숫자 실시간 동기화
-            const badge = document.getElementById('notifBadge');
-            if (badge) {
-                if (unreads.length > 0) {
-                    badge.innerText = unreads.length;
-                    badge.style.display = 'flex';
+            noti = noti.map(n => {
+                if (n.signal_no === signal_no) {
+                    // ID가 일치하면 읽음 처리된 복사본 반환
+                    return { ...n, is_read: 1 };
                 } else {
-                    badge.style.display = 'none'; // 0개가 되면 빨간 배지 숨김
+                    // ID가 일치하지 않으면 기존 데이터 그대로 반환
+                    return n;
                 }
-            }
-
-            // 7. 알림판에 더 이상 남은 기사가 없을 때 안내 텍스트 출력
-            const listContainer = document.getElementById('notifList');
-            if (listContainer) {
-                const remainingItems = listContainer.querySelectorAll('.notif-item');
-                if (remainingItems.length === 0) {
-                    listContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af; font-size: 13px;">새로운 알림이 없습니다.</div>';
-                    listContainer.style.maxHeight = 'none';
-                    listContainer.style.overflowY = 'visible';
-                }
-            }
-
-            // 9. 백엔드 데이터베이스 소프트 하이드 상태 변경 (백그라운드 처리)
-            try {
-                await axios.post("/noti/read", { "id": signal_no, "user_id": savedUserId });
-            } catch (err) {
-                console.error("알림 숨김 처리 서버 통신 에러:", err);
-            }
+            });
+            await axios.post("/noti/read", {"signal_no": signal_no, "user_id": savedUserId});
+            updateNotifUI();
         }
 
         // 5. 하단 모두 읽음 버튼 클릭 시: 비동기 POST 일괄 확인 완료 처리
@@ -834,7 +792,7 @@
             }
             try {
                 let { data } = await axios.get("/session_out");
-                console.log("세션 체크 결과:", data);
+                // console.log("세션 체크 결과:", data);
                 if (data && data.res) {
                     sessionStorage.removeItem('savedUserId');
                     showModal("유효시간 만료로 로그아웃 되었습니다.", 'error');                    
@@ -878,6 +836,8 @@
                 executeScrollToCard();
             }           
             await refreshAllData();
+            applyFilterAndRender();
+            updateNotifUI_Static();
             updateNavbar();
         });
 

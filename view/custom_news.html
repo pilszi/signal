@@ -185,7 +185,7 @@
             </div>
         </div>
     <!-- Navbar -->
-    <nav class="border-b bg-white sticky top-0 z-50">
+    <nav class="border-b bg-white sticky top-0 z-50 w-full min-w-[840px]">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
                 <div class="flex items-center gap-8">
@@ -195,8 +195,8 @@
                             Signal
                         </span>
                     </a>
-                    
-                    <div class="hidden md:flex gap-1">
+
+                    <div class="flex gap-1 flex-shrink-0">
                         <!-- 상대 경로 적용 -->
                         <a href="main.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">글로벌 현황</a>
                         <a href="custom_news.html" class="nav-item px-4 py-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 font-medium">맞춤형 뉴스</a>
@@ -212,12 +212,8 @@
                         <!-- 요청하신 스타일(rounded-lg, hover, text-blue-600)을 클래스에 반영 -->
                         <button class="notif-trigger rounded-lg hover:bg-gray-100 text-blue-600" id="notifTrigger">
                             <i data-lucide="bell" class="w-5 h-5"></i>
-                            <!-- 알림 숫자 배지 -->
-                                <!-- 초기 상태는 숨김 처리 -->
                             <span class="notif-badge" id="notifBadge" style="display: none;"></span>
                         </button>
-
-                        <!-- 드롭다운 메뉴 (기본 숨김) -->
                         <div class="notif-dropdown hidden" id="notifDropdown">
                             <div class="notif-header">
                                 <span class="header-count" id="notifCountText"></span>
@@ -448,7 +444,7 @@
 
         function renderList(container, notiList) {
             if (!container) return;
-            if (noti.length === 0) {
+            if (notiList.length === 0) {
                 container.innerHTML = '<div style="padding: 40px; text-align: center; color: #9ca3af;">새로운 알림이 없습니다.</div>';
                 // 스크롤바 설정
                 container.style.maxHeight = 'none';
@@ -456,7 +452,7 @@
                 return;
             }
             // signal noti 스크롤바 설정(noti가 5개 이상일 때만 생성)
-            if (noti.length >= 5) {
+            if (notiList.length >= 5) {
                 container.style.maxHeight = '450px'; // 5개 정도가 보일 적당한 높이
                 container.style.overflowY = 'auto';
             } else {
@@ -862,7 +858,7 @@
             }
             try {
                 let { data } = await axios.get("/session_out");
-                console.log("세션 체크 결과:", data);
+                // console.log("세션 체크 결과:", data);
                 if (data && data.res) {
                     sessionStorage.removeItem('savedUserId');
                     showModal("유효시간 만료로 로그아웃 되었습니다.", 'error');                    
