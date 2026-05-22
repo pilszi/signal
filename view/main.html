@@ -456,6 +456,9 @@
 
         // 페이지 오픈시 실행
         document.addEventListener('DOMContentLoaded', async() => {
+            const isUserValid = await checkSession();
+            if (!isUserValid) return;
+
             // 현재 브라우저의 파일명만 추출
             const currentPath = window.location.pathname.split("/").pop() || "main.html";
             const navItems = document.querySelectorAll('.nav-item');
@@ -479,7 +482,6 @@
             // 3. 데이터 가져오기 + heatmap 적용
             await fetchMainData();
             // 세션만료 계정 로그아웃 처리 요청
-            await checkSession();
             await updateNotifUI();
             
             // 4. 나머지 ui
@@ -1368,33 +1370,34 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        function jumperToLogin(timerId) {
-            clearTimeout(timerId);
-            location.href = "login.html";
-        }
-
-        function bindConfirmBtn(timerId) {
-            const confirmBtn = document.getElementById('modal-confirm-btn');
-            if (confirmBtn) {
-                confirmBtn.onclick = () => jumperToLogin(timerId);
-            }
-        }
-
         async function checkSession() {
+            const wasLoggedIn = sessionStorage.getItem('savedUserId');
+            if (!wasLoggedIn) {
+                return true; 
+            }
             try {
-                let { data } = await axios.get("/session_out");
-                console.log("세션 체크 결과:", data);
+                let { data } = await axios.get("/session_out");                
                 if (data && data.res) {
-                    sessionStorage.removeItem('savedUserId');
-                    showModal("유효시간 만료로 로그아웃 되었습니다.", 'error');                    
-                    const timer = setTimeout(() => jumperToLogin(timer), 1500);
-                    bindConfirmBtn(timer);
+                    // 1. 로그인 흔적을 지워서 이제는 '비로그인 사용자'로 만듭니다.
+                    sessionStorage.removeItem('savedUserId');                    
+                    // 2. 안내 모달을 띄웁니다.
+                    showModal("유효시간 만료로 로그아웃 되었습니다.", 'error');
+                    const timer = setTimeout(() => {
+                        location.reload(); // 현재 페이지 새로고침
+                    }, 1500);                    
+                    const confirmBtn = document.querySelector('.modal-confirm-btn'); 
+                    if (confirmBtn) {
+                        confirmBtn.addEventListener('click', () => {
+                            clearTimeout(timer);
+                            location.reload();
+                        });
+                    }
                     return false; 
-                }
+                }                
                 return true;                 
             } catch (error) {
                 console.error("세션 서버 통신 중 에러 발생:", error);
-                return false; 
+                return true; 
             }
         }
 
