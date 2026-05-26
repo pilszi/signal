@@ -27,7 +27,6 @@ def run_naver_collect():
     return bulk_search_naver_news()
 
 
-
 def bulk_search_naver_news():
     """네이버 API 응답 체크 및 수집 로직"""
     newly_saved = 0
@@ -156,7 +155,7 @@ def process_single_article(item):
         raw_title = item['title'].replace('<b>', '').replace('</b>', '')
         clean_title = html.unescape(raw_title)
 
-        # 2. 🔥 [2차 필터링] 팀원의 노이즈 필터링 함수 적용
+        # 2. [2차 필터링] 팀원의 노이즈 필터링 함수 적용
         # 제목, 수집된 본문, URL을 모두 체크하여 100자 미만이거나 노이즈 키워드 포함 시 제외
         if is_noise_article(clean_title, details['content'], item['link']):
             logging.info(f"🚫 [Noise Filtered] {clean_title[:20]}... (필터링됨)")
