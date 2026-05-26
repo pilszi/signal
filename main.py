@@ -266,12 +266,12 @@ async def run_initial_batch(scheduler):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 각종 수집 작업 등록 (5~10분 간격인데 나중에 운영할 때는 1시간으로 늘리기)
-    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=30, id='nc')
-    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=30, id='yc')
-    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=30, id='rc')
-    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=10, id='tw',max_instances=1)
-    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=30, id='ic')
-    global_scheduler.add_job(run_analysis_and_save,'interval',minutes=10,id='ml_analysis',max_instances=1,replace_existing=True)
+    global_scheduler.add_job(naver.run_naver_collect, 'interval', minutes=60, id='nc')
+    global_scheduler.add_job(yna.run_yna_collect, 'interval', minutes=60, id='yc')
+    global_scheduler.add_job(RSS.run_reuters_collect, 'interval', minutes=60, id='rc')
+    global_scheduler.add_job(translator_worker.process_translation, 'interval', minutes=60, id='tw',max_instances=1)
+    global_scheduler.add_job(indicator.collect_market_data_job, 'interval', minutes=60, id='ic')
+    global_scheduler.add_job(run_analysis_and_save,'interval',minutes=60,id='ml_analysis',max_instances=1,replace_existing=True)
     # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
     asyncio.create_task(run_initial_batch(global_scheduler))
 
