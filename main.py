@@ -22,10 +22,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contextlib import asynccontextmanager
 from sse_starlette.sse import EventSourceResponse
 
-# --- 이 코드를 반드시 추가하세요 ---
+# [환경 설정] Windows 환경에서 비동기 루프 정책 문제 방지 (Proactor 사용)
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-# -------------------------------
 
 # [내부 모듈 임포트]
 from config import Config
@@ -35,7 +34,7 @@ from db import get_db
 from hash import hash_password, verify_password
 from utils import save_analysis_result
 
-# 파일 연동 (수집 및 분석 모듈)
+# [외부 수집 및 분석 모듈 임포트]
 import naver
 import yna
 import RSS
@@ -43,14 +42,14 @@ import indicator
 import translator_worker
 import ml
 
-# 로거 및 학습 완료 증명서 설정
+# 로거 및 학습 체크포인트 파일 설정
 logger = get_logger(__name__)
 TRAIN_LOCK_FILE = "train_complete.lock" # 모델 자신이 학습했는지 아닌지를 확인하는 체크포인트
 
-# 전역 스케줄러 객체 (함수 외부에서 접근 가능하도록 설정)
+# [전역 스케줄러] 정기적인 작업 수행을 위한 APScheduler 객체
 global_scheduler = AsyncIOScheduler()
 
-# es 설정
+# [Elasticsearch 설정] 클라이언트 연결 생성
 es_url = Config.ES_HOST
 if f":{Config.ES_PORT}" not in es_url:
     es_url = f"{es_url}:{Config.ES_PORT}"
@@ -63,12 +62,13 @@ es = Elasticsearch(
 
 
 # ==========================================
-# 0. 핵심 파이프라인 제어 (학습 및 분석 통합)
+# 0. 핵심 파이프라인 제어 (분석 실행)
 # ==========================================
-is_processing = False
+is_processing = False  # 분석 중복 실행을 방지하기 위한 플래그
 
 # 분석 실행 후 결과를 DB에 저장하는 함수
 async def run_analysis_and_save():
+    """뉴스 데이터 분석, 리스크 등급 판정, DB 저장 및 알림 발송을 담당하는 파이프라인"""
     global is_processing
 
     # 이미 실행 중이면 중복 실행 차단
@@ -81,21 +81,19 @@ async def run_analysis_and_save():
 
     try:
         logger.info("🧠 [Analysis] AI 분석 및 DB 저장 시퀀스 시작")
-
-        results = await ml.run_analysis()
+        results = await ml.run_analysis() # ml 모듈에서 뉴스 분석 실행
 
         if not results:
             logger.info("❌ [Analysis] 분석할 기사가 없습니다.")
             return
 
         processed_ids = []
+        session = SessionLocal()  # DB 세션 시작
 
-        # DB 세션 생성
-        session = SessionLocal()
         for res in results:
             try:
                 # ==========================================
-                # [STEP 1] MariaDB 저장
+                # [STEP 1] 분석 결과를 MariaDB에 저장
                 # ==========================================
                 new_signal_no = save_analysis_result(session, res)
 
@@ -105,13 +103,12 @@ async def run_analysis_and_save():
                     continue
 
                 processed_ids.append(res.get('doc_id'))
-
                 logger.info(
                     f"✅ [DB Success] signal_no: {new_signal_no}"
                 )
 
                 # ==========================================
-                # [STEP 2] 키워드 매칭
+                # [STEP 2] 관심 키워드 매칭 및 사용자 알림
                 # ==========================================
                 news_keywords = [
                     kw.strip().lower()
@@ -119,6 +116,7 @@ async def run_analysis_and_save():
                 ]
 
                 if news_keywords:
+                    # 키워드 매칭 사용자 조회
                     match_sql = sqlalchemy.text("""
                                     SELECT DISTINCT 
                                         m.member_no, 
@@ -145,7 +143,7 @@ async def run_analysis_and_save():
                         )
 
                         # ----------------------------------
-                        # A. alarm_log 저장
+                        # [STEP 2-A] 알림 로그 저장
                         # ----------------------------------
                         alarm_sql = sqlalchemy.text("""
                                         INSERT INTO alarm_log
@@ -186,24 +184,18 @@ async def run_analysis_and_save():
                                     f"({user.email}): {mail_err}"
                                 )
 
-                # ==========================================
-                # [STEP 3] 기사 단위 commit
-                # ==========================================
-                session.commit()
+                session.commit()  # 기사 단위 커밋
 
-            # ==========================================
-            # 기사 단위 rollback
-            # ==========================================
+
             except Exception:
-                session.rollback()
+                session.rollback() # 롤백
                 logger.error(traceback.format_exc())
                 continue
 
             # ==========================================
-            # [STEP 4] ES 상태 업데이트
+            # Elasticsearch 처리 상태(is_processed) 업데이트
             # ==========================================
         if processed_ids:
-
             for doc_id in processed_ids:
                 await ml.update_es_status(
                     doc_id,
@@ -215,31 +207,26 @@ async def run_analysis_and_save():
                 f"🚀 ES 업데이트 완료: {len(processed_ids)}건"
             )
 
-    # ==========================================
-    # 전체 배치 예외 처리
-    # ==========================================
-    except Exception:
 
-        if session:
+    except Exception:
+        if session: # 전체 배치 예외 처리
             session.rollback()
 
         logger.error(traceback.format_exc())
-
-    # ==========================================
-    # 세션 종료 및 잠금 해제
-    # ==========================================
     finally:
-
-        if session:
+        if session: # 세션 종료 및 잠금 해제
             session.close()
 
         is_processing = False
+
+
 # ==========================================
-# 1. 서버 생애주기(Lifespan) 설정
+# 1. 서버 생애주기(Lifespan) 및 초기화
 # ==========================================
-# 서버 시작 시 순차적으로 실행될 초기화 함수 정의
-executor = ThreadPoolExecutor(max_workers=5)
+executor = ThreadPoolExecutor(max_workers=5) # 멀티스레드 수집용 풀
+
 async def run_initial_batch(scheduler):
+    """서버 시작 시 실행될 수집/번역/분석 배치 작업"""
     loop = asyncio.get_event_loop()
     try:
         logger.info("🎬 [초기화 시퀀스] 1단계: 뉴스 수집 시작")
@@ -274,13 +261,12 @@ async def lifespan(app: FastAPI):
     global_scheduler.add_job(run_analysis_and_save,'interval',minutes=60,id='ml_analysis',max_instances=1,replace_existing=True)
     # 서버를 먼저 열고, 수집은 백그라운드에서 비동기로 실행
     asyncio.create_task(run_initial_batch(global_scheduler))
-
     global_scheduler.start()
     logger.info("🚀 리스크 관제 시스템 통합 스케줄러 가동")
 
     yield
 
-    # --- 서버 종료 시 정리 로직 ---
+    # 서버 종료 시 리소스 정리
     logger.info("🛑 서버 종료 중: 실행 중인 작업들을 정리합니다.")
     global_scheduler.shutdown(wait=False)  # 스케줄러 즉시 정지
     executor.shutdown(wait=False, cancel_futures=True)  # 스레드 풀 강제 종료
@@ -288,44 +274,49 @@ async def lifespan(app: FastAPI):
 
 # FastAPI 앱 초기화
 app = FastAPI(lifespan=lifespan)
-# 페이지 새로고침 할 때마다 max_age 초기화
+
+
+# [미들웨어] 세션 유지 시간 연장 및 기본 설정
 @app.middleware("http")
 async def extend_session_max_age(req: Request, call_next):
     if req.session:
         req.session["last_time"] = int(time.time())
     response = await call_next(req)
     return response
+
 # 세션 유지 시간 60분(1시간)
 app.add_middleware(SessionMiddleware, secret_key="secret", max_age=3600)
 app.mount("/view", StaticFiles(directory="view"), name="view")
 
 
 # ==========================================
-# 2. API 엔드포인트
+# 2. API 엔드포인트: 서비스 기본 경로 및 리다이렉션
 # ==========================================
 @app.get('/')
 def main():
+    """루트 경로 접속 시 메인 페이지로 자동 이동"""
     return RedirectResponse("/view/main.html")
 
 
 @app.get('/overlay')
 def overlay(id: str, db: Session = Depends(get_db)):
-    """아이디 중복 체크"""
+    """회원가입 시 ID 중복 여부를 DB에서 확인"""
     sql = sqlalchemy.text("SELECT EXISTS (SELECT 1 FROM member_info WHERE id = :id) as is_taken")
     result = db.execute(sql, {"id": id}).mappings().fetchone()
     return {"msg": bool(result["is_taken"])}
 
-
+# ==========================================
+# 3. 회원 인증 및 프로필 관리
+# ==========================================
 @app.post("/regist")
 def regist(info: RegistModel, req: Request, db: Session = Depends(get_db)):
-    """회원가입 및 키워드 저장"""
-    # [백엔드 이중 보안] 진짜 이메일 인증 단계를 통과했는지 세션 최종 검증
+    """최종 회원가입 처리: 인증 완료된 세션 검증 후 DB 삽입 및 키워드 저장"""
+    # 진짜 이메일 인증 단계를 통과했는지 세션 최종 검증
     session_data = req.session.get("regist_auth")
     if not session_data or session_data["email"] != info.email or not session_data["verified"]:
         return {"msg": "이메일 인증이 완료되지 않았거나 세션이 만료되었습니다."}
 
     pw = hash_password(info.pw)
-
     sql = sqlalchemy.text("""INSERT INTO member_info (id, pw, user_name, phone_number, email)
                              VALUES (:id, :pw, :user_name, :phone_number, :email)""")
     res = db.execute(sql, {"id": info.id, "pw": pw, "user_name": info.user_name, "phone_number": info.phone_number,
@@ -335,17 +326,19 @@ def regist(info: RegistModel, req: Request, db: Session = Depends(get_db)):
     child_sql = sqlalchemy.text("INSERT INTO member_keyword (member_no, keyword) VALUES (:member_no, :keyword)")
     for key in info.keyword:
         db.execute(child_sql, {"member_no": member_no, "keyword": key})
-    # 가입 성공 시 인증 관련 세션 파기하여 깔끔하게 정리
-    req.session.pop("regist_auth", None)
+
+
+    req.session.pop("regist_auth", None)  # 가입 성공 시 인증 세션 제거
     db.commit()
     save_admin_log(db=db, log_type='join', title='신규회원', target_id=info.id, content='신규 회원 가입',
                    after_data={"id": info.id, "user_name": info.user_name, "phone_number": info.phone_number,"email": info.email})
     return
 
 
-# 회원가입 1단계: 인증번호 이메일 발송 요청
+
 @app.post("/regist/request_code")
 def regist_request_code(info: Dict[str, str], req: Request):
+    """회원가입 1단계: 회원가입용 이메일 인증코드 생성 및 발송"""
     email = info.get("email")
     if not email:
         return {"res": False, "msg": "이메일 주소를 입력해주세요."}
@@ -375,9 +368,10 @@ def regist_request_code(info: Dict[str, str], req: Request):
     }
 
 
-# 회원가입 2단계: 인증코드 검증
+
 @app.post("/regist/verify_code")
 def regist_verify_code(info: Dict[str, str], req: Request):
+    """회원가입 2단계: 이메일 인증코드 검증 및 verified 상태 업데이트"""
     input_code = info.get("code")
     session_data = req.session.get("regist_auth")
 
@@ -405,7 +399,7 @@ def regist_verify_code(info: Dict[str, str], req: Request):
 
 @app.post('/login')
 def login(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
-    """로그인 처리 및 로그 기록"""
+    """로그인 인증 및 로그인 로그 기록 (기존 세션 종료 후 신규 생성)"""
     try:
         # 1. 회원 정보 조회
         sql = sqlalchemy.text("SELECT member_no, pw, user_name FROM member_info WHERE id = :id")
@@ -449,7 +443,7 @@ def login(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
 
 @app.get("/logout")
 def logout(req: Request, db: Session = Depends(get_db)):
-    """로그아웃 및 로그 엔드타임 갱신"""
+    """로그아웃 처리: 로그인 로그에 logout_time 기록 및 세션 파기"""
     member_no = req.session.get("member_no")
     if member_no:
         try:
@@ -473,6 +467,7 @@ def logout(req: Request, db: Session = Depends(get_db)):
 # session 만료 계정 자동 로그아웃 : member_login_log 테이블 업데이트 - logout_time, status
 @app.get('/session_out')
 def session_out(req: Request, db: Session = Depends(get_db)):
+    """60분 이상 미활동 세션 자동 로그아웃 처리"""
     try:
         logout_sql = sqlalchemy.text("""UPDATE member_login_log SET logout_time = NOW(), status = 0
                                         WHERE status = 1 AND login_time <= NOW() - INTERVAL 60 MINUTE""")
@@ -492,7 +487,7 @@ def session_out(req: Request, db: Session = Depends(get_db)):
 
 @app.get("/profile")
 def get_profile(id: str, db: Session = Depends(get_db)):
-    """사용자의 프로필 정보와 관심 키워드를 가져옴"""
+    """사용자 정보 및 설정된 관심 키워드 조회"""
 
     # 1. 기본 정보 조회
     user_sql = sqlalchemy.text("SELECT user_name, email, phone_number, member_no FROM member_info WHERE id = :id")
@@ -514,7 +509,7 @@ def get_profile(id: str, db: Session = Depends(get_db)):
 
 @app.post("/update_profile")
 def update_profile(info: Dict[str, Any], db: Session = Depends(get_db)):
-    """회원 정보 수정 (키워드 포함)"""
+    """회원 정보(PW, 이메일, 키워드 등) 수정 및 관리자 로그 저장"""
 
     # 1. 회원 번호 확인
     id_sql = sqlalchemy.text("""SELECT
@@ -569,9 +564,10 @@ def update_profile(info: Dict[str, Any], db: Session = Depends(get_db)):
     return {"updated_keywords": key_insert}
 
 
+
 @app.post("/delete_member")
 def delete_member(info: Dict[str, str], db: Session = Depends(get_db)):
-    """비밀번호 확인 후 회원 탈퇴 처리 (관련 데이터 삭제)"""
+    """비밀번호 재확인 후 회원 데이터(로그, 키워드, 정보) 전체 삭제"""
     user_id = info.get("id")
     input_pw = info.get("input_pw")
 
@@ -593,10 +589,13 @@ def delete_member(info: Dict[str, str], db: Session = Depends(get_db)):
         return {"msg": False}
 
 
+# ==========================================
+# 4. 뉴스 데이터 및 시그널 API
+# ==========================================
 # main 페이지 오늘의 뉴스 조회
 @app.get("/public_signals")
 def public_signals():
-    """ 메인 페이지 기사 요청 및 필터링 """
+    """ Elasticsearch에서 최근 7일 뉴스 검색 및 필터링하여 프론트로 전달 """
     # [1] 검색 조건 설정 (날짜가 있으면 해당 날짜, 없으면 최근 7일치)
     date_filter = {
         "range": {
@@ -665,7 +664,7 @@ def public_signals():
 
 @app.get("/main/country")
 def country(db: Session = Depends(get_db)):
-    """ 히트맵 데이터 요청 """
+    """ 히트맵용 국가별 리스크 통계 계산 및 점수 정규화 """
     sql = sqlalchemy.text("""
             SELECT
                 t3.country_en_name as en_name,
@@ -733,6 +732,7 @@ def country(db: Session = Depends(get_db)):
 # 기사 열람 기록 저장
 @app.post("/news_view")
 def news_view(info:Dict[str, str], db: Session = Depends(get_db)):
+    """ 사용자별 기사 열람 기록 저장(중복 제외) """
     print(f'{info["id"]} 가 열람한 기사 url = {info["url"]}')
 
     sql = sqlalchemy.text("""SELECT member_no FROM member_info WHERE id = :id""")
@@ -750,11 +750,11 @@ def news_view(info:Dict[str, str], db: Session = Depends(get_db)):
     return
 
 
-# 맞춤형뉴스 요청
-# [main.py 내부 - custom_news 함수 완전히 덮어씌우기]
+
+
 @app.get("/custom_news")
 def custom_news(id: str, db: Session = Depends(get_db)):
-    """ 맞춤형 뉴스 데이터 요청 """
+    """ 사용자 관심 키워드 및 열람 기록 기반의 맞춤형 뉴스 추출 """
     logger.info(f'📡 맞춤형 요청 id = {id}')
 
     # 1. 사용자의 관심 키워드 조회
@@ -765,7 +765,6 @@ def custom_news(id: str, db: Session = Depends(get_db)):
         WHERE m.id = :id
     """)
     user_keywords = db.execute(kw_sql, {"id": id}).scalars().all()
-
 
     # 2. 사용자가 읽은 기사 URL 목록 조회
     view_sql = sqlalchemy.text("""
@@ -846,10 +845,10 @@ def custom_news(id: str, db: Session = Depends(get_db)):
         "news": custom_news_list
     }
 
-# 시그널로그 페이지
+
 @app.get("/signal_log")
 def signal_log(id: str, db: Session = Depends(get_db)):
-    """ 로그인한 사용자의 관심 키워드 기반 시그널만 조회
+    """ 로그인한 사용자 맞춤 시그널 로그 조회
     (ES 검색 대신, 분석 시점에 미리 매칭된 alarm_log 테이블 활용)
     """
     logger.info(f"📋 {id}님의 시그널 로그 조회 요청")
@@ -903,10 +902,9 @@ def signal_log(id: str, db: Session = Depends(get_db)):
 
 
 
-# signal 알림 토글 요청
 @app.get("/noti/signal")
 def noti_signal(id:str, db: Session = Depends(get_db)):
-    """ 페이지 상단 네비게이션바 통합 알림 요청 """
+    """ 상단 종 모양 알림창용 데이터 조회 (심각 등급 한정) """
     try:
         logger.info(f"📋 {id}님의 시그널 로그 알림 요청")
 
@@ -949,10 +947,10 @@ def noti_signal(id:str, db: Session = Depends(get_db)):
         return {"noti": [], "error": str(e)}
 
 
-# 알림토글 읽음 요청
+
 @app.post("/noti/read")
 def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
-    """ 알림 클릭 시 해당 알림 확인 상태 변경 """
+    """ 개별 알림 읽음 처리 """
     sql = sqlalchemy.text("""
             UPDATE alarm_log t1 JOIN member_info t2 
                 ON t1.member_no = t2.member_no 
@@ -965,10 +963,10 @@ def noti_read(info: Dict[str, Any], db: Session = Depends(get_db)):
     return {"res": True}
 
 
-# 모든 알림토글 읽음 요청
+
 @app.post("/noti/read_all")
 def noti_raed_all(info: Dict[str, Any], db: Session = Depends(get_db)):
-    """ 하단 '모두 읽음으로 표시' 클릭 시 드롭다운 일괄 드롭 """
+    """ 모든 알림 일괄 읽음 처리 """
     user_id = info.get("userId")
     signal_no_list = info.get("signal_nos")
     logger.info(f'userId = {user_id} / signal_no_list = {signal_no_list}')
@@ -991,12 +989,12 @@ def noti_raed_all(info: Dict[str, Any], db: Session = Depends(get_db)):
 
 
 # ==========================================
-# 3. 실시간 알림 API (ml.py 활용)
+# 5. 리스크 모니터링 및 실시간 분석
 # ==========================================
 # 기사 라벨링 6 -[최종 리스크 라벨링(브라우저용)]: 키워드 점수 + AI 점수 => 최종 등급(색상 부여)
 # 그 다음으로 아래 get_risk_signals() 함수에서 브라우저로 보내는 작업 실행
 def get_risk_status(score: float) -> str:
-    """숫자로 된 리스크 점수를 설계서 기준 텍스트로 변환"""
+    """ 숫자로 된 리스크 점수를 설계서 기준 텍스트로 변환 """
     if score >= 70: return "위기"
     if score >= 40: return "주의"
     return "안정"
@@ -1004,7 +1002,7 @@ def get_risk_status(score: float) -> str:
 # 현재 발생한 전체 시그널을 보여주는 조회용 API
 @app.get("/api/risk-signals")
 async def get_risk_signals():
-    """Elasticsearch 기반 데이터를 가져오되, 점수를 텍스트로 변환해서 전달"""
+    """ Elasticsearch 기반 실시간 리스크 시그널 점수 변환 조회 """
     try:
         # ml.py의 검색 함수(get_latest_signals) 호출
         results = ml.get_latest_signals(size=10)
@@ -1026,30 +1024,27 @@ async def get_risk_signals():
 # 시그널 로그를 브라우저 알림에 뜨게 해주는 함수
 @app.get("/api/stream-risk")
 async def stream_risk():
-    """브라우저에 알림을 쏴주는 SSE 통로"""
+    """ SSE(Server-Sent Events)를 이용한 실시간 알림 스트림 """
     async def event_generator():
         while True:
-            # 1분마다 시스템이 살아있음을 알림 (실제 알림 로직은 고도화 가능)
+            # 1분마다 시스템이 살아있음을 알림
             yield {"data": "🔔 실시간 분석 엔진 가동 중"}
             await asyncio.sleep(60)
 
     return EventSourceResponse(event_generator())
 
 
-# ==========================================
-# 4. 시장 지표(환율/원자재) 조회 API
-# ==========================================
+
 # indicator_map으로 환율/원자재 라벨링 2: 매핑해줌 -> 그 다음 main.html
 @app.get("/api/market-indicators")
 def get_market_indicators(db: Session = Depends(get_db)):
-    """DB에서 각 지표별 최신 수치를 가져와 브라우저로 전달"""
+    """ 환율 및 원자재 지표 최신 데이터 조회 """
     # indicator_no 매핑 (indicator.py와 동일하게 맞춤)
     indicator_map = {
         1: "usd", 2: "eur", 3: "jpy", 4: "cny",
         5: "gold", 6: "silver", 7: "copper",
         8: "wti", 9: "brent", 10: "gas", 11: "oil_mini"
     }
-
 
     # 각 지표(indicator_no)별로 가장 최신(MAX gathering_time) 데이터만 추출하는 SQL
     sql = sqlalchemy.text("""
@@ -1074,10 +1069,10 @@ def get_market_indicators(db: Session = Depends(get_db)):
     return {"status": "success", "data": formatted_data}
 
 
-
 # DB에 저장된 국가명 테이블 데이터 불러오기
 @app.get("/main/countryMap")
 def country_map(db: Session = Depends(get_db)):
+    """ 국가 한글/영문 매핑 정보 조회 """
     logger.info(f'----- 국가명 데이터 가져오기 -----')
 
     sql = sqlalchemy.text("""SELECT country_kr_name, country_en_name FROM country""")
@@ -1088,12 +1083,13 @@ def country_map(db: Session = Depends(get_db)):
 
 
 
-# ===============================
-#        find ID / PW
-# ===============================
-# 아이디 찾기
+# ==========================================
+# 6. 계정 찾기 (ID/PW)
+# ==========================================
+
 @app.post("/find_id/request")
 def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
+    """ 아이디 찾기: 이름과 이메일로 ID 조회 후 관리자 로그 기록 """
     logger.info(f'id 찾기 info = {info}')
 
     sql = sqlalchemy.text("""SELECT id, create_at FROM member_info WHERE user_name = :name AND email = :email""")
@@ -1103,15 +1099,16 @@ def find_id(info:Dict[str, str], db: Session = Depends(get_db)):
     return {"res": res}
 
 
-# 비밀번호 찾기 1단계: 인증코드 요청
+
 @app.post("/find_pw/request")
 async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depends(get_db)):
+    """ 비밀번호 찾기 1단계: 회원 존재 확인 및 이메일 인증코드 발송 """
     user_id = info.get("userId").strip()
     email = info.get("email").strip()
 
     logger.info(f"user_id = [{user_id}]")
     logger.info(f"email = [{email}]")
-
+    # 일치하는 회원 정보 조회
     sql = sqlalchemy.text("SELECT 1 FROM member_info WHERE id = :id AND email = :email")
     user_exists = db.execute(sql,{"id": user_id.strip(),"email": email.strip() }).scalar()
 
@@ -1138,7 +1135,7 @@ async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depe
     # 만능 알림 함수 호출 (PWD 모드)
     success = notifier.send_emergency_email(
         to_email=email,
-        ai_report={'prediction': pwd_code},  # 진짜 코드를 넣어서 쏘세요!
+        ai_report={'prediction': pwd_code},
         news_url=None,
         risk_level="PWD",
         keywords_str=None,
@@ -1150,9 +1147,10 @@ async def find_pw_request(info: Dict[str, str], req: Request, db: Session = Depe
     }
 
 
-# 비밀번호 찾기 2단계: 코드 검증
+
 @app.post("/find_pw/verify")
 async def find_pw_verify(info: Dict[str, str], req: Request):
+    """ 비밀번호 찾기 2단계: 인증코드 검증 """
     input_code = info.get("code")
     session_data = req.session.get("find_pw_auth")
 
@@ -1166,6 +1164,7 @@ async def find_pw_verify(info: Dict[str, str], req: Request):
     # 세션 자체가 유실되었다면 에러 메시지를 명확하게 분리해서 반환
     if not session_data:
         return {"res": False, "msg": "서버 세션이 만료되었거나 인증번호가 생성되지 않았습니다. 코드를 다시 받아주세요."}
+
     # 인증코드 만료 체크
     try:
         expires_at = datetime.fromisoformat(session_data["expires_at"])
@@ -1194,15 +1193,16 @@ async def find_pw_verify(info: Dict[str, str], req: Request):
     return {"res": True}
 
 
-# 3단계: 최종 비밀번호 변경
+
 @app.post("/find_pw/reset")
 async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends(get_db)):
+    """ 비밀번호 찾기 3단계: 새로운 비밀번호 업데이트 """
     logger.info(f'비밀번호 변경 계정 = {info}')
     user_id = info.get("userId")
     new_pw = hash_password(info.get("password"))
     session_data = req.session.get("find_pw_auth")
 
-    # 세션 검증 보안 장치 (인증코드, 코드검증 단계를 정상적으로 거쳤는지 확인)
+    # 인증 단계를 정상적으로 거쳤는지 세션 보안 검증
     if (
             not session_data
             or session_data["userId"] != user_id
@@ -1233,16 +1233,16 @@ async def find_pw_reset(info:Dict[str, str], req: Request, db: Session = Depends
     return {"res": res.rowcount}
 
 
-# ======================
-#     관리자 페이지
-# ======================
+# ==========================================
+# 7. 관리자 전용 기능 (회원/로그 조회)
+# ==========================================
 
 # 관리자 페이지 요청
 @app.get("/admin/user_list")
 def user_list(db: Session = Depends(get_db)):
+    """ 전체 회원 리스트 및 최신 로그인 상태, 키워드 조회 """
     logger.info("------관리자 페이지------")
     user_list = []
-
 
     sql = sqlalchemy.text("""SELECT
                                 mi.id, mi.email, mi.create_at, mi.phone_number, ml.status, mk.keywords, mi.user_name
@@ -1275,9 +1275,11 @@ def user_list(db: Session = Depends(get_db)):
         user_list.append(user)
     return {"user": user_list}
 
+
 # 유저 로그인로그 요청
 @app.get("/admin/login_log")
 def login_log(id:str, db: Session = Depends(get_db)):
+    """ 특정 회원의 로그인/로그아웃 시간 및 IP 이력 조회 """
     # logger.info(f'로그인로그 요청 id = {id}')
 
     sql = sqlalchemy.text("""SELECT
@@ -1297,7 +1299,7 @@ def login_log(id:str, db: Session = Depends(get_db)):
         if row["logout_time"]:
             row["logout_time"] = row["logout_time"].strftime("%Y-%m-%d %H:%M:%S")
         else:
-            # null인 경우 빈 문자열("") 또는 특정 텍스트("-" 등)를 보냅니다.
+            # null인 경우 빈 문자열("") 또는 특정 텍스트("-" 등)를 보냄
             row["logout_time"] = ""
         result.append(row)
     return {"res": result}
@@ -1317,7 +1319,7 @@ def admin_log(db: Session = Depends(get_db)):
 
 @app.get("/admin/alarm_log")
 def alarm_log(db: Session = Depends(get_db)):
-    """ 최근 1시간 이내에 3단계(심각) 분류 알림 로그 """
+    """ 최근 1시간 이내에 3단계(심각) 알림 로그 조회 """
     sql = sqlalchemy.text("""SELECT t1.signal_no, t1.risk_level, t1.prediction, t1.url,
                                 MAX(t2.alarm_time) AS alarm_time,
                                 GROUP_CONCAT(t2.member_no SEPARATOR ',') AS member_list
@@ -1333,7 +1335,8 @@ def alarm_log(db: Session = Depends(get_db)):
 
     return {"res": res}
 
-# 관리자 열람 로그 함수
+
+# 관리자 활동 기록 저장 함수 (공통 모듈)
 def save_admin_log(
     db: Session,
     log_type: str,
@@ -1345,6 +1348,7 @@ def save_admin_log(
 ):
     """
        admin_logs 테이블에 로그 저장
+       모든 관리자 작업(생성/수정/삭제)을 JSON 형태로 기록
 
        Parameters
        ----------
@@ -1385,15 +1389,16 @@ def save_admin_log(
         db.rollback()
         logger.info(f'{e} 발생으로 admin_log 저장 실패')
 
-
+# ==========================================
+# 8. 서버 실행
+# ==========================================
 if __name__ == "__main__":
     import uvicorn
     import sys
 
-    # 정책 설정은 임포트 직후 최상단에 있는 것도 좋지만, 실행 직전에도 한 번 더 확인
+    # Windows 비동기 정책 설정
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-    # uvicorn 실행 시 루프 설정을 명시하거나,
-    # reload=True 환경에서는 정책 선언이 잘 먹히지 않을 수 있으므로 주의가 필요합니다.
+    # 서버 실행 (host: 0.0.0.0으로 외부 접속 허용, port: 8000)
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, loop="asyncio")
