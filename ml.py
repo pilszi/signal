@@ -733,7 +733,7 @@ async def run_analysis():
 
         # [E] 최종 가두기 및 등급 판정
         total = max(0.0, min(1.0, total))
-        risk_lv = "심각" if total <= 0.175 else "주의" if total <= 0.63 else "안정"
+        risk_lv = "심각" if total <= 0.2 else "주의" if total <= 0.63 else "안정"
         # ----------------------------------------------------------
         # 제미나이 리포트
         try:

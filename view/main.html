@@ -668,9 +668,8 @@
             const { data } = await axios.get(
                 `/noti/signal?id=${savedUserId}`
             );
-            // 3. 알림용 데이터 처리 (기존 로직 + 안전장치)
-            let rawNoti = (data && data.noti) ? data.noti : (Array.isArray(data.noti) ? data.noti : []);
-    
+             let rawNoti = (data.noti && data.noti) ? data.noti : (Array.isArray(data.noti) ? data.noti : []);
+
             // 🎯 [핵심 패치] signal_no를 키로 사용하여 중복 데이터 원천 차단
             const uniqueMap = new Map();
             rawNoti.forEach(item => {
@@ -826,7 +825,7 @@
                         formatter: function(params) {
                             const score = params.data ? params.data.value : 0;
                             let level = '안정';
-                            if (score >= 300) level = '심각';
+                            if (score >=300) level = '심각';
                             else if (score >= 200) level = '주의';
                             return `${params.name}<br/>리스크 점수: ${score}점 (${level})`;
                         }
@@ -913,7 +912,7 @@
 
                     // 새로운 300점 기준선에 맞춰 위기 아이콘 스위칭
                     const isSerious = item.level === "심각" || displayScore >= 300;
-                    const scoreColor = isSerious ? "text-red-300" : "text-yellow-200";
+                    const scoreColor = isSerious ? "text-red-500" : "text-yellow-200";
                     const badgeIcon = isSerious ? "🔥" : "⚠️";
 
                     // 국가 한글/영문 딕셔너리 매핑 안전장치
@@ -1050,7 +1049,6 @@
                 // 2. 아이콘과 색상 결정
                 let icon = isUp ? "trending-up" : (isDown ? "trending-down" : "minus");
                 let color = isUp ? "text-red-500" : (isDown ? "text-blue-500" : "text-gray-400");
-
 
 
                 return `
