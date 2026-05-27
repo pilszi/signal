@@ -315,7 +315,17 @@
                 // 2. 전체 로그 처리
                 allSignals = (signalsRes.data && signalsRes.data.news) ? signalsRes.data.news : [];
                 keyword = (signalsRes.data && signalsRes.data.keyword) ? signalsRes.data.keyword : [];
-                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+                // 3. 알림용 데이터 처리 (기존 로직 + 안전장치)
+                let rawNoti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+        
+                // 🎯 [핵심 패치] signal_no를 키로 사용하여 중복 데이터 원천 차단
+                const uniqueMap = new Map();
+                rawNoti.forEach(item => {
+                    if (item && item.signal_no) {
+                        uniqueMap.set(String(item.signal_no), item);
+                    }
+                });
+                noti = Array.from(uniqueMap.values());
                 console.log(keyword, allSignals, noti);
             } catch (error) {
                 // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어

@@ -402,8 +402,19 @@
                     "phone" : (userProfile.data && userProfile.data.phone_number) ? userProfile.data.phone_number : '',
                     "keywords" : (userProfile.data && userProfile.data.keyword) ? userProfile.data.keyword : []
                 };
-                noti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
-                console.log(userData, noti);
+                // 3. 알림용 데이터 처리 (기존 로직 + 안전장치)
+                let rawNoti = (notiRes.data && notiRes.data.noti) ? notiRes.data.noti : (Array.isArray(notiRes.data) ? notiRes.data : []);
+        
+                // 🎯 [핵심 패치] signal_no를 키로 사용하여 중복 데이터 원천 차단
+                const uniqueMap = new Map();
+                rawNoti.forEach(item => {
+                    if (item && item.signal_no) {
+                        uniqueMap.set(String(item.signal_no), item);
+                    }
+                });
+                noti = Array.from(uniqueMap.values());
+                console.log(allSignals, noti);
+               
             } catch (error) {
                 // 데이터 동기화 실패 시에도 시스템이 멈추지 않게 방어
                 console.error("데이터 동기화 실패:", error);

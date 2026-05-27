@@ -668,8 +668,18 @@
             const { data } = await axios.get(
                 `/noti/signal?id=${savedUserId}`
             );
-            console.log(data);
-            noti = data.noti;
+            // 3. 알림용 데이터 처리 (기존 로직 + 안전장치)
+            let rawNoti = (data && data.noti) ? data.noti : (Array.isArray(data.noti) ? data.noti : []);
+    
+            // 🎯 [핵심 패치] signal_no를 키로 사용하여 중복 데이터 원천 차단
+            const uniqueMap = new Map();
+            rawNoti.forEach(item => {
+                if (item && item.signal_no) {
+                    uniqueMap.set(String(item.signal_no), item);
+                }
+            });
+            noti = Array.from(uniqueMap.values());
+            console.log(noti);
             renderList(list, noti);
             const unreads = noti.filter(n => !n.is_read);
             if (unreads.length > 0) {
